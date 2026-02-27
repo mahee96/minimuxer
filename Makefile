@@ -41,13 +41,13 @@ copy:
 	@echo "SIDESTORE_REPO: $(SIDESTORE_REPO)"
 
 	@echo "copying libraries"
-	@cp target/lib$(TARGET)-ios.a "$(SIDESTORE_REPO)/SideStore/minimuxer"
-	@cp target/lib$(TARGET)-sim.a "$(SIDESTORE_REPO)/SideStore/minimuxer"
+	@cp target/lib$(TARGET)-ios.a "$(SIDESTORE_REPO)/Dependencies/minimuxer"
+	@cp target/lib$(TARGET)-sim.a "$(SIDESTORE_REPO)/Dependencies/minimuxer"
 
 	@echo "copying generated"
-	@cp generated/* "$(SIDESTORE_REPO)/SideStore/minimuxer"
+	@cp generated/* "$(SIDESTORE_REPO)/Dependencies/minimuxer"
 
-	@touch "$(SIDESTORE_REPO)/SideStore/.skip-prebuilt-fetch-minimuxer"
+	@touch "$(SIDESTORE_REPO)/Dependencies/.skip-prebuilt-fetch-minimuxer"
 
 # build: compile copy
 build: compile

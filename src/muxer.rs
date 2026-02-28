@@ -17,11 +17,10 @@ mod ffi {
     enum Errors {}
 
     extern "Rust" {
-        fn start(pairing_file: String, log_path: String, ifaddr: Option<String>) -> Result<(), Errors>;
+        fn start(pairing_file: String, log_path: String) -> Result<(), Errors>;
         fn startWithLogger(
             pairing_file: String,
             log_path: String,
-            ifaddr: Option<String>,
             is_console_logging_enabled: bool,
         ) -> Result<(), Errors>;
         fn target_minimuxer_address();
@@ -30,7 +29,7 @@ mod ffi {
 
 const LISTEN_PORT: u16 = 27015;
 
-pub fn listen(pairing_file: Dictionary, ifaddr: Option<String>) {
+pub fn listen(pairing_file: Dictionary) {
     std::thread::Builder::new()
         .name("muxer".to_string())
         .spawn(move || {
@@ -109,7 +108,7 @@ pub fn listen(pairing_file: Dictionary, ifaddr: Option<String>) {
                 let packet: RawPacket = buf[..size].try_into().unwrap();
 
                 // Handle the request
-                let response = match handle_packet(&packet, &pairing_file, &ifaddr) {
+                let response = match handle_packet(&packet, &pairing_file) {
                     Ok(res) => res,
                     Err(e) => {
                         trace!("handle_packet error: {e:?}");
@@ -137,7 +136,6 @@ enum HandlePacketError {
 fn handle_packet(
     packet: &RawPacket,
     pairing_file: &Dictionary,
-    ifaddr: &Option<String>,
 ) -> Result<Value, HandlePacketError> {
     let message_type = packet
         .plist
@@ -188,7 +186,7 @@ fn handle_packet(
             properties.insert(
                 "NetworkAddress".to_string(),
                 Value::Data(
-                    convert_ip(IpAddr::V4(Ipv4Addr::from_str(ifaddr.clone().unwrap_or_else(|| String::from("10.7.0.1")).as_str()).unwrap())).to_vec(),
+                    convert_ip(IpAddr::V4(Ipv4Addr::from_str("10.7.0.1").unwrap())).to_vec(),
                 ),
             );
             properties.insert("SerialNumber".to_string(), udid.into());
@@ -266,14 +264,13 @@ pub static STARTED: AtomicBool = AtomicBool::new(true); // minimuxer won't start
 /// Starts the muxer and heartbeat client
 /// # Arguments
 /// Pairing file contents as a string and log path as a string
-pub fn start(pairing_file: String, log_path: String, ifaddr: Option<String>) -> crate::Res<()> {
-    startWithLogger(pairing_file, log_path, ifaddr, true) // logging is enabled by default as before
+pub fn start(pairing_file: String, log_path: String) -> crate::Res<()> {
+    startWithLogger(pairing_file, log_path, true) // logging is enabled by default as before
 }
 
 pub fn startWithLogger(
     pairing_file: String,
     log_path: String,
-    ifaddr: Option<String>,
     is_console_logging_enabled: bool,
 ) -> crate::Res<()> {
     use fern::Dispatch;
@@ -352,7 +349,7 @@ pub fn startWithLogger(
         }
     };
 
-    listen(pairing_file, ifaddr);
+    listen(pairing_file);
     start_beat();
 
     info!("minimuxer has started!");

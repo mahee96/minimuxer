@@ -7,7 +7,7 @@ use plist_plus::Plist;
 use rusty_libimobiledevice::services::afc::AfcFileMode;
 
 use crate::{
-    device::fetch_first_device,
+    device::{fetch_first_device, test_device_connection},
     Errors, PlistPlusConversion, Res,
 };
 
@@ -28,6 +28,11 @@ const PKG_PATH: &str = "PublicStaging";
 /// Yeets an ipa to the afc jail
 pub fn yeet_app_afc(bundle_id: String, ipa_bytes: &[u8]) -> Res<()> {
     info!("Yeeting IPA for bundle ID: {}", bundle_id);
+
+    if !test_device_connection() {
+        error!("No device connection");
+        return Err(Errors::NoConnection);
+    }
 
     let device = fetch_first_device()?;
 
@@ -108,6 +113,11 @@ pub fn yeet_app_afc(bundle_id: String, ipa_bytes: &[u8]) -> Res<()> {
 pub fn install_ipa(bundle_id: String) -> Res<()> {
     info!("Installing app for bundle ID: {}", bundle_id);
 
+    if !test_device_connection() {
+        error!("No device connection");
+        return Err(Errors::NoConnection);
+    }
+
     let device = fetch_first_device()?;
 
     // normally, we use client_options_new: https://github.com/jkcoxson/rusty_libimobiledevice/blob/master/src/services/instproxy.rs#L123
@@ -148,6 +158,11 @@ pub fn install_ipa(bundle_id: String) -> Res<()> {
 /// Removes an app from the device
 pub fn remove_app(bundle_id: String) -> Res<()> {
     info!("Removing app for {}", bundle_id);
+
+    if !test_device_connection() {
+        error!("No device connection");
+        return Err(Errors::NoConnection);
+    }
 
     let device = fetch_first_device()?;
 

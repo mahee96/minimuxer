@@ -11,7 +11,7 @@ mod ffi {
 
     extern "Rust" {
         fn fetch_udid() -> Option<String>;
-        fn test_device_connection(sockaddr: Option<String>) -> bool;
+        fn test_device_connection() -> bool;
     }
 }
 
@@ -43,7 +43,7 @@ pub fn fetch_first_device() -> Res<Device> {
 }
 
 /// Tests if the device is on and listening without jumping through hoops
-pub fn test_device_connection(ifaddr: Option<String>) -> bool {
+pub fn test_device_connection() -> bool {
     #[cfg(test)]
     {
         info!("Skipping device connection test since we're in a test");
@@ -52,12 +52,11 @@ pub fn test_device_connection(ifaddr: Option<String>) -> bool {
 
     #[cfg(not(test))]
     {
-        use std::str::FromStr;
         use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpStream};
 
         // Connect to lockdownd's socket
         TcpStream::connect_timeout(
-            &SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::from_str(ifaddr.clone().unwrap_or_else(|| String::from("10.7.0.1")).as_str()).unwrap(), 62078)),
+            &SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(10, 7, 0, 1), 62078)),
             Duration::from_millis(100),
         )
         .is_ok()

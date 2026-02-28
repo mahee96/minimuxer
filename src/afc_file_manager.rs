@@ -2,7 +2,7 @@ use log::{debug, error};
 use rusty_libimobiledevice::services::afc::{AfcClient, AfcFileMode};
 
 use crate::{
-    device::fetch_first_device,
+    device::{fetch_first_device, test_device_connection},
     Errors, Res,
 };
 
@@ -64,6 +64,11 @@ impl RustDirectoryEntry {
 pub struct AfcFileManager;
 impl AfcFileManager {
     fn client() -> Res<AfcClient<'static>> {
+        if !test_device_connection() {
+            error!("No device connection");
+            return Err(Errors::NoConnection);
+        }
+
         match AfcClient::start_service(&fetch_first_device()?, "minimuxer") {
             Ok(afc) => Ok(afc),
             Err(e) => {

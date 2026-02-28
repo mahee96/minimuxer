@@ -18,7 +18,7 @@ use plist_plus::Plist;
 use rusty_libimobiledevice::services::instproxy::InstProxyClient;
 
 use crate::{
-    device::fetch_first_device,
+    device::{fetch_first_device, test_device_connection},
     Errors, Res, RUNTIME,
 };
 
@@ -36,6 +36,11 @@ mod ffi {
 /// Debugs an app from an app ID
 pub fn debug_app(app_id: String) -> Res<()> {
     info!("Debugging app ID: {}", app_id);
+
+    if !test_device_connection() {
+        error!("No device connection");
+        return Err(Errors::NoConnection);
+    }
 
     let device = fetch_first_device()?;
     let ld_client = match device.new_lockdownd_client("minimuxer") {
@@ -338,6 +343,11 @@ pub fn debug_app(app_id: String) -> Res<()> {
 /// - `pid`: Process ID. `attach_debugger` will automatically turn this into the format required by DebugServer.
 pub fn attach_debugger(pid: u32) -> Res<()> {
     info!("Debugging process ID: {}", pid);
+
+    if !test_device_connection() {
+        error!("No device connection");
+        return Err(Errors::NoConnection);
+    }
 
     let device = fetch_first_device()?;
 

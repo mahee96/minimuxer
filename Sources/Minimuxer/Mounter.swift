@@ -1,0 +1,151 @@
+import Foundation
+import RustBridge
+
+public class Mounter {
+    public static var dmgMounted = false
+
+    public static func startAutoMounter(docsPath: String) {
+        let path = docsPath.hasPrefix("file://") ? String(docsPath.dropFirst(7)) : docsPath
+        let dmgDocsPath = "\(path)/DMG"
+
+        Thread.detachNewThread {
+            try? FileManager.default.createDirectory(atPath: dmgDocsPath, withIntermediateDirectories: true)
+
+            while true {
+                Thread.sleep(forTimeInterval: 5.0)
+                do {
+                    let device = try Device.getFirstDevice()
+                    guard let lockdown = RustLockdown.connect(device: device.internalInstance, label: "minimuxer"),
+                          let versionStr = lockdown.getValue(key: "ProductVersion") else {
+                        print("[minimuxer] WARN: Could not get device/version for mounter")
+                        continue
+                    }
+
+                    let major = Int(versionStr.split(separator: ".").first ?? "0") ?? 0
+                    if major < 17 {
+                        try handlePre17Mount(device: device, iosVersion: versionStr, dmgDocsPath: dmgDocsPath)
+                    } else {
+                        try handlePost17Mount(dmgDocsPath: dmgDocsPath)
+                    }
+                } catch {}
+            }
+        }
+    }
+
+    private static func handlePre17Mount(device: Device, iosVersion: String, dmgDocsPath: String) throws {
+        print("[minimuxer] Starting image mounter (pre-17)")
+        guard let mounter = RustMounter.connect(device: device.internalInstance, label: "sidestore-image-reeeee") else {
+            print("[minimuxer] ERROR: Unable to start mobile image mounter")
+            throw MinimuxerError.Mount
+        }
+
+        if let lookupResult = mounter.lookup(imageType: "Developer"),
+           let data = lookupResult.data(using: .utf8),
+           let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any],
+           let sigArray = plist["ImageSignature"] as? [Any], !sigArray.isEmpty {
+            print("[minimuxer] Developer disk image already mounted")
+            dmgMounted = true; return
+        }
+
+        let dmgPath = "\(dmgDocsPath)/\(iosVersion).dmg"
+        let sigPath = "\(dmgPath).signature"
+        if !FileManager.default.fileExists(atPath: dmgPath) {
+            print("[minimuxer] Downloading iOS \(iosVersion) DMG...")
+            try downloadPre17Image(iosVersion: iosVersion, dmgDocsPath: dmgDocsPath)
+        }
+
+        guard mounter.upload(path: dmgPath, signature: sigPath, imageType: "Developer") else {
+            print("[minimuxer] ERROR: Unable to upload developer disk image")
+            throw MinimuxerError.Mount
+        }
+        print("[minimuxer] Successfully uploaded the image")
+        guard mounter.mount(path: dmgPath, signature: sigPath, imageType: "Developer") else {
+            print("[minimuxer] ERROR: Unable to mount developer image")
+            throw MinimuxerError.Mount
+        }
+        print("[minimuxer] Successfully mounted the image")
+        dmgMounted = true
+    }
+
+    private static func handlePost17Mount(dmgDocsPath: String) throws {
+        let dir = URL(fileURLWithPath: dmgDocsPath)
+        let tasks: [(String, URL)] = [
+            (MuxerConstants.ddiImageURL, dir.appendingPathComponent("Image.dmg")),
+            (MuxerConstants.ddiTrustcacheURL, dir.appendingPathComponent("Image.dmg.trustcache")),
+            (MuxerConstants.ddiManifestURL, dir.appendingPathComponent("BuildManifest.plist"))
+        ]
+
+        for (urlStr, path) in tasks {
+            if !FileManager.default.fileExists(atPath: path.path) {
+                print("[minimuxer] Downloading \(path.lastPathComponent)...")
+                guard let url = URL(string: urlStr), let data = try? Data(contentsOf: url) else {
+                    print("[minimuxer] ERROR: Failed to download \(path.lastPathComponent)")
+                    throw MinimuxerError.DownloadImage
+                }
+                try data.write(to: path)
+            }
+        }
+        print("[minimuxer] Files downloaded, reading to memory")
+
+        let imageData = try Data(contentsOf: tasks[0].1)
+        let trustcacheData = try Data(contentsOf: tasks[1].1)
+        let manifestData = try Data(contentsOf: tasks[2].1)
+
+        print("[minimuxer] Mounting DDI...")
+        let result = rustBridgeMountPersonalizedDDI(image: imageData, trustcache: trustcacheData, manifest: manifestData)
+        if result == 0 {
+            print("[minimuxer] DDI mounted successfully")
+            dmgMounted = true
+        } else {
+            print("[minimuxer] ERROR: Failed to mount DDI (code \(result))")
+            switch result {
+            case 1: throw MinimuxerError.NoConnection
+            case 4: throw MinimuxerError.CreateLockdown
+            case 5: throw MinimuxerError.GetLockdownValue
+            case 6: throw MinimuxerError.ImageLookup
+            case 8: throw MinimuxerError.Mount
+            default: throw MinimuxerError.Mount
+            }
+        }
+    }
+
+    private static func downloadPre17Image(iosVersion: String, dmgDocsPath: String) throws {
+        guard let url = URL(string: MuxerConstants.pre17VersionsURL),
+              let data = try? Data(contentsOf: url),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: String],
+              let dmgUrlStr = json[iosVersion],
+              let dmgUrl = URL(string: dmgUrlStr) else {
+            print("[minimuxer] ERROR: Unable to download DMG dictionary or find version")
+            throw MinimuxerError.DownloadImage
+        }
+
+        let zipData = try Data(contentsOf: dmgUrl)
+        let zipPath = "\(dmgDocsPath)/dmg.zip"
+        try zipData.write(to: URL(fileURLWithPath: zipPath))
+
+        let tmpPath = "\(dmgDocsPath)/tmp"
+        try? FileManager.default.removeItem(atPath: tmpPath)
+        try FileManager.default.createDirectory(atPath: tmpPath, withIntermediateDirectories: true)
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
+        process.arguments = [zipPath, "-d", tmpPath]
+        try? process.run()
+        process.waitUntilExit()
+        try? FileManager.default.removeItem(atPath: zipPath)
+
+        for item in try FileManager.default.contentsOfDirectory(atPath: tmpPath) {
+            let itemPath = "\(tmpPath)/\(item)"
+            var isDir: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: itemPath, isDirectory: &isDir), isDir.boolValue,
+                  !item.contains("__MACOSX") else { continue }
+            let dmgFile = "\(itemPath)/DeveloperDiskImage.dmg"
+            let sigFile = "\(itemPath)/DeveloperDiskImage.dmg.signature"
+            if FileManager.default.fileExists(atPath: dmgFile) {
+                try FileManager.default.moveItem(atPath: dmgFile, toPath: "\(dmgDocsPath)/\(iosVersion).dmg")
+                try FileManager.default.moveItem(atPath: sigFile, toPath: "\(dmgDocsPath)/\(iosVersion).dmg.signature")
+            }
+        }
+        try? FileManager.default.removeItem(atPath: tmpPath)
+    }
+}

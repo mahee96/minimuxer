@@ -16,3 +16,8 @@
 module.modulemap*
 SwiftMuxer
 .DS_Store
+
+.build/
+**/.build/
+target/
+**/target/

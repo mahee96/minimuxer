@@ -27,7 +27,8 @@ public class Jit {
         } else {
             // iOS 17+ uses CoreDeviceProxy + DVT + DebugProxy via async Rust
             print("[minimuxer] iOS \(major) detected, using post-17 JIT path")
-            let result = rustBridgeDebugAppPost17(appId)
+            let muxerAddr = "127.0.0.1:\(MuxerConstants.muxerPort)"
+            let result = rustBridgeDebugAppPost17(appId, muxerAddr: muxerAddr, deviceIp: MuxerConstants.deviceIP)
             if result != 0 {
                 switch result {
                 case 1: throw MinimuxerError.NoConnection

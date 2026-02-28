@@ -1,4 +1,4 @@
-// swift-tools-version: 5.7
+// swift-tools-version: 5.9
 import PackageDescription
 
 let package = Package(
@@ -8,32 +8,59 @@ let package = Package(
         .macOS(.v11)
     ],
     products: [
-        // .library(name: "RustBridge", targets: ["RustBridge"]),
-        .library(name: "Minimuxer", targets: ["Minimuxer"])
+        .library(
+            name: "Minimuxer",
+            targets: ["Minimuxer"]
+        )
     ],
     dependencies: [
-        .package(url: "https://github.com/weichsel/ZIPFoundation.git", .upToNextMajor(from: "0.9.0"))
+        .package(
+            url: "https://github.com/weichsel/ZIPFoundation.git",
+            .upToNextMajor(from: "0.9.0")
+        )
     ],
     targets: [
+
+        // MARK: Rust build plugin
+        .plugin(
+            name: "RustBuildPlugin",
+            capability: .buildTool(),
+            path: "Plugins/RustBuildPlugin"
+        ),
+
+        // MARK: Rust bridge (links static lib produced by cargo)
         .target(
             name: "RustBridge",
-            path: "Sources/RustBridge",
-            exclude: ["Cargo.toml", "Cargo.lock", "src", "target", "lib"],
-            sources: ["MinimuxerBridge.swift"],
+            path: "RustBridge",
+            exclude: [
+                "Cargo.toml",
+                "Cargo.lock",
+                "src",
+                "target",
+                "lib"
+            ],
+            sources: [
+                "MinimuxerBridge.swift"
+            ],
             linkerSettings: [
                 .unsafeFlags([
-                    "-LSources/RustBridge/lib",
+                    "-L", "RustBridge/lib",
                     "-lrust_bridge"
                 ])
             ]
         ),
+
+        // MARK: Main library
         .target(
             name: "Minimuxer",
             dependencies: [
                 "RustBridge",
                 .product(name: "ZIPFoundation", package: "ZIPFoundation")
             ],
-            path: "Sources/Minimuxer"
+            path: "Sources",
+            plugins: [
+                .plugin(name: "RustBuildPlugin")
+            ]
         )
     ]
 )

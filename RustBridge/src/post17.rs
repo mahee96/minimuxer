@@ -14,7 +14,7 @@ use log::{debug, error, info};
 use once_cell::sync::Lazy;
 use tokio::runtime::{self, Runtime};
 
-use crate::constants;
+
 
 static RUNTIME: Lazy<Runtime> = Lazy::new(|| {
     runtime::Builder::new_multi_thread()
@@ -24,10 +24,10 @@ static RUNTIME: Lazy<Runtime> = Lazy::new(|| {
         .unwrap()
 });
 
-async fn get_provider() -> Result<TcpProvider, i32> {
+async fn get_provider(muxer_addr: &str, device_ip: &str) -> Result<TcpProvider, i32> {
     let mut uc = UsbmuxdConnection::new(
         Box::new(
-            tokio::net::TcpStream::connect(constants::MUXER_ADDR)
+            tokio::net::TcpStream::connect(muxer_addr)
                 .await
                 .map_err(|_| 1i32)?,
         ),
@@ -43,14 +43,14 @@ async fn get_provider() -> Result<TcpProvider, i32> {
 
     let dev = dev.to_provider(
         idevice::usbmuxd::UsbmuxdAddr::TcpSocket(std::net::SocketAddr::V4(
-            SocketAddrV4::from_str(constants::MUXER_ADDR).unwrap(),
+            SocketAddrV4::from_str(muxer_addr).unwrap(),
         )),
         0,
         "asdf",
     );
 
     Ok(TcpProvider {
-        addr: std::net::IpAddr::V4(Ipv4Addr::from_str(constants::DEVICE_IP).unwrap()),
+        addr: std::net::IpAddr::V4(Ipv4Addr::from_str(device_ip).unwrap()),
         pairing_file: dev.get_pairing_file().await.unwrap(),
         label: "minimuxer".to_string(),
     })
@@ -58,9 +58,9 @@ async fn get_provider() -> Result<TcpProvider, i32> {
 
 /// Post-17 JIT: CoreDeviceProxy → DVT → ProcessControl → DebugProxy
 /// Returns 0 on success, 1-11 on specific failures.
-pub(crate) fn debug_app_post17(app_id: String) -> i32 {
+pub(crate) fn debug_app_post17(app_id: String, muxer_addr: String, device_ip: String) -> i32 {
     RUNTIME.block_on(async move {
-        let provider = match get_provider().await {
+        let provider = match get_provider(&muxer_addr, &device_ip).await {
             Ok(p) => p,
             Err(e) => return e,
         };
@@ -139,9 +139,11 @@ pub(crate) fn mount_personalized_ddi(
     image_bytes: &[u8],
     trustcache_bytes: &[u8],
     manifest_bytes: &[u8],
+    muxer_addr: String,
+    device_ip: String,
 ) -> i32 {
     RUNTIME.block_on(async move {
-        let provider = match get_provider().await {
+        let provider = match get_provider(&muxer_addr, &device_ip).await {
             Ok(p) => p,
             Err(e) => return e,
         };

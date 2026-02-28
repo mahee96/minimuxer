@@ -9,7 +9,6 @@ use rusty_libimobiledevice::services::debug_server::DebugServer;
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_void};
 use plist_plus::Plist;
-use crate::constants;
 use crate::post17;
 
 fn to_char(s: String) -> *mut c_char {
@@ -381,9 +380,9 @@ pub extern "C" fn rust_bridge_heartbeat_new(device: *mut DeviceWrapper, label: *
 }
 
 #[no_mangle]
-pub extern "C" fn rust_bridge_heartbeat_receive(client: *mut HeartbeatWrapper) -> *mut c_char {
+pub extern "C" fn rust_bridge_heartbeat_receive(client: *mut HeartbeatWrapper, timeout_ms: u32) -> *mut c_char {
     let c = unsafe { &*client };
-    match c.0.receive(constants::HEARTBEAT_TIMEOUT_MS) {
+    match c.0.receive(timeout_ms) {
         Ok(p) => to_char(Plist::from(p).to_string()),
         Err(_) => std::ptr::null_mut(),
     }
@@ -417,9 +416,11 @@ pub extern "C" fn rust_bridge_set_debug(level: i32) {
 // --- Post-17 (delegates to post17.rs) ---
 
 #[no_mangle]
-pub extern "C" fn rust_bridge_debug_app_post17(app_id: *const c_char) -> i32 {
+pub extern "C" fn rust_bridge_debug_app_post17(app_id: *const c_char, muxer_addr: *const c_char, device_ip: *const c_char) -> i32 {
     let app_id = unsafe { CStr::from_ptr(app_id) }.to_str().unwrap().to_string();
-    post17::debug_app_post17(app_id)
+    let muxer_addr = unsafe { CStr::from_ptr(muxer_addr) }.to_str().unwrap().to_string();
+    let device_ip = unsafe { CStr::from_ptr(device_ip) }.to_str().unwrap().to_string();
+    post17::debug_app_post17(app_id, muxer_addr, device_ip)
 }
 
 #[no_mangle]
@@ -427,9 +428,12 @@ pub extern "C" fn rust_bridge_mount_personalized_ddi(
     image_ptr: *const u8, image_len: u32,
     trustcache_ptr: *const u8, trustcache_len: u32,
     manifest_ptr: *const u8, manifest_len: u32,
+    muxer_addr: *const c_char, device_ip: *const c_char,
 ) -> i32 {
     let image = unsafe { std::slice::from_raw_parts(image_ptr, image_len as usize) };
     let trustcache = unsafe { std::slice::from_raw_parts(trustcache_ptr, trustcache_len as usize) };
     let manifest = unsafe { std::slice::from_raw_parts(manifest_ptr, manifest_len as usize) };
-    post17::mount_personalized_ddi(image, trustcache, manifest)
+    let muxer_addr = unsafe { CStr::from_ptr(muxer_addr) }.to_str().unwrap().to_string();
+    let device_ip = unsafe { CStr::from_ptr(device_ip) }.to_str().unwrap().to_string();
+    post17::mount_personalized_ddi(image, trustcache, manifest, muxer_addr, device_ip)
 }

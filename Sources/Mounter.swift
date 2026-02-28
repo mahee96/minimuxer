@@ -93,7 +93,8 @@ public class Mounter {
         let manifestData = try Data(contentsOf: tasks[2].1)
 
         print("[minimuxer] Mounting DDI...")
-        let result = rustBridgeMountPersonalizedDDI(image: imageData, trustcache: trustcacheData, manifest: manifestData)
+        let muxerAddr = "127.0.0.1:\(MuxerConstants.muxerPort)"
+        let result = rustBridgeMountPersonalizedDDI(image: imageData, trustcache: trustcacheData, manifest: manifestData, muxerAddr: muxerAddr, deviceIp: MuxerConstants.deviceIP)
         if result == 0 {
             print("[minimuxer] DDI mounted successfully")
             dmgMounted = true

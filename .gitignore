@@ -21,3 +21,4 @@ SwiftMuxer
 **/.build/
 target/
 **/target/
+RustBridge/lib

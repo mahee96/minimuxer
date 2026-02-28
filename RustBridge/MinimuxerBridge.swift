@@ -110,7 +110,7 @@ internal func _rust_bridge_mounter_mount(_ client: UnsafeMutableRawPointer?, _ p
 internal func _rust_bridge_heartbeat_new(_ device: UnsafeMutableRawPointer?, _ label: UnsafePointer<Int8>?) -> UnsafeMutableRawPointer?
 
 @_silgen_name("rust_bridge_heartbeat_receive")
-internal func _rust_bridge_heartbeat_receive(_ client: UnsafeMutableRawPointer?) -> UnsafeMutablePointer<Int8>?
+internal func _rust_bridge_heartbeat_receive(_ client: UnsafeMutableRawPointer?, _ timeout_ms: UInt32) -> UnsafeMutablePointer<Int8>?
 
 @_silgen_name("rust_bridge_heartbeat_send")
 internal func _rust_bridge_heartbeat_send(_ client: UnsafeMutableRawPointer?, _ plist_xml: UnsafePointer<Int8>?) -> Bool
@@ -306,8 +306,8 @@ public final class RustHeartbeat {
         guard let p = _rust_bridge_heartbeat_new(device.ptr, label) else { return nil }
         return RustHeartbeat(ptr: p)
     }
-    public func receive() -> String? {
-        guard let p = _rust_bridge_heartbeat_receive(ptr) else { return nil }
+    public func receive(timeoutMs: UInt32) -> String? {
+        guard let p = _rust_bridge_heartbeat_receive(ptr, timeoutMs) else { return nil }
         defer { _rust_bridge_free_string(p) }
         return String(cString: p)
     }
@@ -319,13 +319,14 @@ public final class RustHeartbeat {
 // MARK: - Utility
 
 @_silgen_name("rust_bridge_debug_app_post17")
-internal func _rust_bridge_debug_app_post17(_ app_id: UnsafePointer<Int8>?) -> Int32
+internal func _rust_bridge_debug_app_post17(_ app_id: UnsafePointer<Int8>?, _ muxer_addr: UnsafePointer<Int8>?, _ device_ip: UnsafePointer<Int8>?) -> Int32
 
 @_silgen_name("rust_bridge_mount_personalized_ddi")
 internal func _rust_bridge_mount_personalized_ddi(
     _ image_ptr: UnsafePointer<UInt8>?, _ image_len: UInt32,
     _ trustcache_ptr: UnsafePointer<UInt8>?, _ trustcache_len: UInt32,
-    _ manifest_ptr: UnsafePointer<UInt8>?, _ manifest_len: UInt32
+    _ manifest_ptr: UnsafePointer<UInt8>?, _ manifest_len: UInt32,
+    _ muxer_addr: UnsafePointer<Int8>?, _ device_ip: UnsafePointer<Int8>?
 ) -> Int32
 
 public func rustBridgeSetDebug(_ debug: Bool) {
@@ -333,20 +334,21 @@ public func rustBridgeSetDebug(_ debug: Bool) {
 }
 
 /// Post-iOS-17 JIT debug via CoreDeviceProxy + DVT + DebugProxy.
-public func rustBridgeDebugAppPost17(_ appId: String) -> Int32 {
-    return _rust_bridge_debug_app_post17(appId)
+public func rustBridgeDebugAppPost17(_ appId: String, muxerAddr: String, deviceIp: String) -> Int32 {
+    return _rust_bridge_debug_app_post17(appId, muxerAddr, deviceIp)
 }
 
 /// Post-iOS-17 personalized DDI mount from already-downloaded file bytes.
 /// Swift is responsible for downloading the DDI files.
-public func rustBridgeMountPersonalizedDDI(image: Data, trustcache: Data, manifest: Data) -> Int32 {
+public func rustBridgeMountPersonalizedDDI(image: Data, trustcache: Data, manifest: Data, muxerAddr: String, deviceIp: String) -> Int32 {
     return image.withUnsafeBytes { imgBuf in
         trustcache.withUnsafeBytes { tcBuf in
             manifest.withUnsafeBytes { manBuf in
                 _rust_bridge_mount_personalized_ddi(
                     imgBuf.bindMemory(to: UInt8.self).baseAddress, UInt32(image.count),
                     tcBuf.bindMemory(to: UInt8.self).baseAddress, UInt32(trustcache.count),
-                    manBuf.bindMemory(to: UInt8.self).baseAddress, UInt32(manifest.count)
+                    manBuf.bindMemory(to: UInt8.self).baseAddress, UInt32(manifest.count),
+                    muxerAddr, deviceIp
                 )
             }
         }

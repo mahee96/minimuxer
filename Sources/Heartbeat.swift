@@ -30,7 +30,7 @@ public class Heartbeat {
 
                 // Inner loop: keep receiving and sending heartbeats
                 while true {
-                    guard let plist = heartbeat.receive() else {
+                    guard let plist = heartbeat.receive(timeoutMs: MuxerConstants.heartbeatTimeoutMs) else {
                         print("[minimuxer] ERROR: Heartbeat recv failed")
                         lastBeatSuccessful = false
                         break

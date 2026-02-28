@@ -5,7 +5,7 @@ use plist::Value;
 use plist_plus::Plist;
 
 use crate::{
-    device::{fetch_first_device, test_device_connection},
+    device::fetch_first_device,
     Errors, Res, RustyPlistConversion,
 };
 
@@ -26,11 +26,6 @@ mod ffi {
 // pub fn install_provisioning_profile(profile: Vec<&[u8]>, bundle_ids: Vec<String>) -> Result<()> {
 pub fn install_provisioning_profile(profile: &[u8]) -> Res<()> {
     info!("Installing provisioning profile");
-
-    if !test_device_connection() {
-        error!("No device connection");
-        return Err(Errors::NoConnection);
-    }
 
     let device = fetch_first_device()?;
 
@@ -62,11 +57,6 @@ pub fn install_provisioning_profile(profile: &[u8]) -> Res<()> {
 pub fn remove_provisioning_profile(id: String) -> Res<()> {
     info!("Removing profile with ID: {}", id);
 
-    if !test_device_connection() {
-        error!("No device connection");
-        return Err(Errors::NoConnection);
-    }
-
     let device = fetch_first_device()?;
 
     let mis_client = match device.new_misagent_client("minimuxer-install-prov") {
@@ -91,11 +81,6 @@ pub fn remove_provisioning_profile(id: String) -> Res<()> {
 
 pub fn dump_profiles(docs_path: String) -> Res<String> {
     info!("Dumping profiles");
-
-    if !test_device_connection() {
-        error!("No device connection");
-        return Err(Errors::NoConnection);
-    }
 
     let device = fetch_first_device()?;
 

@@ -93,7 +93,7 @@ mod ffi {
     extern "Rust" {
         fn describe_error(error: Errors) -> String;
 
-        fn ready() -> bool;
+        fn ready(sockaddr: Option<String>) -> bool;
         fn set_debug(debug: bool);
     }
 }
@@ -114,8 +114,8 @@ pub(crate) type Res<T> = Result<T, Errors>;
 /// - last heartbeat was a success
 /// - the developer disk image is mounted
 /// - `start` has been called and it was successful
-fn ready() -> bool {
-    let device_connection = test_device_connection();
+fn ready(ifaddr: Option<String>) -> bool {
+    let device_connection = test_device_connection(ifaddr);
     let device_exists = fetch_first_device().is_ok();
     let heartbeat_success = LAST_BEAT_SUCCESSFUL.load(Ordering::Relaxed);
     let dmg_mounted = DMG_MOUNTED.load(Ordering::Relaxed);

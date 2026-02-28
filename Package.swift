@@ -37,7 +37,7 @@ let package = Package(
                 "Cargo.lock",
                 "src",
                 "target",
-                "lib"
+                "Makefile",
             ],
             sources: [
                 "MinimuxerBridge.swift"

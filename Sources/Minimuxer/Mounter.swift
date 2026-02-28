@@ -1,5 +1,6 @@
 import Foundation
 import RustBridge
+import ZIPFoundation
 
 public class Mounter {
     public static var dmgMounted = false
@@ -127,11 +128,8 @@ public class Mounter {
         try? FileManager.default.removeItem(atPath: tmpPath)
         try FileManager.default.createDirectory(atPath: tmpPath, withIntermediateDirectories: true)
 
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
-        process.arguments = [zipPath, "-d", tmpPath]
-        try? process.run()
-        process.waitUntilExit()
+        let tmpPathURL = URL(fileURLWithPath: tmpPath)
+        try FileManager.default.unzipItem(at: URL(fileURLWithPath: zipPath), to: tmpPathURL)
         try? FileManager.default.removeItem(atPath: zipPath)
 
         for item in try FileManager.default.contentsOfDirectory(atPath: tmpPath) {

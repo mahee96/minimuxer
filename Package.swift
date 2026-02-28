@@ -11,6 +11,9 @@ let package = Package(
         // .library(name: "RustBridge", targets: ["RustBridge"]),
         .library(name: "Minimuxer", targets: ["Minimuxer"])
     ],
+    dependencies: [
+        .package(url: "https://github.com/weichsel/ZIPFoundation.git", .upToNextMajor(from: "0.9.0"))
+    ],
     targets: [
         .target(
             name: "RustBridge",
@@ -26,7 +29,10 @@ let package = Package(
         ),
         .target(
             name: "Minimuxer",
-            dependencies: ["RustBridge"],
+            dependencies: [
+                "RustBridge",
+                .product(name: "ZIPFoundation", package: "ZIPFoundation")
+            ],
             path: "Sources/Minimuxer"
         )
     ]

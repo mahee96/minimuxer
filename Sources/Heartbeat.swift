@@ -7,13 +7,26 @@ public class Heartbeat {
     public static func startBeat() {
         Thread.detachNewThread {
             print("[minimuxer] Starting heartbeat thread...")
-            while !Muxer.ready {
-                print("[minimuxer] mounter-thread: Waiting for usbmuxd to be ready...")
-                Thread.sleep(forTimeInterval: 0.1)
+            Thread.sleep(forTimeInterval: 1)
+            while !Muxer.usbmuxdReady {
+                let ts = ISO8601DateFormatter().string(from: Date())
+                print("[\(ts)] [minimuxer] heartbeat-thread: Waiting for usbmuxd to be ready...")
+                Thread.sleep(forTimeInterval: 0.25)
             }
             print("[minimuxer] heartbeat-thread: usbmuxd is ready")
 
+            // outer loop
             while true {
+                // NEW: verify tunnel/device reachability first
+                let deviceIP = MuxerConstants.deviceIP
+                if !Minimuxer.testDeviceConnection(ifaddr: deviceIP) {
+                    print("[minimuxer] heartbeat-thread: device not reachable, waiting...")
+                    lastBeatSuccessful = false
+                    Thread.sleep(forTimeInterval: 1)
+                    continue
+                }
+                print("[minimuxer] heartbeat-thread: device reachable at: \(deviceIP)")
+
                 let device: Device
                 do {
                     device = try Device.getFirstDevice()

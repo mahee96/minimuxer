@@ -20,7 +20,7 @@ public struct Minimuxer {
         } catch {
             deviceExists = false
         }
-        guard deviceConnection, deviceExists, Heartbeat.lastBeatSuccessful, Muxer.started, Muxer.ready else {
+        guard deviceConnection, deviceExists, Heartbeat.lastBeatSuccessful, Muxer.started, Muxer.usbmuxdReady else {
             print(
                 "minimuxer not ready: " +
                 "conn=\(deviceConnection) " +
@@ -28,7 +28,7 @@ public struct Minimuxer {
                 "hb=\(Heartbeat.lastBeatSuccessful) " +
                 "dmg=\(Mounter.dmgMounted) " +
                 "started=\(Muxer.started) " +
-                "ready=\(Muxer.ready)"
+                "ready=\(Muxer.usbmuxdReady)"
             )
             return false
         }

@@ -10,12 +10,14 @@ public class Mounter {
         let dmgDocsPath = "\(path)/DMG"
 
         Thread.detachNewThread {
-            print("[minimuxer] Starting mounter thread...")
-            while !Muxer.ready {
-                print("[minimuxer] mounter-thread: Waiting for usbmuxd to be ready...")
-                Thread.sleep(forTimeInterval: 0.1)
+            print("[minimuxer] Starting mount thread...")
+            Thread.sleep(forTimeInterval: 1)
+            while !Muxer.usbmuxdReady {
+                let ts = ISO8601DateFormatter().string(from: Date())
+                print("[\(ts)] [minimuxer] mount-thread: Waiting for usbmuxd to be ready...")
+                Thread.sleep(forTimeInterval: 0.25)
             }
-            print("[minimuxer] mounter-thread: usbmuxd is ready")
+            print("[minimuxer] mount-thread: usbmuxd is ready")
 
             try? FileManager.default.createDirectory(atPath: dmgDocsPath, withIntermediateDirectories: true)
 
@@ -57,16 +59,26 @@ public class Mounter {
 
         let dmgPath = "\(dmgDocsPath)/\(iosVersion).dmg"
         let sigPath = "\(dmgPath).signature"
+        
+        print("[minimuxer] Pre17 DMG:", dmgPath)
+        print("[minimuxer] Pre17 Signature:", sigPath)
+        
         if !FileManager.default.fileExists(atPath: dmgPath) {
             print("[minimuxer] Downloading iOS \(iosVersion) DMG...")
             try downloadPre17Image(iosVersion: iosVersion, dmgDocsPath: dmgDocsPath)
         }
 
+        let dmgSize = (try? Data(contentsOf: URL(fileURLWithPath: dmgPath)).count) ?? -1
+        let sigSize = (try? Data(contentsOf: URL(fileURLWithPath: sigPath)).count) ?? -1
+
+        print("[minimuxer] Uploading image (dmg=\(dmgSize) bytes, sig=\(sigSize) bytes)...")
         guard mounter.upload(path: dmgPath, signature: sigPath, imageType: "Developer") else {
             print("[minimuxer] ERROR: Unable to upload developer disk image")
             throw MinimuxerError.Mount
         }
         print("[minimuxer] Successfully uploaded the image")
+        
+        print("[minimuxer] Mounting developer image...")
         guard mounter.mount(path: dmgPath, signature: sigPath, imageType: "Developer") else {
             print("[minimuxer] ERROR: Unable to mount developer image")
             throw MinimuxerError.Mount
@@ -95,11 +107,25 @@ public class Mounter {
         }
         print("[minimuxer] Files downloaded, reading to memory")
 
-        let imageData = try Data(contentsOf: tasks[0].1)
-        let trustcacheData = try Data(contentsOf: tasks[1].1)
-        let manifestData = try Data(contentsOf: tasks[2].1)
+         let imageURL = tasks[0].1
+         let trustcacheURL = tasks[1].1
+         let manifestURL = tasks[2].1
 
-        print("[minimuxer] Mounting DDI...")
+         print("[minimuxer] Image:     ", imageURL.path)
+         print("[minimuxer] Trustcache:", trustcacheURL.path)
+         print("[minimuxer] Manifest:  ", manifestURL.path)
+
+         let imageData = try Data(contentsOf: imageURL)
+         let trustcacheData = try Data(contentsOf: trustcacheURL)
+         let manifestData = try Data(contentsOf: manifestURL)
+
+         print(
+             "[minimuxer] Mounting DDI " +
+             "(image=\(imageData.count) bytes, " +
+             "trustcache=\(trustcacheData.count) bytes, " +
+             "manifest=\(manifestData.count) bytes)"
+         )
+
         let result = rustBridgeMountPersonalizedDDI(
             image: imageData,
             trustcache: trustcacheData,

@@ -20,17 +20,13 @@ let package = Package(
         )
     ],
     targets: [
-
-        // MARK: Rust build plugin
-        .plugin(
-            name: "RustBuildPlugin",
-            capability: .buildTool(),
-            path: "Plugins/RustBuildPlugin"
+        .binaryTarget(
+            name: "RustBridgeLib",
+            path: "RustBridge/lib/RustBridge.xcframework"
         ),
-
-        // MARK: Rust bridge (links static lib produced by cargo)
         .target(
             name: "RustBridge",
+            dependencies: ["RustBridgeLib"],
             path: "RustBridge",
             exclude: [
                 "Cargo.toml",
@@ -38,29 +34,18 @@ let package = Package(
                 "src",
                 "target",
                 "Makefile",
+                "lib",
             ],
-            sources: [
-                "MinimuxerBridge.swift"
-            ],
-            linkerSettings: [
-                .unsafeFlags([
-                    "-L", "RustBridge/lib",
-                    "-lrust_bridge"
-                ])
-            ]
+            sources: ["MinimuxerBridge.swift"]
         ),
-
-        // MARK: Main library
+        // MARK: Main SPM target
         .target(
             name: "Minimuxer",
             dependencies: [
                 "RustBridge",
                 .product(name: "ZIPFoundation", package: "ZIPFoundation")
             ],
-            path: "Sources",
-            plugins: [
-                .plugin(name: "RustBuildPlugin")
-            ]
+            path: "Sources"
         )
     ]
 )

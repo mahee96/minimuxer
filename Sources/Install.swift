@@ -4,11 +4,22 @@ import RustBridge
 public class Install {
     public static func yeetAppAfc(bundleId: String, ipaBytes: Data) throws {
         print("[minimuxer] Yeeting IPA for bundle ID: \(bundleId)")
+
+        let deviceIP = MuxerConstants.deviceIP
+        print("[minimuxer] AFC: verifying device connectivity at \(deviceIP)...")
+        guard Minimuxer.testDeviceConnection(ifaddr: deviceIP) else {
+            print("[minimuxer] ERROR: Device not reachable before AFC start")
+            throw MinimuxerError.NoConnection
+        }
+        print("[minimuxer] AFC: device reachable, fetching device handle")
+
         let device = try Device.getFirstDevice()
+        print("[minimuxer] AFC: creating AFC client...")
         guard let afc = RustAfc.connect(device: device.internalInstance, label: "minimuxer") else {
             print("[minimuxer] ERROR: Could not start AFC service")
             throw MinimuxerError.CreateAfc
         }
+        print("[minimuxer] AFC: client created successfully")
 
         let pkg = MuxerConstants.pkgPath
         _ = afc.mkdir(path: "./\(pkg)")

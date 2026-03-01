@@ -10,9 +10,16 @@ public class Mounter {
         let dmgDocsPath = "\(path)/DMG"
 
         Thread.detachNewThread {
+            print("[minimuxer] Starting mounter thread...")
+            while !Muxer.ready {
+                print("[minimuxer] mounter-thread: Waiting for usbmuxd to be ready...")
+                Thread.sleep(forTimeInterval: 0.1)
+            }
+            print("[minimuxer] mounter-thread: usbmuxd is ready")
+
             try? FileManager.default.createDirectory(atPath: dmgDocsPath, withIntermediateDirectories: true)
 
-            while true {
+            while !dmgMounted {
                 Thread.sleep(forTimeInterval: 5.0)
                 do {
                     let device = try Device.getFirstDevice()
@@ -93,8 +100,13 @@ public class Mounter {
         let manifestData = try Data(contentsOf: tasks[2].1)
 
         print("[minimuxer] Mounting DDI...")
-        let muxerAddr = "127.0.0.1:\(MuxerConstants.muxerPort)"
-        let result = rustBridgeMountPersonalizedDDI(image: imageData, trustcache: trustcacheData, manifest: manifestData, muxerAddr: muxerAddr, deviceIp: MuxerConstants.deviceIP)
+        let result = rustBridgeMountPersonalizedDDI(
+            image: imageData,
+            trustcache: trustcacheData,
+            manifest: manifestData,
+            muxerAddr: MuxerConstants.usbmuxdSocket,
+            deviceIp: MuxerConstants.deviceIP
+        )
         if result == 0 {
             print("[minimuxer] DDI mounted successfully")
             dmgMounted = true

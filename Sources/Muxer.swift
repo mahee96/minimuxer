@@ -7,7 +7,8 @@ import Glibc
 
 public class Muxer {
     public static var started = false
-
+    public static var ready = false
+    
     public static func start(pairingFile: String, logPath: String, ifaddr: String?) throws {
         if started {
             print("[minimuxer] Already started minimuxer, skipping")
@@ -41,8 +42,8 @@ public class Muxer {
 
         var addr = sockaddr_in()
         addr.sin_family = sa_family_t(AF_INET)
-        addr.sin_port = MuxerConstants.muxerPort.bigEndian
-        addr.sin_addr.s_addr = inet_addr(MuxerConstants.muxerHost)
+        addr.sin_port = MuxerConstants.usbmuxdPort.bigEndian
+        addr.sin_addr.s_addr = inet_addr(MuxerConstants.usbmuxdHost)
 
         var yes = 1
         setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &yes, socklen_t(MemoryLayout<Int>.size))
@@ -52,12 +53,20 @@ public class Muxer {
                 bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
             }
         }
+        
+        if let env = getenv("USBMUXD_SOCKET_ADDRESS") {
+            print("[minimuxer] ENV USBMUXD_SOCKET_ADDRESS =", String(cString: env))
+        } else {
+            print("[minimuxer] ENV USBMUXD_SOCKET_ADDRESS = <nil>")
+        }
+        
         guard bindResult == 0, listen(fd, 5) == 0 else {
             print("[minimuxer] WARN: Failed to bind/listen, will retry")
             return
         }
-        print("[minimuxer] Bound successfully to \(MuxerConstants.muxerHost):\(MuxerConstants.muxerPort)")
-
+        print("[minimuxer] Bound successfully to \(MuxerConstants.usbmuxdHost):\(MuxerConstants.usbmuxdPort)")
+        Muxer.ready = true
+        
         while true {
             var clientAddr = sockaddr()
             var addrLen = socklen_t(MemoryLayout<sockaddr>.size)
@@ -100,7 +109,7 @@ public class Muxer {
             let properties: [String: Any] = [
                 "ConnectionType": "Network",
                 "DeviceID": 420,
-                "EscapedFullServiceName": "yurmomlolllllll",
+                "EscapedFullServiceName": "\(udid)._apple-mobdev2._tcp.local",
                 "InterfaceIndex": 69,
                 "NetworkAddress": Data(networkAddr),
                 "SerialNumber": udid
@@ -126,6 +135,11 @@ public class Muxer {
     }
 
     public static func targetMinimuxerAddress() {
-        setenv(MuxerConstants.usbmuxdEnvKey, MuxerConstants.muxerAddr, 1)
+        print("[minimuxer] setenv(USBMUXD_SOCKET_ADDRESS, \(MuxerConstants.usbmuxdSocket))")
+        
+        setenv(MuxerConstants.usbmuxdEnvKey, MuxerConstants.usbmuxdSocket, 1)
+        
+        let value = String(cString: getenv(MuxerConstants.usbmuxdEnvKey))
+        print("[minimuxer] getenv(USBMUXD_SOCKET_ADDRESS) =", value)
     }
 }

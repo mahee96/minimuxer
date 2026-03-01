@@ -20,12 +20,16 @@ public struct Minimuxer {
         } catch {
             deviceExists = false
         }
-        let heartbeatSuccess = Heartbeat.lastBeatSuccessful
-        let dmgMounted = Mounter.dmgMounted
-        let started = Muxer.started
-
-        if !deviceConnection || !deviceExists || !heartbeatSuccess || !started {
-            print("minimuxer not ready: conn=\(deviceConnection) dev=\(deviceExists) hb=\(heartbeatSuccess) dmg=\(dmgMounted) started=\(started)")
+        guard deviceConnection, deviceExists, Heartbeat.lastBeatSuccessful, Muxer.started, Muxer.ready else {
+            print(
+                "minimuxer not ready: " +
+                "conn=\(deviceConnection) " +
+                "dev=\(deviceExists) " +
+                "hb=\(Heartbeat.lastBeatSuccessful) " +
+                "dmg=\(Mounter.dmgMounted) " +
+                "started=\(Muxer.started) " +
+                "ready=\(Muxer.ready)"
+            )
             return false
         }
         return true
@@ -66,7 +70,7 @@ public struct Minimuxer {
         let ip = ifaddr ?? MuxerConstants.deviceIP
         var addr = sockaddr_in()
         addr.sin_family = sa_family_t(AF_INET)
-        addr.sin_port = MuxerConstants.lockdownPort.bigEndian
+        addr.sin_port = MuxerConstants.lockdowndPort.bigEndian
         inet_pton(AF_INET, ip, &addr.sin_addr)
 
         let fd = socket(AF_INET, SOCK_STREAM, 0)

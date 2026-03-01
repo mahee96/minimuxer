@@ -6,9 +6,12 @@ public class Heartbeat {
 
     public static func startBeat() {
         Thread.detachNewThread {
-            print("[minimuxer] Starting heartbeat thread")
-            // Wait for the listen thread to start
-            Thread.sleep(forTimeInterval: 0.1)
+            print("[minimuxer] Starting heartbeat thread...")
+            while !Muxer.ready {
+                print("[minimuxer] mounter-thread: Waiting for usbmuxd to be ready...")
+                Thread.sleep(forTimeInterval: 0.1)
+            }
+            print("[minimuxer] heartbeat-thread: usbmuxd is ready")
 
             while true {
                 let device: Device
@@ -30,11 +33,11 @@ public class Heartbeat {
 
                 // Inner loop: keep receiving and sending heartbeats
                 while true {
-                    guard let plist = heartbeat.receive(timeoutMs: MuxerConstants.heartbeatTimeoutMs) else {
-                        print("[minimuxer] ERROR: Heartbeat recv failed")
-                        lastBeatSuccessful = false
-                        break
-                    }
+                   guard let plist = heartbeat.receive(timeoutMs: MuxerConstants.heartbeatTimeoutMs) else {
+                       print("[minimuxer] ERROR: Heartbeat recv failed")
+                       lastBeatSuccessful = false
+                       break
+                   }
 
                     if heartbeat.send(plistXml: plist) {
                         lastBeatSuccessful = true

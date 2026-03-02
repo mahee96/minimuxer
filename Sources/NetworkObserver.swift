@@ -34,8 +34,6 @@ public final class NetworkObserver {
             self?.refreshEndpoint()
         }
 
-        refreshEndpoint()
-
         monitor.start(queue: queue)
         started = true
         print("[minimuxer] [net] monitor started")
@@ -43,12 +41,15 @@ public final class NetworkObserver {
     }
     
     private func refreshEndpoint() {
+        print("[minimuxer] [net] refreshing interfaces list and peers")
         IfaceScanner.shared.refresh()
 
+        print("[minimuxer] [net] retrive the first vpn interface info")
         if let info = try? IfaceScanner.shared.probableVPN() {
             print("[minimuxer] [net] vpn:", info, "peer:", info.peerIP ?? "nil")
 
             if let peer = info.peerIP {
+                print("[minimuxer] [net] update the device endpoint with discovered peer on the vpn interface")
                 DeviceEndpoint.shared.update(peer)
             } else {
                 print("[minimuxer] [net] peer not available for", info.name)

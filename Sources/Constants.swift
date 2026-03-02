@@ -1,16 +1,6 @@
 import Foundation
 
 public enum MuxerConstants {
-//    public static let tunnelHostIP = "10.7.0.0"         // local utun interface
-//    public static let tunnelDestIP = "10.7.0.1"         // remote device endpoint
-    
-    // Allowed SideVPN tunnel networks (network base + subnet mask)
-    /* We now do dynamic peer lookup from the utun available so we don't need static declaration */
-    public static let sidetoreTunnelNetworks: [(baseIP: String, maskIP: String)] = [
-        ("10.7.0.0",        "255.255.255.0"),
-        ("192.168.56.0",    "255.255.255.0")
-    ]
-    
     public static let lockdowndPort: UInt16 = 62078     // lockdown daemon port
 
     public static let usbmuxdHost = "127.0.0.1"

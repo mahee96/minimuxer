@@ -78,30 +78,15 @@ public struct NetInfo: Hashable, CustomStringConvertible {
 }
 
 // MARK: - Scanner
-
 final class IfaceScanner {
 
     static let shared = IfaceScanner()
     private(set) var interfaces: Set<NetInfo> = []
 
-    // allowed VPN networks (networkBase : subnetMask)
-    private var allowedVPNNetworks: [(base: UInt32, mask: UInt32)] = []
-
     private var refreshed = false
     private let lock = NSLock()
 
     private init() {}
-
-    // configure allowed tunnel networks
-    func configureAllowedVPNs(_ networks: [(baseIP: String, maskIP: String)]) throws {
-        allowedVPNNetworks = try networks.map {
-            guard
-                let base = ipv4UInt($0.baseIP),
-                let mask = ipv4UInt($0.maskIP)
-            else { throw IfaceError.invalidConfiguration }
-            return (base, mask)
-        }
-    }
 
     func refresh() {
         lock.lock(); defer { lock.unlock() }
@@ -145,13 +130,7 @@ final class IfaceScanner {
 
     func probableVPN() throws -> NetInfo? {
         try ensureReady()
-
-        return interfaces.first { iface in
-            allowedVPNNetworks.contains { allowed in
-                (iface.host & allowed.mask) == allowed.base &&
-                iface.mask == allowed.mask
-            }
-        }
+        return interfaces.first { $0.name.hasPrefix("utun") }
     }
 
     func probableLAN() throws -> NetInfo? {
@@ -160,7 +139,8 @@ final class IfaceScanner {
     }
 
     func vpnPatched() -> Bool {
-        guard let lan = try? probableLAN(), let vpn = try? probableVPN()
+        guard let lan = try? probableLAN(),
+              let vpn = try? probableVPN()
         else { return false }
 
         return lan.maskIP == vpn.maskIP
@@ -169,7 +149,6 @@ final class IfaceScanner {
 
 enum IfaceError: Error {
     case notRefreshed
-    case invalidConfiguration
 }
 
 @inline(__always)

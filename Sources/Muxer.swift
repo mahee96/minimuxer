@@ -11,14 +11,12 @@ public class Muxer {
     
     public static func targetMinimuxerAddress() {
         print("[minimuxer] setenv(USBMUXD_SOCKET_ADDRESS, \(MuxerConstants.usbmuxdSocket))")
-        
         setenv(MuxerConstants.usbmuxdEnvKey, MuxerConstants.usbmuxdSocket, 1)
-        
         let value = String(cString: getenv(MuxerConstants.usbmuxdEnvKey))
         print("[minimuxer] getenv(USBMUXD_SOCKET_ADDRESS) =", value)
     }
     
-    public static func start(pairingFile: String, logPath: String, ifaddr: String?) throws {
+    public static func start(pairingFile: String, logPath: String) throws {
         if started {
             print("[minimuxer] Already started minimuxer, skipping")
             return
@@ -39,12 +37,18 @@ public class Muxer {
         }
 
         started = true
-        Thread.detachNewThread { listenLoop(pairingDict: pairingDict, ifaddr: ifaddr) }
+        Thread.detachNewThread { listenLoop(pairingDict: pairingDict) }
         Heartbeat.startBeat()
         print("[minimuxer] minimuxer has started!")
     }
 
-    private static func listenLoop(pairingDict: [String: Any], ifaddr: String?) {
+    // MARK: - Listener
+
+    // Binds a TCP server on 127.0.0.1:27015 and accepts incoming connections
+    // from libimobiledevice/libusbmuxd. This is our fake usbmuxd — it speaks
+    // just enough of the usbmuxd protocol for the library to discover the
+    // device, read the pairing record, and open services (AFC, lockdown, etc.).
+    private static func listenLoop(pairingDict: [String: Any]) {
         print("[minimuxer] Starting listener")
         let fd = socket(AF_INET, SOCK_STREAM, 0)
         guard fd >= 0 else { return }
@@ -73,61 +77,107 @@ public class Muxer {
         print("[minimuxer] Bound successfully to \(MuxerConstants.usbmuxdHost):\(MuxerConstants.usbmuxdPort)")
         Muxer.usbmuxdReady = true
 
+        // Each accepted connection is handed off to its own thread immediately
+        // so this loop is never blocked waiting for a client to finish. Multiple
+        // services (heartbeat, AFC, instproxy, etc.) connect concurrently and
+        // each one gets its own independent session.
         while true {
             var clientAddr = sockaddr()
             var addrLen = socklen_t(MemoryLayout<sockaddr>.size)
             let clientFd = accept(fd, &clientAddr, &addrLen)
             guard clientFd >= 0 else { continue }
-            var addr = sockaddr_in()
 
-            /*
-             DEBUG: Uncomment below code to log each incoming usbmux client TCP connection.
-                    usbmuxd/libimobiledevice opens many short-lived connections,
-                    each using a new ephemeral source port — this is expected
-                    and helps diagnose connection churn or handshake loops.
-             */
-//            memcpy(&addr, &clientAddr, MemoryLayout<sockaddr_in>.size)
-//            let ip = String(cString: inet_ntoa(addr.sin_addr))
-//            let port = UInt16(bigEndian: addr.sin_port)
-//            print("[minimuxer] client connected from \(ip):\(port) (fd=\(clientFd))")
-
-            handleClient(fd: clientFd, pairingDict: pairingDict, ifaddr: ifaddr)
+            let capturedFd = clientFd
+            Thread.detachNewThread {
+                handleClient(fd: capturedFd, pairingDict: pairingDict)
+            }
         }
     }
 
-    private static func handleClient(fd: Int32, pairingDict: [String: Any], ifaddr: String?) {
-        let bufLen = 0xfff
-        var buffer = [UInt8](repeating: 0, count: bufLen)
-        
+    // MARK: - Client Session
+
+    // Handles a single client connection for its full lifetime.
+    //
+    // libimobiledevice services that require authentication (AFC, misagent,
+    // instproxy, etc.) use lockdownd_client_new_with_handshake, which sends
+    // multiple usbmuxd messages on the SAME TCP connection before the TLS
+    // session is established:
+    //
+    //   1. ListDevices  — discover the device
+    //   2. ReadPairRecord — fetch the pairing certificate
+    //   3. (optionally) ReadBUID, more ReadPairRecords, etc.
+    //
+    // We loop here until the client disconnects (recv returns 0), answering
+    // every message in sequence. Closing early would leave the handshake
+    // incomplete and cause the service to fail.
+    //
+    // The heartbeat client uses lockdownd_client_new (no handshake) so it
+    // only ever sends one message — the loop handles that case too since
+    // recv will return 0 once the client closes its end.
+    private static func handleClient(fd: Int32, pairingDict: [String: Any]) {
         defer { close(fd) }
 
-        // client is active, so keep responding to the socket
-        let bytesRead = recv(fd, &buffer, bufLen, 0)
-        guard bytesRead > 0 else { return }
+        let bufLen = 0xfff
+        var buffer = [UInt8](repeating: 0, count: bufLen)
 
-        let data = Data(buffer[0..<bytesRead])
-        guard let packet = RawPacket(data: data) else { return }
+        while true {
+            let bytesRead = recv(fd, &buffer, bufLen, 0)
+            guard bytesRead > 0 else { return }
+            var totalRead = bytesRead
 
-        do {
-            let response = try handlePacket(packet, pairingDict: pairingDict, ifaddr: ifaddr)
-            let responsePacket = RawPacket(plist: response, version: 1, message: 8, tag: packet.tag)
-            let responseData = responsePacket.data
-            responseData.withUnsafeBytes { ptr in
-                _ = send(fd, ptr.baseAddress!, responseData.count, 0)
+            // libimobiledevice sometimes sends the 16-byte packet header in
+            // one write and the plist body in a follow-up write. If we only
+            // got the header, block for the body before trying to parse.
+            if bytesRead == 16 {
+                let extra = recv(fd, &buffer[16], bufLen - 16, 0)
+                if extra > 0 { totalRead += extra }
             }
-        } catch {}
+
+            let data = Data(buffer[0..<totalRead])
+            guard let packet = RawPacket(data: data) else { return }
+
+            do {
+                let response = try handlePacket(packet, pairingDict: pairingDict)
+                let responsePacket = RawPacket(plist: response, version: 1, message: 8, tag: packet.tag)
+                let responseData = responsePacket.data
+                responseData.withUnsafeBytes { ptr in
+                    _ = send(fd, ptr.baseAddress!, responseData.count, 0)
+                }
+            } catch {
+                // Unrecognised message type — keep the connection alive and
+                // wait for the next message rather than tearing down the
+                // session, since the client may still send messages we do
+                // understand (e.g. ReadPairRecord after an unknown message).
+            }
+        }
     }
 
-    private static func handlePacket(_ packet: RawPacket, pairingDict: [String: Any], ifaddr: String?) throws -> [String: Any] {
+    // MARK: - Packet Handling
+
+    // Responds to the subset of usbmuxd protocol messages that
+    // libimobiledevice actually needs from us:
+    //
+    //   ListDevices / Listen — return our single virtual network device
+    //   ReadPairRecord       — return the pairing file contents
+    //
+    // "Listen" and "ListDevices" both return the full device list because
+    // some libimobiledevice code paths use Listen for device discovery,
+    // not just ListDevices.
+    private static func handlePacket(_ packet: RawPacket, pairingDict: [String: Any]) throws -> [String: Any] {
         guard let messageType = packet.plist["MessageType"] as? String else {
             throw MinimuxerError.NoConnection
         }
 
+        print("[minimuxer] usbmux message:", messageType)
+
         switch messageType {
-        case "ListDevices":
+
+        case "ListDevices", "Listen":
             guard let udid = pairingDict["UDID"] as? String else { throw MinimuxerError.PairingFile }
-            let ip = ifaddr ?? MuxerConstants.deviceIP
-            let networkAddr = convertIp(ip)
+            let deviceIP = try DeviceEndpoint.shared.ip()
+            let networkAddr = convertIp(deviceIP)
+            print("[minimuxer] returning device \(udid) at \(deviceIP)")
+
             let properties: [String: Any] = [
                 "ConnectionType": "Network",
                 "DeviceID": 420,
@@ -136,21 +186,29 @@ public class Muxer {
                 "NetworkAddress": Data(networkAddr),
                 "SerialNumber": udid
             ]
-            return ["DeviceList": [["DeviceID": 420, "MessageType": "Attached", "Properties": properties]]]
-
-        case "Listen":
-            print("[minimuxer] usbmux client registered (Listen received)")
-            return ["Result": 0]
+            return [
+                "DeviceList": [[
+                    "DeviceID": 420,
+                    "MessageType": "Attached",
+                    "Properties": properties
+                ]]
+            ]
 
         case "ReadPairRecord":
+            print("[minimuxer] sending pair record to client")
             let data = try PropertyListSerialization.data(fromPropertyList: pairingDict, format: .xml, options: 0)
             return ["PairRecordData": data]
 
         default:
+            print("[minimuxer] WARN: unknown message type:", messageType)
             throw MinimuxerError.NoConnection
         }
     }
 
+    // MARK: - Helpers
+
+    // Encodes an IPv4 address into the 152-byte sockaddr_storage layout that
+    // libusbmuxd expects in the NetworkAddress field of the device properties.
     private static func convertIp(_ ip: String) -> [UInt8] {
         var data = [UInt8](repeating: 0, count: 152)
         var addr = in_addr()

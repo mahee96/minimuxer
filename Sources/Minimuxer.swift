@@ -11,8 +11,17 @@ public struct Minimuxer {
         return error.description
     }
 
-    public static func ready(ifaddr: String?) -> Bool {
-        let deviceConnection = testDeviceConnection(ifaddr: ifaddr)
+    public static func ready() -> Bool {
+        
+        let deviceIP: String
+        do {
+            deviceIP = try DeviceEndpoint.shared.ip()
+        } catch {
+            print("[minimuxer] minimuxer not ready: device endpoint not initialized")
+            return false
+        }
+        
+        let deviceConnection = testDeviceConnection(ifaddr: deviceIP)
         let deviceExists: Bool
         do {
             _ = try Device.getFirstDevice()
@@ -32,6 +41,12 @@ public struct Minimuxer {
             )
             return false
         }
+        
+        if #available(iOS 26.4, *) {
+            if !IfaceScanner.shared.vpnPatched {
+                print("[minimuxer] WARN: VPN subnet not patched")
+            }
+        }
         return true
     }
 
@@ -39,15 +54,15 @@ public struct Minimuxer {
         rustBridgeSetDebug(debug)
     }
 
-    public static func start(pairingFile: String, logPath: String, ifaddr: String?) throws {
-        try startWithLogger(pairingFile: pairingFile, logPath: logPath, ifaddr: ifaddr, isConsoleLoggingEnabled: true)
+    public static func start(pairingFile: String, logPath: String) throws {
+        try startWithLogger(pairingFile: pairingFile, logPath: logPath, isConsoleLoggingEnabled: true)
     }
 
-    public static func startWithLogger(pairingFile: String, logPath: String, ifaddr: String?, isConsoleLoggingEnabled: Bool) throws {
-        try Muxer.start(pairingFile: pairingFile, logPath: logPath, ifaddr: ifaddr)
+    public static func startWithLogger(pairingFile: String, logPath: String, isConsoleLoggingEnabled: Bool) throws {
+        try Muxer.start(pairingFile: pairingFile, logPath: logPath)
     }
 
-    public static func targetMinimuxerAddress() {
+    public static func updateUsbMuxdAddr() {
         Muxer.targetMinimuxerAddress()
     }
 
@@ -67,7 +82,8 @@ public struct Minimuxer {
     }
 
     public static func testDeviceConnection(ifaddr: String?) -> Bool {
-        let ip = ifaddr ?? MuxerConstants.deviceIP
+        guard let ip = ifaddr else { return false }
+        
         var addr = sockaddr_in()
         addr.sin_family = sa_family_t(AF_INET)
         addr.sin_port = MuxerConstants.lockdowndPort.bigEndian

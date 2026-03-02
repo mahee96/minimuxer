@@ -131,7 +131,7 @@ public class Mounter {
             trustcache: trustcacheData,
             manifest: manifestData,
             muxerAddr: MuxerConstants.usbmuxdSocket,
-            deviceIp: MuxerConstants.deviceIP
+            deviceIp: try DeviceEndpoint.shared.ip()
         )
         if result == 0 {
             print("[minimuxer] DDI mounted successfully")

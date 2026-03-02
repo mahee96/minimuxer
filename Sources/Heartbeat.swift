@@ -17,8 +17,17 @@ public class Heartbeat {
 
             // outer loop
             while true {
-                // NEW: verify tunnel/device reachability first
-                let deviceIP = MuxerConstants.deviceIP
+                let deviceIP: String
+                do {
+                    deviceIP = try DeviceEndpoint.shared.ip()
+                } catch {
+                    print("[minimuxer] heartbeat-thread: device endpoint not initialized")
+                    lastBeatSuccessful = false
+                    Thread.sleep(forTimeInterval: 1)
+                    continue
+                }
+                
+                // verify tunnel/device reachability first
                 if !Minimuxer.testDeviceConnection(ifaddr: deviceIP) {
                     print("[minimuxer] heartbeat-thread: device not reachable, waiting...")
                     lastBeatSuccessful = false

@@ -5,7 +5,7 @@ public class Install {
     public static func yeetAppAfc(bundleId: String, ipaBytes: Data) throws {
         print("[minimuxer] Yeeting IPA for bundle ID: \(bundleId)")
 
-        let deviceIP = MuxerConstants.deviceIP
+        let deviceIP = try DeviceEndpoint.shared.ip()
         print("[minimuxer] AFC: verifying device connectivity at \(deviceIP)...")
         guard Minimuxer.testDeviceConnection(ifaddr: deviceIP) else {
             print("[minimuxer] ERROR: Device not reachable before AFC start")
@@ -22,15 +22,22 @@ public class Install {
         print("[minimuxer] AFC: client created successfully")
 
         let pkg = MuxerConstants.pkgPath
-        _ = afc.mkdir(path: "./\(pkg)")
         let appDir = "./\(pkg)/\(bundleId)"
-        _ = afc.mkdir(path: appDir)
+        mkdirP(appDir, afc: afc)
 
         if !afc.writeFile(path: "\(appDir)/app.ipa", data: ipaBytes) {
             print("[minimuxer] ERROR: Unable to write IPA to device")
             throw MinimuxerError.RwAfc
         }
         print("[minimuxer] Successfully staged IPA")
+    }
+    
+    private static func mkdirP(_ path: String, afc: RustAfc) {
+        var current = ""
+        for part in path.split(separator: "/") {
+            current += "/\(part)"
+            _ = afc.mkdir(path: current)
+        }
     }
 
     public static func installIpa(bundleId: String) throws {

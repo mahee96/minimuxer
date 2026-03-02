@@ -1,11 +1,13 @@
 import Foundation
 
 public enum MuxerConstants {
-    public static let deviceIP = "10.7.0.1"
-    public static let lockdowndPort: UInt16 = 62078
+    public static let tunnelHostIP = "10.7.0.0"         // local utun interface
+    public static let tunnelDestIP = "10.7.0.1"         // remote device endpoint
+    
+    public static let lockdowndPort: UInt16 = 62078     // lockdown daemon port
 
     public static let usbmuxdHost = "127.0.0.1"
-    public static let usbmuxdPort: UInt16 = 27015
+    public static let usbmuxdPort: UInt16 = 27015       // usbmux daemon port
     public static let usbmuxdSocket = "\(usbmuxdHost):\(usbmuxdPort)"
     
     public static let heartbeatTimeoutMs: UInt32 = 12000

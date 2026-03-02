@@ -229,19 +229,6 @@ public class Muxer {
                 return ["DeviceList": [attach]]
 
             case "Listen":
-                DispatchQueue.global().asyncAfter(deadline: .now() + 0.1) {
-                    do {
-                        let attach = try buildAttachPayload()
-
-                        emitDeviceEvent(fd: fd, type: "Detached", payload: attach)
-                        usleep(50_000)
-                        emitDeviceEvent(fd: fd, type: "Attached", payload: attach)
-
-                        print("[minimuxer] emitted Detach→Attach cycle")
-                    } catch {
-                        print("[minimuxer] event emit failed:", error)
-                    }
-                }
                 return ["Result": 0]
 
             case "ReadBUID":

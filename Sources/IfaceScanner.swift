@@ -160,11 +160,13 @@ final class IfaceScanner {
         interfaces = Self.scan()
         refreshed = true
 
-        if let vpnIface = try? probableVPN() {
-            tunnelConfigCache?.setDeviceIP(vpnIface.hostIP)
-            tunnelConfigCache?.setSubnetMask(vpnIface.maskIP)
-            tunnelConfigCache?.setFakeIP(vpnIface.peerIP)
-        }
+        // clear it so that if iface was valid and if peerIP was override it will set it
+        tunnelConfigCache?.setOverrideEffective(false)
+        
+        let vpnIface = try? probableVPN()
+        tunnelConfigCache?.setDeviceIP(vpnIface?.hostIP)
+        tunnelConfigCache?.setSubnetMask(vpnIface?.maskIP)
+        tunnelConfigCache?.setFakeIP(vpnIface?.peerIP)
     }
 
     private func ensureReady() throws {

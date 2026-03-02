@@ -28,18 +28,18 @@ public class Heartbeat {
                 
                 // verify tunnel/device reachability first
                 if !Minimuxer.testDeviceConnection(ifaddr: deviceIP) {
-                    print("[minimuxer] heartbeat-thread: device not reachable, waiting...")
+                    print("[minimuxer] heartbeat-thread: device IP not reachable, waiting...")
                     lastBeatSuccessful = false
                     Thread.sleep(forTimeInterval: 1)
                     continue
                 }
-                print("[minimuxer] heartbeat-thread: device reachable at: \(deviceIP)")
+                print("[minimuxer] heartbeat-thread: device IP reachable at: \(deviceIP)")
 
                 let device: Device
                 do {
                     device = try Device.getFirstDevice()
                 } catch {
-                    print("[minimuxer] WARN: Could not get device from muxer for heartbeat")
+                    print("[minimuxer] WARN: Could not query device from usbmuxd for heartbeat")
                     lastBeatSuccessful = false
                     Thread.sleep(forTimeInterval: 1)
                     continue

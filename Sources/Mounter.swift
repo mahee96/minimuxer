@@ -11,18 +11,17 @@ public class Mounter {
 
         Thread.detachNewThread {
             print("[minimuxer] Starting mount thread...")
-            Thread.sleep(forTimeInterval: 1)
             while !Muxer.usbmuxdReady {
+                Thread.sleep(forTimeInterval: 1)
                 let ts = ISO8601DateFormatter().string(from: Date())
                 print("[\(ts)] [minimuxer] mount-thread: Waiting for usbmuxd to be ready...")
-                Thread.sleep(forTimeInterval: 0.25)
             }
             print("[minimuxer] mount-thread: usbmuxd is ready")
 
             try? FileManager.default.createDirectory(atPath: dmgDocsPath, withIntermediateDirectories: true)
 
             while !dmgMounted {
-                Thread.sleep(forTimeInterval: 5.0)
+                Thread.sleep(forTimeInterval: 1.0)
                 do {
                     let device = try Device.getFirstDevice()
                     guard let lockdown = RustLockdown.connect(device: device.internalInstance, label: "minimuxer"),

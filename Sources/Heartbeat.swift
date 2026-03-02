@@ -7,11 +7,10 @@ public class Heartbeat {
     public static func startBeat() {
         Thread.detachNewThread {
             print("[minimuxer] Starting heartbeat thread...")
-            Thread.sleep(forTimeInterval: 1)
             while !Muxer.usbmuxdReady {
+                Thread.sleep(forTimeInterval: 1)
                 let ts = ISO8601DateFormatter().string(from: Date())
                 print("[\(ts)] [minimuxer] heartbeat-thread: Waiting for usbmuxd to be ready...")
-                Thread.sleep(forTimeInterval: 0.25)
             }
             print("[minimuxer] heartbeat-thread: usbmuxd is ready")
 
@@ -42,14 +41,14 @@ public class Heartbeat {
                 } catch {
                     print("[minimuxer] WARN: Could not get device from muxer for heartbeat")
                     lastBeatSuccessful = false
-                    Thread.sleep(forTimeInterval: 0.1)
+                    Thread.sleep(forTimeInterval: 1)
                     continue
                 }
 
                 guard let heartbeat = RustHeartbeat.connect(device: device.internalInstance, label: "minimuxer") else {
                     print("[minimuxer] ERROR: Failed to create heartbeat client")
                     lastBeatSuccessful = false
-                    Thread.sleep(forTimeInterval: 0.1)
+                    Thread.sleep(forTimeInterval: 1)
                     continue
                 }
 

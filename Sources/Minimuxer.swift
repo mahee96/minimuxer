@@ -62,8 +62,8 @@ public struct Minimuxer {
         try Muxer.start(pairingFile: pairingFile, logPath: logPath)
     }
 
-    public static func updateUsbMuxdAddr() {
-        Muxer.targetMinimuxerAddress()
+    public static func retargetUsbmuxdAddr() {
+        Muxer.retargetUsbmuxdAddr()
     }
 
     public static func fetchUDID() -> String? {

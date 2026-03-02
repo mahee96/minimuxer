@@ -148,6 +148,7 @@ final class IfaceScanner {
 
     func bindTunnelConfig(_ binding: TunnelConfigBinding) {
         tunnelConfigCache = binding
+        refresh()
     }
 
     var cachedOverrideFakeIP: String? { tunnelConfigCache?.getOverrideFakeIP() }
@@ -158,6 +159,12 @@ final class IfaceScanner {
         lock.lock(); defer { lock.unlock() }
         interfaces = Self.scan()
         refreshed = true
+
+        if let vpnIface = try? probableVPN() {
+            tunnelConfigCache?.setDeviceIP(vpnIface.hostIP)
+            tunnelConfigCache?.setSubnetMask(vpnIface.maskIP)
+            tunnelConfigCache?.setFakeIP(vpnIface.peerIP)
+        }
     }
 
     private func ensureReady() throws {
@@ -199,6 +206,17 @@ final class IfaceScanner {
         defer {
             let ms = Date().timeIntervalSince(start) * 1000
             print(String(format: "[minimuxer] [iface] routingTablePeer took %.2fms", ms))
+        }
+        
+        if let cachedDeviceIP = cachedOverrideFakeIP,
+//           let raw = ipv4UInt(cachedDeviceIP),
+//           (raw & iface.mask) == iface.networkBase
+            Minimuxer.testDeviceConnection(ifaddr: cachedDeviceIP)
+        {
+            print("[minimuxer] [iface] using user specified tunnel peer:", cachedDeviceIP)
+            tunnelConfigCache?.setFakeIP(cachedDeviceIP)
+            tunnelConfigCache?.setOverrideEffective(true)
+            return cachedDeviceIP
         }
     
         var mib: [Int32] = [CTL_NET, PF_ROUTE, 0, AF_INET, NET_RT_DUMP, 0]
@@ -249,7 +267,15 @@ final class IfaceScanner {
             guard let raw = ipv4UInt($0) else { return false }
             return (raw & iface.mask) == iface.networkBase
         }
-        return inSubnet ?? candidates.first
+
+        let selected = inSubnet ?? candidates.first
+
+        if let selected {
+            tunnelConfigCache?.setFakeIP(selected)
+            tunnelConfigCache?.setOverrideEffective(false)
+        }
+
+        return selected
     }
     
 

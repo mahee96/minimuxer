@@ -223,13 +223,10 @@ public class Muxer {
         }
 
         switch messageType {
-            case "ListDevices":
+            case "ListDevices", "Listen":
                 let attach = try buildAttachPayload()
                 print("[minimuxer] returning device list")
                 return ["DeviceList": [attach]]
-
-            case "Listen":
-                return ["Result": 0]
 
             case "ReadBUID":
                 return ["BUID": "00000000-0000-0000-0000-000000000000"]

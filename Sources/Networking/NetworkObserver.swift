@@ -43,7 +43,11 @@ public final class NetworkObserver {
     }
     
     private func refreshEndpoint() {
-        if let info = IfaceScanner.shared.probableVPN {
+        IfaceScanner.shared.refresh()
+
+        try? IfaceScanner.shared.configureAllowedVPNs(MuxerConstants.sidetoreTunnelNetworks)
+
+        if let info = try? IfaceScanner.shared.probableVPN() {
             print("[minimuxer] [net] vpn:", info, "peer:", info.peerIP ?? "nil")
 
             if let peer = info.peerIP {

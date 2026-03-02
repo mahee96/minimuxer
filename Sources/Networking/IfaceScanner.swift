@@ -79,15 +79,41 @@ public struct NetInfo: Hashable, CustomStringConvertible {
 
 // MARK: - Scanner
 
-final class IfaceScanner: Sendable {
+final class IfaceScanner {
 
     static let shared = IfaceScanner()
+    private(set) var interfaces: Set<NetInfo> = []
 
-    nonisolated(unsafe) private(set) var interfaces: Set<NetInfo> = []
+    // allowed VPN networks (networkBase : subnetMask)
+    private var allowedVPNNetworks: [(base: UInt32, mask: UInt32)] = []
 
-    private init() { refresh() }
+    private var refreshed = false
+    private let lock = NSLock()
 
-    func refresh() { interfaces = Self.scan() }
+    private init() {}
+
+    // configure allowed tunnel networks
+    func configureAllowedVPNs(_ networks: [(baseIP: String, maskIP: String)]) throws {
+        allowedVPNNetworks = try networks.map {
+            guard
+                let base = ipv4UInt($0.baseIP),
+                let mask = ipv4UInt($0.maskIP)
+            else { throw IfaceError.invalidConfiguration }
+            return (base, mask)
+        }
+    }
+
+    func refresh() {
+        lock.lock(); defer { lock.unlock() }
+        interfaces = Self.scan()
+        refreshed = true
+    }
+
+    private func ensureReady() throws {
+        guard refreshed else { throw IfaceError.notRefreshed }
+    }
+
+    // MARK: scan
 
     private static func scan() -> Set<NetInfo> {
         var result = Set<NetInfo>()
@@ -97,7 +123,6 @@ final class IfaceScanner: Sendable {
 
         var cur: UnsafeMutablePointer<ifaddrs>? = first
         while let p = cur {
-
             let e = p.pointee
             let flags = Int32(e.ifa_flags)
 
@@ -116,18 +141,39 @@ final class IfaceScanner: Sendable {
         return result
     }
 
-    var probableVPN: NetInfo? {
-        interfaces.first {
-            $0.name.hasPrefix("utun")
+    // MARK: selection
+
+    func probableVPN() throws -> NetInfo? {
+        try ensureReady()
+
+        return interfaces.first { iface in
+            allowedVPNNetworks.contains { allowed in
+                (iface.host & allowed.mask) == allowed.base &&
+                iface.mask == allowed.mask
+            }
         }
     }
 
-    var probableLAN: NetInfo? {
-        interfaces.first { $0.name.hasPrefix("en") }
+    func probableLAN() throws -> NetInfo? {
+        try ensureReady()
+        return interfaces.first { $0.name.hasPrefix("en") }
     }
 
-    var vpnPatched: Bool {
-        guard let lan = probableLAN, let vpn = probableVPN else { return false }
+    func vpnPatched() -> Bool {
+        guard let lan = try? probableLAN(), let vpn = try? probableVPN()
+        else { return false }
+
         return lan.maskIP == vpn.maskIP
     }
+}
+
+enum IfaceError: Error {
+    case notRefreshed
+    case invalidConfiguration
+}
+
+@inline(__always)
+private func ipv4UInt(_ str: String) -> UInt32? {
+    var addr = in_addr()
+    return inet_pton(AF_INET, str, &addr) == 1 ? addr.s_addr.bigEndian : nil
 }

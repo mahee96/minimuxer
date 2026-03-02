@@ -43,7 +43,7 @@ public struct Minimuxer {
         }
         
         if #available(iOS 26.4, *) {
-            if !IfaceScanner.shared.vpnPatched {
+            if !IfaceScanner.shared.vpnPatched() {
                 print("[minimuxer] WARN: VPN subnet not patched")
             }
         }

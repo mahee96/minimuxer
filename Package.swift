@@ -32,7 +32,6 @@ let package = Package(
                 "Cargo.toml",
                 "Cargo.lock",
                 "src",
-                "target",
                 "Makefile",
                 "lib",
             ],

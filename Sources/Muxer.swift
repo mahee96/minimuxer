@@ -102,7 +102,7 @@ public class Muxer {
                 guard clientFd >= 0 else {
                     consecutiveErrors += 1
                     print("[minimuxer] WARN: accept() failed (\(consecutiveErrors)): \(String(cString: strerror(errno)))")
-                    if consecutiveErrors > 5 {
+                    if consecutiveErrors > 0 {
                         print("[minimuxer] ERROR: accept() repeatedly failing, restarting socket")
                         break  // break inner → outer loop recreates socket
                     }

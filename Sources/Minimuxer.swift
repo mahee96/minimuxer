@@ -10,7 +10,11 @@ public struct Minimuxer {
     public static func describeError(_ error: MinimuxerError) -> String {
         return error.description
     }
-
+    
+    public static func bindTunnelConfig(_ binding: TunnelConfigBinding) {
+        IfaceScanner.shared.bindTunnelConfig(binding)
+    }
+    
     public static func ready() -> Bool {
         
         let deviceIP: String

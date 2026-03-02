@@ -113,7 +113,29 @@ private let NET_RT_DUMP: Int32 = 1
 private let RTF_HOST: Int32    = 0x4      // route is a host route (/32)
 private let RTF_UP: Int32      = 0x1      // route is usable
 
-// MARK: - Scanner
+public final class TunnelConfigBinding: Sendable {
+    public let setDeviceIP: @Sendable (String?) -> Void
+    public let setFakeIP: @Sendable (String?) -> Void
+    public let setSubnetMask: @Sendable (String?) -> Void
+    public let getOverrideFakeIP: @Sendable () -> String
+    public let setOverrideEffective: @Sendable (Bool) -> Void
+
+    public init(
+        setDeviceIP: @escaping @Sendable (String?) -> Void,
+        setFakeIP: @escaping @Sendable (String?) -> Void,
+        setSubnetMask: @escaping @Sendable (String?) -> Void,
+        getOverrideFakeIP: @escaping @Sendable () -> String,
+        setOverrideEffective: @escaping @Sendable (Bool) -> Void
+    ) {
+        self.setDeviceIP = setDeviceIP
+        self.setFakeIP = setFakeIP
+        self.setSubnetMask = setSubnetMask
+        self.getOverrideFakeIP = getOverrideFakeIP
+        self.setOverrideEffective = setOverrideEffective
+    }
+}
+
+
 final class IfaceScanner {
 
     static let shared = IfaceScanner()
@@ -122,6 +144,14 @@ final class IfaceScanner {
     private var refreshed = false
     private let lock = NSLock()
 
+    private var tunnelConfigCache: TunnelConfigBinding?
+
+    func bindTunnelConfig(_ binding: TunnelConfigBinding) {
+        tunnelConfigCache = binding
+    }
+
+    var cachedOverrideFakeIP: String? { tunnelConfigCache?.getOverrideFakeIP() }
+    
     private init() {}
 
     func refresh() {
@@ -135,7 +165,6 @@ final class IfaceScanner {
     }
 
     // MARK: scan
-
     private static func scan() -> Set<NetInfo> {
         var result = Set<NetInfo>()
         var head: UnsafeMutablePointer<ifaddrs>? = nil

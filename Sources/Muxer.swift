@@ -7,7 +7,7 @@ import Glibc
 
 public class Muxer {
     public static var started = false
-    public static var usbmuxdReady = true
+    public static var usbmuxdReady = false
     
     public static func targetMinimuxerAddress() {
         print("[minimuxer] setenv(USBMUXD_SOCKET_ADDRESS, \(MuxerConstants.usbmuxdSocket))")
@@ -156,13 +156,6 @@ public class Muxer {
 
     // Responds to the subset of usbmuxd protocol messages that
     // libimobiledevice actually needs from us:
-    //
-    //   ListDevices / Listen — return our single virtual network device
-    //   ReadPairRecord       — return the pairing file contents
-    //
-    // "Listen" and "ListDevices" both return the full device list because
-    // some libimobiledevice code paths use Listen for device discovery,
-    // not just ListDevices.
     private static func handlePacket(_ packet: RawPacket, pairingDict: [String: Any]) throws -> [String: Any] {
         guard let messageType = packet.plist["MessageType"] as? String else {
             throw MinimuxerError.NoConnection
@@ -171,37 +164,39 @@ public class Muxer {
         print("[minimuxer] usbmux message:", messageType)
 
         switch messageType {
-
-        case "ListDevices", "Listen":
-            guard let udid = pairingDict["UDID"] as? String else { throw MinimuxerError.PairingFile }
-            let deviceIP = try DeviceEndpoint.shared.ip()
-            let networkAddr = convertIp(deviceIP)
-            print("[minimuxer] returning device \(udid) at \(deviceIP)")
-
-            let properties: [String: Any] = [
-                "ConnectionType": "Network",
-                "DeviceID": 420,
-                "EscapedFullServiceName": "\(udid)._apple-mobdev2._tcp.local",
-                "InterfaceIndex": 69,
-                "NetworkAddress": Data(networkAddr),
-                "SerialNumber": udid
-            ]
-            return [
-                "DeviceList": [[
+            case "ListDevices":
+                guard let udid = pairingDict["UDID"] as? String else { throw MinimuxerError.PairingFile }
+                let deviceIP = try DeviceEndpoint.shared.ip()
+                let networkAddr = convertIp(deviceIP)
+                print("[minimuxer] returning device \(udid) at \(deviceIP)")
+                let properties: [String: Any] = [
+                    "ConnectionType": "Network",
                     "DeviceID": 420,
-                    "MessageType": "Attached",
-                    "Properties": properties
-                ]]
-            ]
+                    "EscapedFullServiceName": "\(udid)._apple-mobdev2._tcp.local",
+                    "InterfaceIndex": 69,
+                    "NetworkAddress": Data(networkAddr),
+                    "SerialNumber": udid
+                ]
+                return ["DeviceList": [["DeviceID": 420, "MessageType": "Attached", "Properties": properties]]]
 
-        case "ReadPairRecord":
-            print("[minimuxer] sending pair record to client")
-            let data = try PropertyListSerialization.data(fromPropertyList: pairingDict, format: .xml, options: 0)
-            return ["PairRecordData": data]
+            case "Listen":
+                // Acknowledge subscription. We don't push unsolicited events.
+                return ["Result": 0]
 
-        default:
-            print("[minimuxer] WARN: unknown message type:", messageType)
-            throw MinimuxerError.NoConnection
+            case "ReadBUID":
+                // BUID (Backup UDP Identifier) — limd sends this during handshake
+                // to get a unique host identifier. We return a static dummy value.
+                // limd doesn't validate it, just needs something non-empty.
+                return ["BUID": "00000000-0000-0000-0000-000000000000"]
+                
+            case "ReadPairRecord":
+                print("[minimuxer] sending pair record to client")
+                let data = try PropertyListSerialization.data(fromPropertyList: pairingDict, format: .xml, options: 0)
+                return ["PairRecordData": data]
+
+            default:
+                print("[minimuxer] WARN: unknown message type:", messageType)
+                throw MinimuxerError.NoConnection
         }
     }
 

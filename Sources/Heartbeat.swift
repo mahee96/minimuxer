@@ -20,7 +20,7 @@ public class Heartbeat {
                 do {
                     deviceIP = try DeviceEndpoint.shared.ip()
                 } catch {
-                    print("[minimuxer] heartbeat-thread: device endpoint not initialized")
+                    print("[minimuxer] heartbeat-thread: deviceIP unavailable")
                     lastBeatSuccessful = false
                     Thread.sleep(forTimeInterval: 1)
                     continue

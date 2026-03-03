@@ -1,3 +1,10 @@
+//
+//  MinimuxerBridge.swift
+//  RustBridge(Minimuxer)
+//
+//  Created by Magesh K on 02/03/26.
+//
+
 import Foundation
 
 // MARK: - FFI Declarations

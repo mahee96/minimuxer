@@ -1,3 +1,11 @@
+//
+//  Muxer.swift
+//  Minimuxer
+//
+//  Original Rust Implementation by @jkcoxson
+//  Swift Port created by Magesh K on 02/03/26.
+//
+
 import Foundation
 #if canImport(Darwin)
 import Darwin

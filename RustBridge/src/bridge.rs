@@ -1,3 +1,10 @@
+//
+//  bridge.rs
+//  RustBridge(Minimuxer)
+//
+//  Created by Magesh K on 02/03/26.
+//
+
 use rusty_libimobiledevice::idevice::{Device, get_first_device};
 use rusty_libimobiledevice::services::lockdownd::LockdowndClient;
 use rusty_libimobiledevice::services::afc::{AfcClient, AfcFileMode};

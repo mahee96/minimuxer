@@ -2,7 +2,8 @@
 //  NetworkObserver.swift
 //  Minimuxer
 //
-//  Created by Magesh K on 02/03/26.
+//  Original Rust Implementation by @jkcoxson
+//  Swift Port created by Magesh K on 02/03/26.
 //
 
 import Network

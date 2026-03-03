@@ -1,6 +1,11 @@
 //
-//  IfManager.swift
+//  IfaceScanner.swift
+//  Minimuxer
 //
+//  Created by ny on 2/27/26.
+//  Copyright © 2026 SideStore. All rights reserved.
+//
+
 
 import Foundation
 import Darwin

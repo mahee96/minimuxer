@@ -41,7 +41,7 @@ public final class NetworkObserver {
         return true
     }
     
-    private func refreshEndpoint() {
+    public func refreshEndpoint() {
         print("[minimuxer] [net] refreshing interfaces list and peers")
         IfaceScanner.shared.refresh()
 

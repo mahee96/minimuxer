@@ -153,7 +153,9 @@ final class IfaceScanner {
 
     func bindTunnelConfig(_ binding: TunnelConfigBinding) {
         tunnelConfigCache = binding
-        refresh()
+        
+        // ask all observers to be refreshed
+        NetworkObserver.shared.refreshEndpoint()
     }
 
     var cachedOverrideFakeIP: String? { tunnelConfigCache?.getOverrideFakeIP() }
@@ -165,13 +167,12 @@ final class IfaceScanner {
         interfaces = Self.scan()
         refreshed = true
 
-        // clear it so that if iface was valid and if peerIP was override it will set it
-        tunnelConfigCache?.setOverrideEffective(false)
-        
         let vpnIface = try? probableVPN()
         tunnelConfigCache?.setDeviceIP(vpnIface?.hostIP)
         tunnelConfigCache?.setSubnetMask(vpnIface?.maskIP)
-        tunnelConfigCache?.setFakeIP(vpnIface?.peerIP)
+        let peerIP = vpnIface?.peerIP
+        tunnelConfigCache?.setFakeIP(peerIP)
+        tunnelConfigCache?.setOverrideEffective(peerIP == cachedOverrideFakeIP)
     }
 
     private func ensureReady() throws {
@@ -221,8 +222,6 @@ final class IfaceScanner {
             Minimuxer.testDeviceConnection(ifaddr: cachedDeviceIP)
         {
             print("[minimuxer] [iface] using user specified tunnel peer:", cachedDeviceIP)
-            tunnelConfigCache?.setFakeIP(cachedDeviceIP)
-            tunnelConfigCache?.setOverrideEffective(true)
             return cachedDeviceIP
         }
     

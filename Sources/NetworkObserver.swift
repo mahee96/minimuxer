@@ -51,11 +51,16 @@ public final class NetworkObserver {
             if let peer = info.peerIP {
                 print("[minimuxer] [net] update the device endpoint with discovered peer on the vpn interface")
                 DeviceEndpoint.shared.update(peer)
+                Muxer.notifyDeviceAttached(ip: peer)
             } else {
                 print("[minimuxer] [net] peer not available for", info.name)
+                DeviceEndpoint.shared.clear()
+                Muxer.notifyDeviceDetached()
             }
         } else {
             print("[minimuxer] [net] no SideVPN endpoint detected")
+            DeviceEndpoint.shared.clear()
+            Muxer.notifyDeviceDetached()
         }
     }
     

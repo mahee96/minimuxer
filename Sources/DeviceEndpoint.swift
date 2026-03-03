@@ -28,6 +28,12 @@ final class DeviceEndpoint {
         print("[minimuxer] device endpoint updated -> \(newIP)")
     }
 
+    public func clear() {
+        lock.lock(); defer { lock.unlock() }
+        _ip = nil
+        print("[minimuxer] device endpoint cleared -> nil")
+    }
+
     public var isInitialized: Bool {
         lock.lock(); defer { lock.unlock() }
         return _ip != nil

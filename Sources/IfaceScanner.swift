@@ -126,8 +126,9 @@ final class IfaceScanner {
         tunnelConfigCache?.setDeviceIP(vpnIface?.hostIP)
         tunnelConfigCache?.setSubnetMask(vpnIface?.maskIP)
         let peerIP = vpnIface?.peerIP
+        let isOverrideActive = peerIP != nil && peerIP == cachedOverrideFakeIP
         tunnelConfigCache?.setFakeIP(peerIP)
-        tunnelConfigCache?.setOverrideEffective(peerIP == cachedOverrideFakeIP)
+        tunnelConfigCache?.setOverrideEffective(isOverrideActive)
         
         print("""
         [minimuxer] [iface] rescan routes
@@ -136,7 +137,7 @@ final class IfaceScanner {
           • vpn mask: \(vpnIface?.maskIP ?? "nil")
           • vpn peer: \(peerIP ?? "nil")
           • cachedOverrideFakeIP: \(cachedOverrideFakeIP ?? "nil")
-          • overrideEffective: \(peerIP == cachedOverrideFakeIP)
+          • overrideEffective: \(isOverrideActive)
           • refreshed: \(refreshed)
         """)
     }

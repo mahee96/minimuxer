@@ -134,13 +134,12 @@ fileprivate func formatNSSetAsJson(_ message: String) -> String {
            let array = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String] {
             
             let sortedArray = array.sorted()
-            if let jsonData = try? JSONSerialization.data(withJSONObject: sortedArray, options: [.prettyPrinted, .withoutEscapingSlashes]),
-               let jsonString = String(data: jsonData, encoding: .utf8) {
-                
-                let fullRange = startRange.lowerBound..<endRange.upperBound
-                result.replaceSubrange(fullRange, with: jsonString)
-                continue
-            }
+            let listString = sortedArray.map { "\"\($0)\"" }.joined(separator: ",\n")
+            let jsonString = "[\n\(listString)\n]"
+            
+            let fullRange = startRange.lowerBound..<endRange.upperBound
+            result.replaceSubrange(fullRange, with: jsonString)
+            continue
         }
         
         break

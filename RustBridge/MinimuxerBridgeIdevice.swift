@@ -97,12 +97,56 @@ private func rustIdeviceThrowIfNeeded(_ error: UnsafeMutablePointer<RustIdeviceF
 		return
 	}
 
+	let rawMessage = error.pointee.message.map { String(cString: $0) } ?? "unknown error"
+	let formattedMessage = formatNSSetAsJson(rawMessage)
+
 	let swiftError = NSError(domain: "minimuxer", code: Int(error.pointee.code), userInfo: [
-        NSLocalizedDescriptionKey: error.pointee.message.map { String(cString: $0) } ?? "unknown error"
+        NSLocalizedDescriptionKey: formattedMessage
     ])
 
 	_idevice_error_free(error)
 	throw swiftError
+}
+
+fileprivate func formatNSSetAsJson(_ message: String) -> String {
+    let normalized = message
+        .replacingOccurrences(of: "\\r", with: "")
+        .replacingOccurrences(of: "\r", with: "")
+        .replacingOccurrences(of: "\\n", with: "\n")
+        .replacingOccurrences(of: "\\\"", with: "\"")
+        .replacingOccurrences(of: "\\t", with: "\t")
+    
+    var result = normalized
+    
+    while let startRange = result.range(of: "{("),
+          let endRange = result.range(of: ")}") {
+        
+        guard startRange.upperBound < endRange.lowerBound else {
+            break
+        }
+        
+        let contentRange = startRange.upperBound..<endRange.lowerBound
+        let content = String(result[contentRange])
+        
+        let plistString = "(\(content))"
+        
+        if let data = plistString.data(using: .utf8),
+           let array = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String] {
+            
+            let sortedArray = array.sorted()
+            if let jsonData = try? JSONSerialization.data(withJSONObject: sortedArray, options: [.prettyPrinted, .withoutEscapingSlashes]),
+               let jsonString = String(data: jsonData, encoding: .utf8) {
+                
+                let fullRange = startRange.lowerBound..<endRange.upperBound
+                result.replaceSubrange(fullRange, with: jsonString)
+                continue
+            }
+        }
+        
+        break
+    }
+    
+    return result
 }
 
 // MARK: - Swift Wrappers

@@ -79,10 +79,11 @@ public struct Minimuxer {
         let deviceConnection = testDeviceConnection(ifaddr: deviceIP)
         // check if rrpairing first
         if Muxer.isrppairing {
-            guard deviceConnection, Mounter.isReady(), Muxer.started, Muxer.usbmuxdReady else {
+            guard deviceConnection, Mounter.isReady() else {
                 verboseLog(
                     "minimuxer not ready: " +
                     "conn=\(deviceConnection) " +
+                    "hb=\(Heartbeat.lastBeatSuccessful) " +
                     "dmg=\(Mounter.isReady()) " +
                     "started=\(Muxer.started) " +
                     "ready=\(Muxer.usbmuxdReady)"

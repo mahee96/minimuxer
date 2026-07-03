@@ -83,7 +83,7 @@ public struct Minimuxer {
                 "minimuxer not ready: " +
                 "conn=\(deviceConnection) " +
                 "hb=\(Heartbeat.lastBeatSuccessful) " +
-                "dmg=\(Mounter.dmgMounted) " +
+                "dmg=\(Mounter.isReady()) " +
                 "started=\(Muxer.started) " +
                 "ready=\(Muxer.usbmuxdReady)"
             )
@@ -98,13 +98,13 @@ public struct Minimuxer {
         } catch {
             deviceExists = false
         }
-        guard deviceConnection, deviceExists, Heartbeat.lastBeatSuccessful, Mounter.dmgMounted, Muxer.started, Muxer.usbmuxdReady else {
+        guard deviceConnection, deviceExists, Heartbeat.lastBeatSuccessful, Mounter.isReady(), Muxer.started, Muxer.usbmuxdReady else {
             verboseLog(
                 "minimuxer not ready: " +
                 "conn=\(deviceConnection) " +
                 "dev=\(deviceExists) " +
                 "hb=\(Heartbeat.lastBeatSuccessful) " +
-                "dmg=\(Mounter.dmgMounted) " +
+                "dmg=\(Mounter.isReady()) " +
                 "started=\(Muxer.started) " +
                 "ready=\(Muxer.usbmuxdReady)"
             )

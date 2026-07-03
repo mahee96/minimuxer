@@ -12,6 +12,7 @@ import ZIPFoundation
 
 public protocol MounterProvider: AnyObject {
     var dmgMounted:Bool { get set }
+    func isReady() -> Bool
     func startAutoMounter(docsPath: String) async;
 }
 
@@ -34,7 +35,9 @@ public class Mounter {
         await getProvider().startAutoMounter(docsPath: docsPath)
     }
 
-
+    public static func isReady() -> Bool {
+        getProvider().isReady()
+    }
 
     public static var dmgMounted: Bool {
         get { getProvider().dmgMounted }
@@ -44,7 +47,27 @@ public class Mounter {
 
 public class LockDownMounter: MounterProvider {
     public var dmgMounted = false
+    private var lastErrorDescription: String? = nil {
+        didSet {
+            if lastErrorDescription != oldValue {
+                hasPrintedCurrentError = false
+            }
+        }
+    }
+    private var hasPrintedCurrentError = false
     private let state = MutableState()
+
+    public func isReady() -> Bool {
+        if dmgMounted {
+            hasPrintedCurrentError = false
+            return true
+        }
+        if let error = lastErrorDescription, !hasPrintedCurrentError {
+            debugLog("[minimuxer] Last mounter error: \(error)")
+            hasPrintedCurrentError = true
+        }
+        return false
+    }
 
     public func startAutoMounter(docsPath: String) async {
         guard await state.tryStart() else {
@@ -82,20 +105,29 @@ public class LockDownMounter: MounterProvider {
                 let device = try Device.getFirstDevice()
                 let lockdown: RustLockdown
                 switch RustLockdown.connect(device: device.internalInstance, label: "minimuxer") {
-                    case .success(let ld): lockdown = ld
+                    case .success(let ld): 
+                        lockdown = ld
+                        self.lastErrorDescription = nil
                     case .error(let err):
                           if err.contains("InvalidConf") {
                               debugLog("[minimuxer] mounter-task: ERROR: Invalid pairing file — the device rejected the SSL handshake. Please redo-pairing for your device.")
                               debugLog("[minimuxer] mounter-task: exiting due to invalid pairing")
                               await Minimuxer.checkAndNotify(.failed(.mounter, MinimuxerError.PairingFile))
                               return
-                      } else {
-                        debugLog("[minimuxer] mount-task: WARN: Could not connect to lockdown for mounter: \(err)")
-                    }
-                    continue
+                       } else {
+                         if err != self.lastErrorDescription {
+                             debugLog("[minimuxer] mount-task: WARN: Could not connect to lockdown for mounter: \(err)")
+                             self.lastErrorDescription = err
+                         }
+                     }
+                     continue
                 }
                 guard let versionStr = lockdown.getValue(key: "ProductVersion") else {
-                    debugLog("[minimuxer] mount-task: WARN: Could not get device version for mounter")
+                    let warnMsg = "Could not get device version for mounter"
+                    if warnMsg != self.lastErrorDescription {
+                        debugLog("[minimuxer] mount-task: WARN: \(warnMsg)")
+                        self.lastErrorDescription = warnMsg
+                    }
                     continue
                 }
 
@@ -105,15 +137,24 @@ public class LockDownMounter: MounterProvider {
                 } else {
                     try await self.handlePost17Mount(dmgDocsPath: dmgDocsPath)
                 }
+                self.lastErrorDescription = nil
             } catch let error as MinimuxerError {
                 if error == .NoDevice {
                     continue
                 }
-                debugLog("[minimuxer] mount-task: ERROR: Mount failed with .NoDevice error: \(error)")
+                let errorDescription = "\(error)"
+                if errorDescription != self.lastErrorDescription {
+                    debugLog("[minimuxer] mount-task: ERROR: Mount failed with .NoDevice error: \(errorDescription)")
+                    self.lastErrorDescription = errorDescription
+                }
                 await Minimuxer.checkAndNotify(.failed(.mounter, error))
                 return
             } catch {
-                debugLog("[minimuxer] mount-task: ERROR: Mount failed with unknown error: \(error)")
+                let errorDescription = "\(error)"
+                if errorDescription != self.lastErrorDescription {
+                    debugLog("[minimuxer] mount-task: ERROR: Mount failed with unknown error: \(errorDescription)")
+                    self.lastErrorDescription = errorDescription
+                }
                 await Minimuxer.checkAndNotify(.failed(.mounter, error))
                 return
             }
@@ -279,7 +320,27 @@ public class LockDownMounter: MounterProvider {
 
 public class RPMounter: MounterProvider {
     public var dmgMounted: Bool = false
+    private var lastErrorDescription: String? = nil {
+        didSet {
+            if lastErrorDescription != oldValue {
+                hasPrintedCurrentError = false
+            }
+        }
+    }
+    private var hasPrintedCurrentError = false
     private let state = MutableState()
+
+    public func isReady() -> Bool {
+        if dmgMounted {
+            hasPrintedCurrentError = false
+            return true
+        }
+        if let error = lastErrorDescription, !hasPrintedCurrentError {
+            debugLog("[minimuxer] Last mounter error: \(error)")
+            hasPrintedCurrentError = true
+        }
+        return false
+    }
 
     public func startAutoMounter(docsPath: String) async {
         guard !dmgMounted, await state.tryStart() else {
@@ -315,8 +376,13 @@ public class RPMounter: MounterProvider {
                     try RustIdevice.mountPersonalizedDDI(image: imageData, trustcache: trustcacheData, manifest: manifestData)
                     verboseLog("[minimuxer] DDI mounted successfully")
                     self.dmgMounted = true
+                    self.lastErrorDescription = nil
                 } catch {
-                    verboseLog("[minimuxer] ERROR: Failed to mount DDI: \(error)")
+                    let errorDescription = "\(error)"
+                    if errorDescription != self.lastErrorDescription {
+                        verboseLog("[minimuxer] ERROR: Failed to mount DDI: \(errorDescription)")
+                        self.lastErrorDescription = errorDescription
+                    }
                 }
             }
         } catch {

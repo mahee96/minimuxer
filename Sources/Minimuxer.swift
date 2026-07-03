@@ -79,15 +79,17 @@ public struct Minimuxer {
         let deviceConnection = testDeviceConnection(ifaddr: deviceIP)
         // check if rrpairing first
         if Muxer.isrppairing {
-            verboseLog(
-                "minimuxer not ready: " +
-                "conn=\(deviceConnection) " +
-                "hb=\(Heartbeat.lastBeatSuccessful) " +
-                "dmg=\(Mounter.isReady()) " +
-                "started=\(Muxer.started) " +
-                "ready=\(Muxer.usbmuxdReady)"
-            )
-            return deviceConnection ? .success(true) : .failure(MinimuxerError.connectionError)
+            guard deviceConnection, Mounter.isReady(), Muxer.started, Muxer.usbmuxdReady else {
+                verboseLog(
+                    "minimuxer not ready: " +
+                    "conn=\(deviceConnection) " +
+                    "dmg=\(Mounter.isReady()) " +
+                    "started=\(Muxer.started) " +
+                    "ready=\(Muxer.usbmuxdReady)"
+                )
+                return .failure(MinimuxerError.connectionError)
+            }
+            return .success(true)
         }
         
         // continue with lockdown validation

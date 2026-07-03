@@ -35,6 +35,7 @@ public class Heartbeat {
     }
 
     private static let state = MutableState()
+    private static var lastErrorDescription: String?
 
     public static var lastBeatSuccessful = false
 
@@ -63,6 +64,17 @@ public class Heartbeat {
         verboseLog("[minimuxer] Heartbeat stop requested")
     }
 
+    private static func logIfNeeded(_ message: String, isVerbose: Bool = false) {
+        if message != lastErrorDescription {
+            if isVerbose {
+                verboseLog("[minimuxer] heartbeat-task: \(message)")
+            } else {
+                debugLog("[minimuxer] heartbeat-task: \(message)")
+            }
+            lastErrorDescription = message
+        }
+    }
+
     private static func heartbeatLoop() async {
         while !Muxer.usbmuxdReady {
             try? await Task.sleep(nanoseconds: 1_000_000_000)
@@ -77,7 +89,7 @@ public class Heartbeat {
             do {
                 deviceIP = try DeviceEndpoint.shared.ip()
             } catch {
-                verboseLog("[minimuxer] heartbeat-task: deviceIP unavailable")
+                logIfNeeded("deviceIP unavailable", isVerbose: true)
                 lastBeatSuccessful = false
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
                 continue
@@ -85,18 +97,17 @@ public class Heartbeat {
             
             // verify tunnel/device reachability first
             if !Minimuxer.testDeviceConnection(ifaddr: deviceIP) {
-                verboseLog("[minimuxer] heartbeat-task: device IP not reachable, waiting...")
+                logIfNeeded("device IP not reachable, waiting...", isVerbose: true)
                 lastBeatSuccessful = false
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
                 continue
             }
-            verboseLog("[minimuxer] heartbeat-task: device IP reachable at: \(deviceIP)")
-
+            
             let device: Device
             do {
                 device = try Device.getFirstDevice()
             } catch {
-                debugLog("[minimuxer] heartbeat-task: WARN: Could not query device from usbmuxd for heartbeat")
+                logIfNeeded("WARN: Could not query device from usbmuxd for heartbeat: \(error)")
                 lastBeatSuccessful = false
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
                 continue
@@ -114,7 +125,7 @@ public class Heartbeat {
                         await state.stop()
                         return
                     } else {
-                        debugLog("[minimuxer] heartbeat-task: WARN: Could not connect to lockdown for heartbeat: \(err)")
+                        logIfNeeded("WARN: Could not connect to lockdown for heartbeat: \(err)")
                     }
                     lastBeatSuccessful = false
                     try? await Task.sleep(nanoseconds: 1_000_000_000)
@@ -125,16 +136,20 @@ public class Heartbeat {
             switch RustHeartbeat.connect(device: device.internalInstance, label: "minimuxer") {
                 case .success(let hb): heartbeat = hb
                 case .error(let err):
-                    debugLog("[minimuxer] heartbeat-task: ERROR: Failed to create heartbeat client: \(err)")
+                    logIfNeeded("ERROR: Failed to create heartbeat client: \(err)")
                     lastBeatSuccessful = false
                     try? await Task.sleep(nanoseconds: 1_000_000_000)
                     continue
             }
 
+            // reset lastErrorDescription if we get this far (i.e. successfully connected to heartbeat)
+            lastErrorDescription = nil
+            verboseLog("[minimuxer] heartbeat-task: device IP reachable at: \(deviceIP)")
+
             // Inner loop: keep receiving and sending heartbeats
             while await state.running {
                 guard let plist = heartbeat.receive(timeoutMs: MuxerConstants.heartbeatTimeoutMs) else {
-                    debugLog("[minimuxer] heartbeat-task: ERROR: Heartbeat recv failed")
+                    logIfNeeded("ERROR: Heartbeat recv failed")
                     lastBeatSuccessful = false
                     break
                 }
@@ -142,8 +157,9 @@ public class Heartbeat {
                 if heartbeat.send(plistXml: plist) {
                     lastBeatSuccessful = true
                     await Minimuxer.checkAndNotify(.ready(.heartbeat))
+                    lastErrorDescription = nil
                 } else {
-                    debugLog("[minimuxer] heartbeat-task: ERROR: Heartbeat send failed")
+                    logIfNeeded("ERROR: Heartbeat send failed")
                     lastBeatSuccessful = false
                     break
                 }

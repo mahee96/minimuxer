@@ -89,6 +89,17 @@ public class LockDownMounter: MounterProvider {
         }
     }
 
+    private func logIfNeeded(_ message: String, prefix: String, isVerbose: Bool = false) {
+        if message != lastErrorDescription {
+            if isVerbose {
+                verboseLog("[minimuxer] \(prefix)\(message)")
+            } else {
+                debugLog("[minimuxer] \(prefix)\(message)")
+            }
+            lastErrorDescription = message
+        }
+    }
+
     private func mountLoop(dmgDocsPath: String) async {
         while !Muxer.usbmuxdReady {
             try? await Task.sleep(nanoseconds: 1_000_000_000)
@@ -115,19 +126,12 @@ public class LockDownMounter: MounterProvider {
                               await Minimuxer.checkAndNotify(.failed(.mounter, MinimuxerError.PairingFile))
                               return
                        } else {
-                         if err != self.lastErrorDescription {
-                             debugLog("[minimuxer] mount-task: WARN: Could not connect to lockdown for mounter: \(err)")
-                             self.lastErrorDescription = err
-                         }
+                         logIfNeeded(err, prefix: "mount-task: WARN: Could not connect to lockdown for mounter: ")
                      }
                      continue
                 }
                 guard let versionStr = lockdown.getValue(key: "ProductVersion") else {
-                    let warnMsg = "Could not get device version for mounter"
-                    if warnMsg != self.lastErrorDescription {
-                        debugLog("[minimuxer] mount-task: WARN: \(warnMsg)")
-                        self.lastErrorDescription = warnMsg
-                    }
+                    logIfNeeded("Could not get device version for mounter", prefix: "mount-task: WARN: ")
                     continue
                 }
 
@@ -142,19 +146,11 @@ public class LockDownMounter: MounterProvider {
                 if error == .NoDevice {
                     continue
                 }
-                let errorDescription = "\(error)"
-                if errorDescription != self.lastErrorDescription {
-                    debugLog("[minimuxer] mount-task: ERROR: Mount failed with .NoDevice error: \(errorDescription)")
-                    self.lastErrorDescription = errorDescription
-                }
+                logIfNeeded("\(error)", prefix: "mount-task: ERROR: Mount failed with .NoDevice error: ")
                 await Minimuxer.checkAndNotify(.failed(.mounter, error))
                 return
             } catch {
-                let errorDescription = "\(error)"
-                if errorDescription != self.lastErrorDescription {
-                    debugLog("[minimuxer] mount-task: ERROR: Mount failed with unknown error: \(errorDescription)")
-                    self.lastErrorDescription = errorDescription
-                }
+                logIfNeeded("\(error)", prefix: "mount-task: ERROR: Mount failed with unknown error: ")
                 await Minimuxer.checkAndNotify(.failed(.mounter, error))
                 return
             }
@@ -362,6 +358,17 @@ public class RPMounter: MounterProvider {
         }
     }
 
+    private func logIfNeeded(_ message: String, prefix: String = "ERROR: Failed to mount DDI: ", isVerbose: Bool = false) {
+        if message != lastErrorDescription {
+            if isVerbose {
+                verboseLog("[minimuxer] \(prefix)\(message)")
+            } else {
+                debugLog("[minimuxer] \(prefix)\(message)")
+            }
+            lastErrorDescription = message
+        }
+    }
+
     private func mountLoop(dmgDocsPath: String) async {
         do {
             try FileManager.default.createDirectory(atPath: dmgDocsPath, withIntermediateDirectories: true)
@@ -378,11 +385,7 @@ public class RPMounter: MounterProvider {
                     self.dmgMounted = true
                     self.lastErrorDescription = nil
                 } catch {
-                    let errorDescription = "\(error)"
-                    if errorDescription != self.lastErrorDescription {
-                        verboseLog("[minimuxer] ERROR: Failed to mount DDI: \(errorDescription)")
-                        self.lastErrorDescription = errorDescription
-                    }
+                    logIfNeeded("\(error)", isVerbose: true)
                 }
             }
         } catch {

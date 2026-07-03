@@ -277,6 +277,16 @@ unsafe fn opt_str(p: *const c_char, default: &str) -> String {
     }
 }
 
+use once_cell::sync::Lazy;
+use tokio::sync::Notify;
+
+static CANCEL_NOTIFY: Lazy<Notify> = Lazy::new(Notify::new);
+
+#[no_mangle]
+pub unsafe extern "C" fn wirelesspair_stop() {
+    CANCEL_NOTIFY.notify_waiters();
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn wirelesspair_run_host(
     bind_addr: *const c_char,
@@ -356,24 +366,32 @@ async fn run_wirelesspair(
 
     emit_ready(&cbs, &service_identifier, port, &host_info);
 
-    let (stream, _peer) = listener
-        .accept()
-        .await
-        .map_err(|e| format!("accept failed: {e}"))?;
+    let (stream, _peer) = tokio::select! {
+        res = listener.accept() => {
+            res.map_err(|e| format!("accept failed: {e}"))?
+        }
+        _ = CANCEL_NOTIFY.notified() => {
+            return Err("cancelled by request".to_string());
+        }
+    };
 
     let socket = RpPairingSocket::new_device(stream);
     let mut host = PairableHost::new(socket, host_info);
 
-    let peer = host
-        .accept(&mut pairing_file, move |pin| async move {
+    let peer = tokio::select! {
+        res = host.accept(&mut pairing_file, move |pin| async move {
             if let Some(cb) = cbs.pin {
                 if let Ok(c) = CString::new(pin) {
                     cb(c.as_ptr(), cbs.ctx);
                 }
             }
-        })
-        .await
-        .map_err(|e| format!("pairing failed: {e}"))?;
+        }) => {
+            res.map_err(|e| format!("pairing failed: {e}"))?
+        }
+        _ = CANCEL_NOTIFY.notified() => {
+            return Err("cancelled by request".to_string());
+        }
+    };
 
     pairing_file
         .write_to_file(&out_path)

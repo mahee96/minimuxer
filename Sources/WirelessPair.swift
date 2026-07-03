@@ -49,6 +49,9 @@ internal func _wirelesspair_run_host(
 @_silgen_name("wirelesspair_result_free")
 internal func _wirelesspair_result_free(_ r: UnsafeMutablePointer<WirelessPairResult>?)
 
+@_silgen_name("wirelesspair_stop")
+internal func _wirelesspair_stop()
+
 
 
 
@@ -140,6 +143,7 @@ public final class WirelessPair {
     public func stop() {
         stopAdvertising()
         isPairing = false
+        _wirelesspair_stop()
     }
     
     fileprivate func startAdvertising(serviceID: String, port: Int, txt: [String: Data]) {

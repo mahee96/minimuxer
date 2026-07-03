@@ -385,7 +385,15 @@ public class RPMounter: MounterProvider {
                     self.dmgMounted = true
                     self.lastErrorDescription = nil
                 } catch {
-                    logIfNeeded("\(error)", isVerbose: true)
+                    let errStr = "\(error)"
+                    logIfNeeded(errStr, isVerbose: true)
+
+                    if errStr.contains("PairVerifyFailed") || errStr.contains("Connection reset by peer") || errStr.contains("ConnectionReset") {
+                        debugLog("[minimuxer] mounter-task: ERROR: Invalid pairing file — the device rejected the remote pairing handshake. Please redo-pairing for your device.")
+                        debugLog("[minimuxer] mounter-task: exiting due to invalid pairing")
+                        await Minimuxer.checkAndNotify(.failed(.mounter, MinimuxerError.PairingFile))
+                        return
+                    }
                 }
             }
         } catch {

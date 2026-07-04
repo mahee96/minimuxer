@@ -82,13 +82,12 @@ public class Muxer {
 
         try reinitializePairingData(pairingFile: pairingFile)
 
-        started = true
-
         if !isrppairing {
             Task.detached(priority: .userInitiated) { listenLoop() }
-            // Heartbeat is started/stopped by NetworkObserver when VPN peer changes
-            // Heartbeat.startBeat()
+            Heartbeat.startBeat()
         }
+        started = true
+
         verboseLog("[minimuxer] minimuxer has started!")
     }
 

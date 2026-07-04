@@ -1,5 +1,5 @@
 //
-//  Mounter.swift
+//  MounterService.swift
 //  Minimuxer
 //
 //  Original Rust Implementation by @jkcoxson
@@ -10,43 +10,43 @@ import Foundation
 import RustBridge
 import ZIPFoundation
 
-public protocol MounterProvider: AnyObject {
+internal protocol MounterServiceProvider: AnyObject {
     var dmgMounted:Bool { get set }
     func isReady() -> Bool
     func startAutoMounter(docsPath: String) async;
 }
 
-public class Mounter {
-    public static var provider: MounterProvider?;
+final internal class MounterService {
+    static var provider: MounterServiceProvider?;
 
-    private static func getProvider() -> any MounterProvider {
+    private static func getProvider() -> any MounterServiceProvider {
         if let provider {
             return provider
         } else {
-            if Muxer.isrppairing {
-                provider = RPMounter()
+            if MuxerService.isrppairing {
+                provider = RPMounterService()
             } else {
-                provider = LockDownMounter()
+                provider = LockDownMounterService()
             }
         }
         return provider!
     }
-    public static func startAutoMounter(docsPath: String) async {
+    static func startAutoMounter(docsPath: String) async {
         await getProvider().startAutoMounter(docsPath: docsPath)
     }
 
-    public static func isReady() -> Bool {
+    static func isReady() -> Bool {
         getProvider().isReady()
     }
 
-    public static var dmgMounted: Bool {
+    static var dmgMounted: Bool {
         get { getProvider().dmgMounted }
         set { getProvider().dmgMounted = newValue }
     }
 }
 
-public class LockDownMounter: MounterProvider {
-    public var dmgMounted = false
+final internal class LockDownMounterService: MounterServiceProvider {
+    var dmgMounted = false
     private var lastErrorDescription: String? = nil {
         didSet {
             if lastErrorDescription != oldValue {
@@ -57,7 +57,7 @@ public class LockDownMounter: MounterProvider {
     private var hasPrintedCurrentError = false
     private let state = MutableState()
 
-    public func isReady() -> Bool {
+    func isReady() -> Bool {
         if dmgMounted {
             hasPrintedCurrentError = false
             return true
@@ -69,7 +69,7 @@ public class LockDownMounter: MounterProvider {
         return false
     }
 
-    public func startAutoMounter(docsPath: String) async {
+    func startAutoMounter(docsPath: String) async {
         guard await state.tryStart() else {
             return
         }
@@ -101,20 +101,20 @@ public class LockDownMounter: MounterProvider {
     }
 
     private func mountLoop(dmgDocsPath: String) async {
-        while !Muxer.usbmuxdReady {
+        while !MuxerService.usbmuxdReady {
             logIfNeeded("Waiting for usbmuxd to be ready...", prefix: "mount-task: ", isVerbose: true)
-            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            try? await Task.sleep(nanoseconds: MinimuxerConstants.mounterSleepNs)
         }
         verboseLog("[minimuxer] mount-task: usbmuxd is ready")
 
         try? FileManager.default.createDirectory(atPath: dmgDocsPath, withIntermediateDirectories: true)
 
         while !self.dmgMounted {
-            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            try? await Task.sleep(nanoseconds: MinimuxerConstants.mounterSleepNs)
             do {
-                let device = try Device.getFirstDevice()
+                let device = try DeviceService.getFirstDevice()
                 let lockdown: RustLockdown
-                switch RustLockdown.connect(device: device.internalInstance, label: "minimuxer") {
+                switch RustLockdown.connect(device: device.instance, label: "minimuxer") {
                     case .success(let ld): 
                         lockdown = ld
                         self.lastErrorDescription = nil
@@ -122,7 +122,7 @@ public class LockDownMounter: MounterProvider {
                           if err.contains("InvalidConf") {
                               debugLog("[minimuxer] mounter-task: ERROR: Invalid pairing file — the device rejected the SSL handshake. Please redo-pairing for your device.")
                               debugLog("[minimuxer] mounter-task: exiting due to invalid pairing")
-                              await Minimuxer.checkAndNotify(.failed(.mounter, MinimuxerError.PairingFile))
+                              await Minimuxer.shared.checkAndNotify(.failed(.mounter, MinimuxerError.PairingFile))
                               return
                        } else {
                          logIfNeeded(err, prefix: "mount-task: WARN: Could not connect to lockdown for mounter: ")
@@ -146,19 +146,19 @@ public class LockDownMounter: MounterProvider {
                     continue
                 }
                 logIfNeeded("\(error)", prefix: "mount-task: ERROR: Mount failed with .NoDevice error: ")
-                await Minimuxer.checkAndNotify(.failed(.mounter, error))
+                await Minimuxer.shared.checkAndNotify(.failed(.mounter, error))
                 return
             } catch {
                 logIfNeeded("\(error)", prefix: "mount-task: ERROR: Mount failed with unknown error: ")
-                await Minimuxer.checkAndNotify(.failed(.mounter, error))
+                await Minimuxer.shared.checkAndNotify(.failed(.mounter, error))
                 return
             }
         }
     }
 
-    private func handlePre17Mount(device: Device, iosVersion: String, dmgDocsPath: String) async throws {
+    private func handlePre17Mount(device: DeviceService, iosVersion: String, dmgDocsPath: String) async throws {
         verboseLog("[minimuxer] Starting image mounter (pre-17)")
-        guard let mounter = RustMounter.connect(device: device.internalInstance, label: "sidestore-image-reeeee") else {
+        guard let mounter = RustMounter.connect(device: device.instance, label: "sidestore-image-reeeee") else {
             debugLog("[minimuxer] ERROR: Unable to start mobile image mounter")
             throw MinimuxerError.Mount
         }
@@ -169,7 +169,7 @@ public class LockDownMounter: MounterProvider {
            let sigArray = plist["ImageSignature"] as? [Any], !sigArray.isEmpty {
              verboseLog("[minimuxer] Developer disk image already mounted")
              dmgMounted = true
-             await Minimuxer.checkAndNotify(.ready(.mounter))
+             await Minimuxer.shared.checkAndNotify(.ready(.mounter))
              return
         }
 
@@ -182,7 +182,7 @@ public class LockDownMounter: MounterProvider {
         if !FileManager.default.fileExists(atPath: dmgPath) {
             verboseLog("[minimuxer] Downloading iOS \(iosVersion) DMG...")
 //             try downloadPre17Image(iosVersion: iosVersion, dmgDocsPath: dmgDocsPath)
-            try LockDownMounter.downloadPre17Image(iosVersion: iosVersion, dmgDocsPath: dmgDocsPath)
+            try LockDownMounterService.downloadPre17Image(iosVersion: iosVersion, dmgDocsPath: dmgDocsPath)
         }
 
         let dmgSize = (try? Data(contentsOf: URL(fileURLWithPath: dmgPath)).count) ?? -1
@@ -202,11 +202,11 @@ public class LockDownMounter: MounterProvider {
         }
          verboseLog("[minimuxer] Successfully mounted the image")
          dmgMounted = true
-         await Minimuxer.checkAndNotify(.ready(.mounter))
+         await Minimuxer.shared.checkAndNotify(.ready(.mounter))
     }
 
     private func handlePost17Mount(dmgDocsPath: String) async throws {
-        let (imageData, trustcacheData, manifestData) = try LockDownMounter.loadPost17Image(dmgDocsPath: dmgDocsPath)
+        let (imageData, trustcacheData, manifestData) = try LockDownMounterService.loadPost17Image(dmgDocsPath: dmgDocsPath)
 
          verboseLog(
              "[minimuxer] Mounting DDI " +
@@ -219,13 +219,13 @@ public class LockDownMounter: MounterProvider {
             image: imageData,
             trustcache: trustcacheData,
             manifest: manifestData,
-            muxerAddr: MuxerConstants.usbmuxdSocket,
+            muxerAddr: MinimuxerConstants.usbmuxdSocket,
             deviceIp: try DeviceEndpoint.shared.ip()
         )
         if result == 0 {
             verboseLog("[minimuxer] DDI mounted successfully")
             dmgMounted = true
-            await Minimuxer.checkAndNotify(.ready(.mounter))
+            await Minimuxer.shared.checkAndNotify(.ready(.mounter))
         } else {
             verboseLog("[minimuxer] ERROR: Failed to mount DDI (code \(result))")
             switch result {
@@ -242,9 +242,9 @@ public class LockDownMounter: MounterProvider {
     static func loadPost17Image(dmgDocsPath: String) throws -> (Data, Data, Data){
         let dir = URL(fileURLWithPath: dmgDocsPath)
         let tasks: [(String, URL)] = [
-            (MuxerConstants.ddiImageURL, dir.appendingPathComponent("Image.dmg")),
-            (MuxerConstants.ddiTrustcacheURL, dir.appendingPathComponent("Image.dmg.trustcache")),
-            (MuxerConstants.ddiManifestURL, dir.appendingPathComponent("BuildManifest.plist"))
+            (MinimuxerConstants.ddiImageURL, dir.appendingPathComponent("Image.dmg")),
+            (MinimuxerConstants.ddiTrustcacheURL, dir.appendingPathComponent("Image.dmg.trustcache")),
+            (MinimuxerConstants.ddiManifestURL, dir.appendingPathComponent("BuildManifest.plist"))
         ]
 
         for (urlStr, path) in tasks {
@@ -276,7 +276,7 @@ public class LockDownMounter: MounterProvider {
     }
 
     private static func downloadPre17Image(iosVersion: String, dmgDocsPath: String) throws {
-        guard let url = URL(string: MuxerConstants.pre17VersionsURL),
+        guard let url = URL(string: MinimuxerConstants.pre17VersionsURL),
               let data = try? Data(contentsOf: url),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: String],
               let dmgUrlStr = json[iosVersion],
@@ -313,8 +313,8 @@ public class LockDownMounter: MounterProvider {
     }
 }
 
-public class RPMounter: MounterProvider {
-    public var dmgMounted: Bool = false
+final internal class RPMounterService: MounterServiceProvider {
+    var dmgMounted: Bool = false
     private var lastErrorDescription: String? = nil {
         didSet {
             if lastErrorDescription != oldValue {
@@ -325,7 +325,7 @@ public class RPMounter: MounterProvider {
     private var hasPrintedCurrentError = false
     private let state = MutableState()
 
-    public func isReady() -> Bool {
+    func isReady() -> Bool {
         if dmgMounted {
             hasPrintedCurrentError = false
             return true
@@ -337,7 +337,7 @@ public class RPMounter: MounterProvider {
         return false
     }
 
-    public func startAutoMounter(docsPath: String) async {
+    func startAutoMounter(docsPath: String) async {
         guard !dmgMounted, await state.tryStart() else {
             return
         }
@@ -371,15 +371,17 @@ public class RPMounter: MounterProvider {
     private func mountLoop(dmgDocsPath: String) async {
         do {
             try FileManager.default.createDirectory(atPath: dmgDocsPath, withIntermediateDirectories: true)
-            let (imageData, trustcacheData, manifestData) = try LockDownMounter.loadPost17Image(dmgDocsPath: dmgDocsPath)
+            let (imageData, trustcacheData, manifestData) = try LockDownMounterService.loadPost17Image(dmgDocsPath: dmgDocsPath)
 
             while !self.dmgMounted {
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                try? await Task.sleep(nanoseconds: MinimuxerConstants.mounterSleepNs)
                 guard (try? DeviceEndpoint.shared.ip()) != nil else {
                     continue
                 }
                 do {
-                    try RustIdevice.mountPersonalizedDDI(image: imageData, trustcache: trustcacheData, manifest: manifestData)
+                    try adaptingBridgeError {
+                        try RustIdevice.mountPersonalizedDDI(image: imageData, trustcache: trustcacheData, manifest: manifestData)
+                    }
                     verboseLog("[minimuxer] DDI mounted successfully")
                     self.dmgMounted = true
                     self.lastErrorDescription = nil
@@ -387,10 +389,10 @@ public class RPMounter: MounterProvider {
                     let errStr = "\(error)"
                     logIfNeeded(errStr, isVerbose: true)
 
-                    if errStr.contains("PairVerifyFailed") || errStr.contains("Connection reset by peer") || errStr.contains("ConnectionReset") {
+                    if (error as? MinimuxerError) == .PairingFile || errStr.contains("PairVerifyFailed") || errStr.contains("Connection reset by peer") || errStr.contains("ConnectionReset") {
                         debugLog("[minimuxer] mounter-task: ERROR: Invalid pairing file — the device rejected the remote pairing handshake. Please redo-pairing for your device.")
                         debugLog("[minimuxer] mounter-task: exiting due to invalid pairing")
-                        await Minimuxer.checkAndNotify(.failed(.mounter, MinimuxerError.PairingFile))
+                        await Minimuxer.shared.checkAndNotify(.failed(.mounter, MinimuxerError.PairingFile))
                         return
                     }
                 }

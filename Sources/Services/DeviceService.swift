@@ -1,5 +1,5 @@
 //
-//  Device.swift
+//  DeviceService.swift
 //  Minimuxer
 //
 //  Original Rust Implementation by @jkcoxson
@@ -9,18 +9,19 @@
 import Foundation
 import RustBridge
 
-public final class Device {
+internal class DeviceService {
     private let rustDevice: RustDevice
+    internal var instance: RustDevice { rustDevice }
 
     init(rustDevice: RustDevice) { self.rustDevice = rustDevice }
 
-    public static func getFirstDevice() throws -> Device {
-        var remaining = MuxerConstants.deviceFetchTimeoutMs
-        let sleep = MuxerConstants.deviceFetchSleepMs
+    static func getFirstDevice() throws -> DeviceService {
+        var remaining = MinimuxerConstants.deviceFetchTimeoutMs
+        let sleep = MinimuxerConstants.deviceFetchSleepMs
 
         while remaining > 0 {
             if let rd = RustDevice.fetchFirst() {
-                return Device(rustDevice: rd)
+                return DeviceService(rustDevice: rd)
             }
             Thread.sleep(forTimeInterval: Double(sleep) / 1000.0)
             remaining = remaining >= UInt16(sleep) ? remaining - UInt16(sleep) : 0
@@ -29,6 +30,5 @@ public final class Device {
         throw MinimuxerError.NoDevice
     }
 
-    public func getUDID() -> String? { rustDevice.getUDID() }
-    internal var internalInstance: RustDevice { rustDevice }
+    func getUDID() -> String? { rustDevice.getUDID() }
 }

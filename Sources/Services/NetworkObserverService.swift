@@ -1,5 +1,5 @@
 //
-//  NetworkObserver.swift
+//  NetworkObserverService.swift
 //  Minimuxer
 //
 //  Original Rust Implementation by @jkcoxson
@@ -9,19 +9,17 @@
 import Network
 import Foundation
 
-public final class NetworkObserver {
-
-    public static let shared = NetworkObserver()   // keep alive
+final internal class NetworkObserverService: NetworkObserverAPI, @unchecked Sendable {
 
     private let monitor = NWPathMonitor()
     private let queue = DispatchQueue(label: "net.monitor")
 
-    private var started = false
     private let lock = NSLock()
+    private var started = false
 
     @discardableResult
-    public func start() -> Bool {
-        lock.withLock{
+    func start() -> Bool {
+        lock.withLock {
             guard !started else {
                 verboseLog("[minimuxer] [net] monitor already started")
                 return false
@@ -40,7 +38,7 @@ public final class NetworkObserver {
         }
     }
     
-    public func refreshEndpoint() {
+    func refreshEndpoint() {
         verboseLog("[minimuxer] [net] refreshing interfaces list and peers")
         IfaceScanner.shared.refresh()
 
@@ -51,37 +49,37 @@ public final class NetworkObserver {
             if let peer = info.peerIP {
                 verboseLog("[minimuxer] [net] update the device endpoint with discovered peer on the vpn interface")
                 DeviceEndpoint.shared.update(peer)
-                Muxer.notifyDeviceAttached(deviceIP: peer)
-                if Muxer.started && !Muxer.isrppairing {
+                MuxerService.notifyDeviceAttached(deviceIP: peer)
+                if MuxerService.started && !MuxerService.isrppairing {
                     Task { 
-                        await Heartbeat.start()
+                        await HeartbeatService.start()
                     }
                 }
             } else {
                 verboseLog("[minimuxer] [net] peer not available for \(info.name)")
                 DeviceEndpoint.shared.clear()
-                Muxer.notifyDeviceDetached()
-                if !Muxer.isrppairing {
+                MuxerService.notifyDeviceDetached()
+                if !MuxerService.isrppairing {
                     Task { 
-                        await Heartbeat.stop()
+                        await HeartbeatService.stop()
                     }
                 }
             }
         } else {
             verboseLog("[minimuxer] [net] no SideVPN endpoint detected")
             DeviceEndpoint.shared.clear()
-            Muxer.notifyDeviceDetached()
-            if !Muxer.isrppairing {
+            MuxerService.notifyDeviceDetached()
+            if !MuxerService.isrppairing {
                 Task {
-                    await Heartbeat.stop()
+                    await HeartbeatService.stop()
                 }
             }
         }
     }
     
     @discardableResult
-    public func stop() -> Bool {
-        lock.withLock{
+    func stop() -> Bool {
+        lock.withLock {
             if !started {
                 verboseLog("[minimuxer] [net] monitor already stopped")
                 return false

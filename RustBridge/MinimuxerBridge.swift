@@ -136,6 +136,50 @@ internal func _rust_bridge_heartbeat_send(_ client: UnsafeMutableRawPointer?, _ 
 @_silgen_name("rust_bridge_set_debug")
 internal func _rust_bridge_set_debug(_ level: Int32)
 
+// WirelessPair
+public typealias WirelessPairReadyCallback = @convention(c) (
+    _ ctx: UnsafeMutableRawPointer?,
+    _ serviceId: UnsafePointer<Int8>?,
+    _ port: UInt16,
+    _ txtKeys: UnsafePointer<UnsafePointer<Int8>?>?,
+    _ txtVals: UnsafePointer<UnsafePointer<Int8>?>?,
+    _ txtCount: Int
+) -> Void
+
+public typealias WirelessPairPinCallback = @convention(c) (
+    _ pin: UnsafePointer<Int8>?,
+    _ ctx: UnsafeMutableRawPointer?
+) -> Void
+
+public struct WirelessPairResult {
+    public var error: UnsafeMutablePointer<Int8>? = nil
+    public var device_name: UnsafeMutablePointer<Int8>? = nil
+    public var device_model: UnsafeMutablePointer<Int8>? = nil
+    public var device_udid: UnsafeMutablePointer<Int8>? = nil
+    public var pairing_file_path: UnsafeMutablePointer<Int8>? = nil
+    public var host_alt_irk_hex: UnsafeMutablePointer<Int8>? = nil
+    public init() {}
+}
+
+@_silgen_name("wirelesspair_run_host")
+public func _wirelesspair_run_host(
+    _ bindAddr: UnsafePointer<Int8>?,
+    _ port: UInt16,
+    _ name: UnsafePointer<Int8>?,
+    _ model: UnsafePointer<Int8>?,
+    _ outPath: UnsafePointer<Int8>?,
+    _ readyCb: WirelessPairReadyCallback?,
+    _ pinCb: WirelessPairPinCallback?,
+    _ ctx: UnsafeMutableRawPointer?,
+    _ out: UnsafeMutablePointer<WirelessPairResult>?
+) -> Int32
+
+@_silgen_name("wirelesspair_result_free")
+public func _wirelesspair_result_free(_ r: UnsafeMutablePointer<WirelessPairResult>?)
+
+@_silgen_name("wirelesspair_stop")
+public func _wirelesspair_stop()
+
 
 // MARK: - Swift Wrappers
 

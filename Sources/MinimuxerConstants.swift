@@ -1,14 +1,14 @@
 //
-//  MuxerConstants.swift
+//  MinimuxerConstants.swift
 //  Minimuxer
 //
-//  Original Rust Implementation by @jkcoxson
-//  Swift Port created by Magesh K on 02/03/26.
+//  Created by Magesh K on 4/7/26.
+//  Copyright © 2026 SideStore. All rights reserved.
 //
 
 import Foundation
 
-public enum MuxerConstants {
+public enum MinimuxerConstants {
     public static let lockdowndPort: UInt16 = 62078     // lockdown daemon port
     public static let rsdPort: UInt16 = 49152
 
@@ -27,4 +27,24 @@ public enum MuxerConstants {
     public static let ddiImageURL = "https://raw.githubusercontent.com/doronz88/DeveloperDiskImage/refs/heads/main/PersonalizedImages/Xcode_iOS_DDI_Personalized/Image.dmg"
     public static let ddiTrustcacheURL = "https://raw.githubusercontent.com/doronz88/DeveloperDiskImage/refs/heads/main/PersonalizedImages/Xcode_iOS_DDI_Personalized/Image.dmg.trustcache"
     public static let ddiManifestURL = "https://raw.githubusercontent.com/doronz88/DeveloperDiskImage/refs/heads/main/PersonalizedImages/Xcode_iOS_DDI_Personalized/BuildManifest.plist"
+
+    // WirelessPair Constants
+    static let defaultHostName = "SideStore"
+    static let defaultHostModel = "Mac17,7"
+    static let defaultBindIP = "0.0.0.0"
+    static let defaultBindPort: UInt16 = 0
+    static let defaultAdDomain = ""
+    static let remotepairingServiceType = "_remotepairing-pairable-host._tcp."
+
+    // MuxerService Constants
+    static let deviceAttach = "Attached"
+    static let deviceDetach = "Detached"
+
+    // Sleep / Threading timeouts
+    static let heartbeatSleepNs: UInt64 = 1_000_000_000
+    static let mounterSleepNs: UInt64 = 1_000_000_000
+
+    // Packet Configuration
+    static let maxPacketSize = 1024
+    static let packetHeaderLen = 16
 }

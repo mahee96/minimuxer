@@ -9,20 +9,21 @@
 import Foundation
 import RustBridge
 
-public protocol InstallProvider {
+internal protocol InstallProvider {
     func yeetAppAfc(bundleId: String, ipaBytes: Data) throws
     func installIpa(bundleId: String) throws
     func removeApp(bundleId: String) throws
 }
 
-public class Install {
-    public static var provider: InstallProvider?;
+final internal class Install {
+
+    static var provider: InstallProvider?;
     
     private static func getProvider() throws -> any InstallProvider {
         if let provider {
             return provider
         } else {
-            if Muxer.isrppairing {
+            if MuxerService.isrppairing {
                 provider = RPInstall()
             } else {
                 provider = LockDownInstall()
@@ -31,38 +32,38 @@ public class Install {
         return provider!
     }
 
-    public static func yeetAppAfc(bundleId: String, ipaBytes: Data) throws {
+    static func yeetAppAfc(bundleId: String, ipaBytes: Data) throws {
         try getProvider().yeetAppAfc(bundleId: bundleId, ipaBytes: ipaBytes)
     }
-    public static func installIpa(bundleId: String) throws {
+    static func installIpa(bundleId: String) throws {
         try getProvider().installIpa(bundleId: bundleId)
     }
-    public static func removeApp(bundleId: String) throws {
+    static func removeApp(bundleId: String) throws {
         try getProvider().removeApp(bundleId: bundleId)
     }
 }
 
-public class LockDownInstall: InstallProvider {
-    public func yeetAppAfc(bundleId: String, ipaBytes: Data) throws {
+final internal class LockDownInstall: InstallProvider {
+    func yeetAppAfc(bundleId: String, ipaBytes: Data) throws {
         verboseLog("[minimuxer] Yeeting IPA for bundle ID: \(bundleId)")
 
         let deviceIP = try DeviceEndpoint.shared.ip()
         verboseLog("[minimuxer] AFC: verifying device connectivity at \(deviceIP)...")
-        guard Minimuxer.testDeviceConnection(ifaddr: deviceIP) else {
-            debugLog("[minimuxer] ERROR: Device not reachable before AFC start")
+        guard Minimuxer.shared.testDeviceConnection(ifaddr: deviceIP) else {
+            debugLog("[minimuxer] ERROR: DeviceService not reachable before AFC start")
             throw MinimuxerError.connectionError
         }
         verboseLog("[minimuxer] AFC: device reachable, fetching device handle")
 
-        let device = try Device.getFirstDevice()
+        let device = try DeviceService.getFirstDevice()
         verboseLog("[minimuxer] AFC: creating AFC client...")
-        guard let afc = RustAfc.connect(device: device.internalInstance, label: "minimuxer") else {
+        guard let afc = RustAfc.connect(device: device.instance, label: "minimuxer") else {
             debugLog("[minimuxer] ERROR: Could not start AFC service")
             throw MinimuxerError.CreateAfc
         }
         verboseLog("[minimuxer] AFC: client created successfully")
 
-        let pkg = MuxerConstants.pkgPath
+        let pkg = MinimuxerConstants.pkgPath
         let appDir = "./\(pkg)/\(bundleId)"
         mkdirP(appDir, afc: afc)
 
@@ -81,14 +82,14 @@ public class LockDownInstall: InstallProvider {
         }
     }
 
-    public func installIpa(bundleId: String) throws {
+    func installIpa(bundleId: String) throws {
         verboseLog("[minimuxer] Installing app for bundle ID: \(bundleId)")
-        let device = try Device.getFirstDevice()
-        guard let inst = RustInstProxy.connect(device: device.internalInstance, label: "ideviceinstaller") else {
+        let device = try DeviceService.getFirstDevice()
+        guard let inst = RustInstProxy.connect(device: device.instance, label: "ideviceinstaller") else {
             debugLog("[minimuxer] ERROR: Unable to start instproxy")
             throw MinimuxerError.CreateInstproxy
         }
-        let path = "./\(MuxerConstants.pkgPath)/\(bundleId)/app.ipa"
+        let path = "./\(MinimuxerConstants.pkgPath)/\(bundleId)/app.ipa"
         verboseLog("[minimuxer] Installing...")
         if !inst.install(path: path) {
             debugLog("[minimuxer] ERROR: Install failed")
@@ -97,10 +98,10 @@ public class LockDownInstall: InstallProvider {
         verboseLog("[minimuxer] Install done!")
     }
 
-    public func removeApp(bundleId: String) throws {
+    func removeApp(bundleId: String) throws {
         verboseLog("[minimuxer] Removing app: \(bundleId)")
-        let device = try Device.getFirstDevice()
-        guard let inst = RustInstProxy.connect(device: device.internalInstance, label: "minimuxer-remove-app") else {
+        let device = try DeviceService.getFirstDevice()
+        guard let inst = RustInstProxy.connect(device: device.instance, label: "minimuxer-remove-app") else {
             debugLog("[minimuxer] ERROR: Unable to start instproxy")
             throw MinimuxerError.CreateInstproxy
         }
@@ -113,14 +114,20 @@ public class LockDownInstall: InstallProvider {
     }
 }
 
-public class RPInstall: InstallProvider {
-    public func yeetAppAfc(bundleId: String, ipaBytes: Data) throws {
-        try RustIdevice.yeetAppAfc(bundleId: bundleId, ipaBytes: ipaBytes)
+final internal class RPInstall: InstallProvider {
+    func yeetAppAfc(bundleId: String, ipaBytes: Data) throws {
+        try adaptingBridgeError {
+            try RustIdevice.yeetAppAfc(bundleId: bundleId, ipaBytes: ipaBytes)
+        }
     }
-    public func installIpa(bundleId: String) throws {
-        try RustIdevice.installIpa(bundleId: bundleId)
+    func installIpa(bundleId: String) throws {
+        try adaptingBridgeError {
+            try RustIdevice.installIpa(bundleId: bundleId)
+        }
     }
-    public func removeApp(bundleId: String) throws {
-        try RustIdevice.removeApp(bundleId: bundleId)
+    func removeApp(bundleId: String) throws {
+        try adaptingBridgeError {
+            try RustIdevice.removeApp(bundleId: bundleId)
+        }
     }
 }

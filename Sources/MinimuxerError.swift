@@ -1,31 +1,38 @@
 //
-//  MinimuxerError.swift
+//  MinimuxerErrors.swift
 //  Minimuxer
 //
-//  Original Rust Implementation by @jkcoxson
-//  Swift Port created by Magesh K on 02/03/26.
+//  Created by Magesh K on 4/7/26.
+//  Copyright © 2026 SideStore. All rights reserved.
 //
 
 import Foundation
+import RustBridge
 
-public enum MinimuxerError: Error, Equatable {
+public struct MinimuxerServiceError: Error, CustomStringConvertible {
+    public let component: MinimuxerComponent
+    public let error: Error
+    
+    public var description: String {
+        return "[\(component.rawValue)] \(error.localizedDescription)"
+    }
+}
+
+public enum MinimuxerError: Error, Equatable, CustomStringConvertible, LocalizedError {
     case NoDevice
     case NoConnection
     case NoVPN
     case PairingFile
     case RestartAlreadyInProgressError
 
+
     public static var connectionError: MinimuxerError {
-        #if targetEnvironment(simulator)
-        return .NoVPN
-        #else
-        let net = NetworkObserver.shared
-        if net.isWifiSatisfied || net.isWiredSatisfied || net.isBridgeSatisfied {
-            return .NoVPN
-        } else {
+        let network = Minimuxer.network
+        if !network.isWifiSatisfied && !network.isWiredSatisfied && !network.isBridgeSatisfied {
             return .NoConnection
+        } else {
+            return .NoVPN
         }
-        #endif
     }
 
     case CreateDebug
@@ -66,9 +73,8 @@ public enum MinimuxerError: Error, Equatable {
     case ImageLookup
     case ImageRead
     case Mount
-}
+    case bridgeError(RustBridgeError)
 
-extension MinimuxerError: CustomStringConvertible {
     public var description: String {
         switch self {
         case .NoDevice: return "NoDevice"
@@ -110,6 +116,11 @@ extension MinimuxerError: CustomStringConvertible {
         case .ImageLookup: return "ImageLookup"
         case .ImageRead: return "ImageRead"
         case .Mount: return "Mount"
+        case .bridgeError(let err): return "bridgeError(\(err))"
         }
+    }
+
+    public var errorDescription: String? {
+        return self.description
     }
 }

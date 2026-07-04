@@ -9,19 +9,19 @@
 import Foundation
 import RustBridge
 
-public protocol JITProvider {
+internal protocol JITProvider {
     func debugApp(appId: String) throws;
     func attachDebugger(pid: UInt32) throws;
 }
 
-public class JIT {
+final internal class JIT {
     private static var provider: JITProvider?;
     
     private static func getProvider() -> any JITProvider {
         if let provider {
             return provider
         } else {
-            if Muxer.isrppairing {
+            if MuxerService.isrppairing {
                 provider = RPJit()
             } else {
                 provider = LockDownJIT()
@@ -31,22 +31,22 @@ public class JIT {
         return provider!
     }
 
-    public static func debugApp(appId: String) throws {
+    static func debugApp(appId: String) throws {
         try getProvider().debugApp(appId: appId)
     }
     
-    public static func attachDebugger(pid: UInt32) throws {
+    static func attachDebugger(pid: UInt32) throws {
         try getProvider().attachDebugger(pid: pid)
     }
 }
 
-public class LockDownJIT: JITProvider {
-    public func debugApp(appId: String) throws {
+final internal class LockDownJIT: JITProvider {
+    func debugApp(appId: String) throws {
         verboseLog("[minimuxer] Debugging app ID: \(appId)")
-        let device = try Device.getFirstDevice()
+        let device = try DeviceService.getFirstDevice()
 
         let lockdown: RustLockdown
-        switch RustLockdown.connect(device: device.internalInstance, label: "minimuxer") {
+        switch RustLockdown.connect(device: device.instance, label: "minimuxer") {
         case .success(let ld): lockdown = ld
         case .error(let err):
             debugLog("[minimuxer] ERROR: Failed to connect to lockdown: \(err)")
@@ -69,7 +69,7 @@ public class LockDownJIT: JITProvider {
         } else {
             // iOS 17+ uses CoreDeviceProxy + DVT + DebugProxy via async Rust
             verboseLog("[minimuxer] iOS \(major) detected, using post-17 JIT path")
-            let muxerAddr = "127.0.0.1:\(MuxerConstants.usbmuxdPort)"
+            let muxerAddr = "127.0.0.1:\(MinimuxerConstants.usbmuxdPort)"
             let result = rustBridgeDebugAppPost17(appId, muxerAddr: muxerAddr, deviceIp: try DeviceEndpoint.shared.ip())
             if result != 0 {
                 switch result {
@@ -90,13 +90,13 @@ public class LockDownJIT: JITProvider {
         }
     }
 
-    private func debugPre17(device: Device, appId: String) throws {
-        guard let debugServer = RustDebugserver.connect(device: device.internalInstance, label: "minimuxer") else {
+    private func debugPre17(device: DeviceService, appId: String) throws {
+        guard let debugServer = RustDebugserver.connect(device: device.instance, label: "minimuxer") else {
             debugLog("[minimuxer] ERROR: Failed to start debug server")
             throw MinimuxerError.CreateDebug
         }
 
-        guard let instProxy = RustInstProxy.connect(device: device.internalInstance, label: "minimuxer") else {
+        guard let instProxy = RustInstProxy.connect(device: device.instance, label: "minimuxer") else {
             debugLog("[minimuxer] ERROR: Failed to create instproxy client")
             throw MinimuxerError.CreateInstproxy
         }
@@ -123,7 +123,7 @@ public class LockDownJIT: JITProvider {
         }
         verboseLog("[minimuxer] Found bundle path: \(bundlePath)")
 
-        _ = debugServer.sendCommand("QSetMaxPacketSize:1024")
+        _ = debugServer.sendCommand("QSetMaxPacketSize:\(MinimuxerConstants.maxPacketSize)")
         _ = debugServer.sendCommand("QSetWorkingDir:\(container)")
 
         if !debugServer.setArgv([bundlePath, bundlePath]) {
@@ -136,10 +136,10 @@ public class LockDownJIT: JITProvider {
         _ = debugServer.sendCommand("D")
     }
 
-    public func attachDebugger(pid: UInt32) throws {
+    func attachDebugger(pid: UInt32) throws {
         verboseLog("[minimuxer] Debugging process ID: \(pid)")
-        let device = try Device.getFirstDevice()
-        guard let debugServer = RustDebugserver.connect(device: device.internalInstance, label: "minimuxer") else {
+        let device = try DeviceService.getFirstDevice()
+        guard let debugServer = RustDebugserver.connect(device: device.instance, label: "minimuxer") else {
             debugLog("[minimuxer] ERROR: Failed to start debug server")
             throw MinimuxerError.CreateDebug
         }
@@ -151,12 +151,16 @@ public class LockDownJIT: JITProvider {
     }
 }
 
-public class RPJit: JITProvider {
-    public func debugApp(appId: String) throws {
-        try RustIdevice.debugApp(appId: appId)
+final internal class RPJit: JITProvider {
+    func debugApp(appId: String) throws {
+        try adaptingBridgeError {
+            try RustIdevice.debugApp(appId: appId)
+        }
     }
     
-    public func attachDebugger(pid: UInt32) throws {
-        try RustIdevice.debugApp(pid: pid)
+    func attachDebugger(pid: UInt32) throws {
+        try adaptingBridgeError {
+            try RustIdevice.debugApp(pid: pid)
+        }
     }
 }

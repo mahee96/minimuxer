@@ -1,5 +1,5 @@
 //
-//  Muxer.swift
+//  MuxerService.swift
 //  Minimuxer
 //
 //  Original Rust Implementation by @jkcoxson
@@ -14,13 +14,10 @@ import Darwin
 import Glibc
 #endif
 
-public class Muxer {
-    public static var started = false
-    public static var usbmuxdReady = false
-    public static var isrppairing = false
-
-    private static let DEVICE_ATTACH = "Attached"
-    private static let DEVICE_DETACH = "Detached"
+final internal class MuxerService {
+    static var started = false
+    static var usbmuxdReady = false
+    static var isrppairing = false
 
     private static var cachedPairingDict: [String: Any]?
     private static var cachedPairingXml: Data?
@@ -42,16 +39,16 @@ public class Muxer {
         }
     }
 
-    public static func retargetUsbmuxdAddr() {
+    static func retargetUsbmuxdAddr() {
         verboseLog("[minimuxer] unsetenv(USBMUXD_SOCKET_ADDRESS)")
-        unsetenv(MuxerConstants.usbmuxdEnvKey)
-        verboseLog("[minimuxer] setenv(USBMUXD_SOCKET_ADDRESS, \(MuxerConstants.usbmuxdSocket))")
-        setenv(MuxerConstants.usbmuxdEnvKey, MuxerConstants.usbmuxdSocket, 1)
-        let value = String(cString: getenv(MuxerConstants.usbmuxdEnvKey))
+        unsetenv(MinimuxerConstants.usbmuxdEnvKey)
+        verboseLog("[minimuxer] setenv(USBMUXD_SOCKET_ADDRESS, \(MinimuxerConstants.usbmuxdSocket))")
+        setenv(MinimuxerConstants.usbmuxdEnvKey, MinimuxerConstants.usbmuxdSocket, 1)
+        let value = String(cString: getenv(MinimuxerConstants.usbmuxdEnvKey))
         verboseLog("[minimuxer] getenv(USBMUXD_SOCKET_ADDRESS) = \(value)")
     }
 
-    public static func reinitializePairingData(pairingFile: String) throws {
+    static func reinitializePairingData(pairingFile: String) throws {
         guard let pairingData = pairingFile.data(using: .utf8),
               let pairingDict = try? PropertyListSerialization.propertyList(from: pairingData, options: [], format: nil) as? [String: Any]
         else {
@@ -83,11 +80,13 @@ public class Muxer {
         cachedPairingXml  = pairingXml
 
         if isrppairing {
-            try RustIdevice.setRpPairingFile(pairingFile)
+            try adaptingBridgeError {
+                try RustIdevice.setRpPairingFile(pairingFile)
+            }
         }
     }
 
-    public static func start(pairingFile: String) throws {
+    static func start(pairingFile: String) throws {
         if started {
             verboseLog("[minimuxer] Already started minimuxer, skipping")
             return
@@ -98,7 +97,7 @@ public class Muxer {
         if !isrppairing {
             Task.detached(priority: .userInitiated) { listenLoop() }
             Task {
-                await Heartbeat.start()
+                await HeartbeatService.start()
             }
         }
         started = true
@@ -128,8 +127,8 @@ public class Muxer {
 
             var addr = sockaddr_in()
             addr.sin_family = sa_family_t(AF_INET)
-            addr.sin_port = MuxerConstants.usbmuxdPort.bigEndian
-            addr.sin_addr.s_addr = inet_addr(MuxerConstants.usbmuxdHost)
+            addr.sin_port = MinimuxerConstants.usbmuxdPort.bigEndian
+            addr.sin_addr.s_addr = inet_addr(MinimuxerConstants.usbmuxdHost)
 
             let bindResult = withUnsafePointer(to: &addr) {
                 $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
@@ -137,7 +136,7 @@ public class Muxer {
                 }
             }
 
-            let value = String(cString: getenv(MuxerConstants.usbmuxdEnvKey))
+            let value = String(cString: getenv(MinimuxerConstants.usbmuxdEnvKey))
             logIfNeeded("muxer: (ENV) USBMUXD_SOCKET_ADDRESS = \(value)", isVerbose: true)
 
             guard bindResult == 0, listen(fd, 16) == 0 else {
@@ -148,7 +147,7 @@ public class Muxer {
                 continue
             }
 
-            verboseLog("[minimuxer] Bound successfully to \(MuxerConstants.usbmuxdHost):\(MuxerConstants.usbmuxdPort)")
+            verboseLog("[minimuxer] Bound successfully to \(MinimuxerConstants.usbmuxdHost):\(MinimuxerConstants.usbmuxdPort)")
             usbmuxdReady = true
             lastLogMessage = nil
 
@@ -294,13 +293,13 @@ public class Muxer {
     }
     
     
-    public static func notifyDeviceAttached(deviceIP: String){
+    static func notifyDeviceAttached(deviceIP: String){
         currentDeviceIP = deviceIP
-        currentEvent = DEVICE_ATTACH
+        currentEvent = MinimuxerConstants.deviceAttach
     }
-    public static func notifyDeviceDetached(){
+    static func notifyDeviceDetached(){
         currentDeviceIP = nil
-        currentEvent = DEVICE_DETACH
+        currentEvent = MinimuxerConstants.deviceDetach
     }
 
 

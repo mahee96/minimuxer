@@ -91,6 +91,23 @@ internal func _rust_bridge_idevice_mount_personalized_ddi(
 
 // MARK: - Error Handling
 
+public enum RustBridgeError: Error, LocalizedError, Equatable {
+    case pairingFileRejected(description: String)
+    case connectionReset(description: String)
+    case unknown(code: Int, description: String)
+    
+    public var errorDescription: String? {
+        switch self {
+        case .pairingFileRejected(let description):
+            return description
+        case .connectionReset(let description):
+            return description
+        case .unknown(_, let description):
+            return description
+        }
+    }
+}
+
 @inline(__always)
 private func rustIdeviceThrowIfNeeded(_ error: UnsafeMutablePointer<RustIdeviceFfiError>?) throws {
 	guard let error else {
@@ -99,10 +116,16 @@ private func rustIdeviceThrowIfNeeded(_ error: UnsafeMutablePointer<RustIdeviceF
 
 	let rawMessage = error.pointee.message.map { String(cString: $0) } ?? "unknown error"
 	let formattedMessage = formatNSSetAsJson(rawMessage)
+	let code = Int(error.pointee.code)
 
-	let swiftError = NSError(domain: "minimuxer", code: Int(error.pointee.code), userInfo: [
-        NSLocalizedDescriptionKey: formattedMessage
-    ])
+	let swiftError: RustBridgeError
+	if formattedMessage.contains("PairVerifyFailed") {
+		swiftError = .pairingFileRejected(description: formattedMessage)
+	} else if formattedMessage.contains("Connection reset by peer") || formattedMessage.contains("ConnectionReset") {
+		swiftError = .connectionReset(description: formattedMessage)
+	} else {
+		swiftError = .unknown(code: code, description: formattedMessage)
+	}
 
 	_idevice_error_free(error)
 	throw swiftError
@@ -240,9 +263,17 @@ public class RustIdevice {
         if let errPtr = result.error {
             let msg = String(cString: errPtr)
             _rust_bridge_idevice_free_string(errPtr)
-            throw NSError(domain: "minimuxer", code: Int(result.value), userInfo: [
-                NSLocalizedDescriptionKey: msg
-            ])
+            let code = Int(result.value)
+            
+            let swiftError: RustBridgeError
+            if msg.contains("PairVerifyFailed") {
+                swiftError = .pairingFileRejected(description: msg)
+            } else if msg.contains("Connection reset by peer") || msg.contains("ConnectionReset") {
+                swiftError = .connectionReset(description: msg)
+            } else {
+                swiftError = .unknown(code: code, description: msg)
+            }
+            throw swiftError
         }
     }
 

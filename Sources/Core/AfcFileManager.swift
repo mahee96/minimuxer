@@ -9,45 +9,45 @@
 import Foundation
 import RustBridge
 
-public struct RustDirectoryEntry {
-    public let path: String
-    public let parent: String
-    public let isFile: Bool
-    public let size: UInt32?
-    public let children: [RustDirectoryEntry]
+internal struct RustDirectoryEntry {
+    let path: String
+    let parent: String
+    let isFile: Bool
+    let size: UInt32?
+    let children: [RustDirectoryEntry]
 }
 
-public class AfcFileManager {
+final internal class AfcFileManager {
     private static func getClient() throws -> RustAfc {
-        let device = try Device.getFirstDevice()
-        guard let afc = RustAfc.connect(device: device.internalInstance, label: "minimuxer") else {
+        let device = try DeviceService.getFirstDevice()
+        guard let afc = RustAfc.connect(device: device.instance, label: "minimuxer") else {
             throw MinimuxerError.CreateAfc
         }
         return afc
     }
 
-    public static func remove(path: String) throws {
+    static func remove(path: String) throws {
         let client = try getClient()
         if !client.remove(path: path) {
             throw MinimuxerError.RwAfc
         }
     }
 
-    public static func createDirectory(path: String) throws {
+    static func createDirectory(path: String) throws {
         let client = try getClient()
         if !client.mkdir(path: path) {
             throw MinimuxerError.RwAfc
         }
     }
 
-    public static func writeFile(to path: String, bytes: Data) throws {
+    static func writeFile(to path: String, bytes: Data) throws {
         let client = try getClient()
         if !client.writeFile(path: path, data: bytes) {
             throw MinimuxerError.RwAfc
         }
     }
 
-    public static func copyFileOutsideAfc(from sourcePath: String, to destPath: String) throws {
+    static func copyFileOutsideAfc(from sourcePath: String, to destPath: String) throws {
         let client = try getClient()
         let dest = destPath.hasPrefix("file://") ? String(destPath.dropFirst(7)) : destPath
 
@@ -71,7 +71,7 @@ public class AfcFileManager {
         try data.write(to: URL(fileURLWithPath: dest))
     }
 
-    public static func contents() -> [RustDirectoryEntry] {
+    static func contents() -> [RustDirectoryEntry] {
         guard let client = try? getClient() else { return [] }
         return _contents(client: client, directoryPath: "/", depth: 0)
     }

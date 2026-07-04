@@ -77,9 +77,8 @@ public class Heartbeat {
 
     private static func heartbeatLoop() async {
         while !Muxer.usbmuxdReady {
+            logIfNeeded("Waiting for usbmuxd to be ready...", isVerbose: true)
             try? await Task.sleep(nanoseconds: 1_000_000_000)
-            let ts = ISO8601DateFormatter().string(from: Date())
-            verboseLog("[\(ts)] [minimuxer] heartbeat-task: Waiting for usbmuxd to be ready...")
         }
         verboseLog("[minimuxer] heartbeat-task: usbmuxd is ready")
 

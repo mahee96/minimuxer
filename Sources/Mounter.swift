@@ -102,9 +102,8 @@ public class LockDownMounter: MounterProvider {
 
     private func mountLoop(dmgDocsPath: String) async {
         while !Muxer.usbmuxdReady {
+            logIfNeeded("Waiting for usbmuxd to be ready...", prefix: "mount-task: ", isVerbose: true)
             try? await Task.sleep(nanoseconds: 1_000_000_000)
-            let ts = ISO8601DateFormatter().string(from: Date())
-            verboseLog("[\(ts)] [minimuxer] mount-task: Waiting for usbmuxd to be ready...")
         }
         verboseLog("[minimuxer] mount-task: usbmuxd is ready")
 

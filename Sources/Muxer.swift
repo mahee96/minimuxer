@@ -29,6 +29,19 @@ public class Muxer {
     private static var currentDeviceIP: String?
     private static var currentEvent: String?
 
+    private static var lastLogMessage: String?
+
+    private static func logIfNeeded(_ message: String, isVerbose: Bool = false) {
+        if message != lastLogMessage {
+            if isVerbose {
+                verboseLog("[minimuxer] \(message)")
+            } else {
+                debugLog("[minimuxer] \(message)")
+            }
+            lastLogMessage = message
+        }
+    }
+
     public static func retargetUsbmuxdAddr() {
         verboseLog("[minimuxer] unsetenv(USBMUXD_SOCKET_ADDRESS)")
         unsetenv(MuxerConstants.usbmuxdEnvKey)
@@ -84,7 +97,9 @@ public class Muxer {
 
         if !isrppairing {
             Task.detached(priority: .userInitiated) { listenLoop() }
-            Heartbeat.startBeat()
+            Task {
+                await Heartbeat.start()
+            }
         }
         started = true
 
@@ -99,7 +114,7 @@ public class Muxer {
     // device, read the pairing record, and open services (AFC, lockdown, etc.).
     private static func listenLoop() {
         while true {
-            verboseLog("[minimuxer] Starting listener")
+            logIfNeeded("Starting listener", isVerbose: true)
 
             let fd = socket(AF_INET, SOCK_STREAM, 0)
             guard fd >= 0 else {
@@ -123,10 +138,10 @@ public class Muxer {
             }
 
             let value = String(cString: getenv(MuxerConstants.usbmuxdEnvKey))
-            verboseLog("[minimuxer] muxer: (ENV) USBMUXD_SOCKET_ADDRESS = \(value)")
+            logIfNeeded("muxer: (ENV) USBMUXD_SOCKET_ADDRESS = \(value)", isVerbose: true)
 
             guard bindResult == 0, listen(fd, 16) == 0 else {
-                debugLog("[minimuxer] WARN: Failed to bind/listen")
+                logIfNeeded("WARN: Failed to bind/listen")
                 close(fd)
                 usbmuxdReady = false
                 Thread.sleep(forTimeInterval: 1)
@@ -135,6 +150,7 @@ public class Muxer {
 
             verboseLog("[minimuxer] Bound successfully to \(MuxerConstants.usbmuxdHost):\(MuxerConstants.usbmuxdPort)")
             usbmuxdReady = true
+            lastLogMessage = nil
 
             // accept loop — runs until socket dies
             var consecutiveErrors = 0
@@ -163,7 +179,7 @@ public class Muxer {
             // socket died — close and let outer loop restart
             close(fd)
             usbmuxdReady = false
-            verboseLog("[minimuxer] listener restarting...")
+            logIfNeeded("[minimuxer] listener restarting...", isVerbose: true)
             Thread.sleep(forTimeInterval: 1)
         }
     }

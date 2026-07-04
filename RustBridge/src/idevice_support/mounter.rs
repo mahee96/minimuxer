@@ -65,7 +65,7 @@ pub async fn mount_personalized_ddi_rppairing(
             return Err((6, format!("get connection failed: {:?}", e)));
         }
     };
-    let conn = &mut *connection;
+    let conn = connection.as_mut().unwrap();
     if let Err(e) = mounter
         .mount_personalized_with_callback_rsd(
             &mut conn.adapter,

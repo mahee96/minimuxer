@@ -10,7 +10,7 @@ use log::{error, info};
 use std::{
     net::SocketAddrV4,
     str::FromStr,
-    sync::{Mutex, OnceLock},
+    sync::Mutex,
 };
 
 type RsdAdapter = idevice::tcp::handle::AdapterHandle;
@@ -20,35 +20,39 @@ pub struct CachedRsdConnection {
     pub handshake: RsdHandshake,
 }
 
-pub static RPPAIRING_FILE: OnceLock<idevice::remote_pairing::RpPairingFile> = OnceLock::new();
-static RPPAIRING_RSD_CONNECTION: OnceLock<Mutex<CachedRsdConnection>> = OnceLock::new();
+pub static RPPAIRING_FILE: Mutex<Option<idevice::remote_pairing::RpPairingFile>> = Mutex::new(None);
+static RPPAIRING_RSD_CONNECTION: Mutex<Option<CachedRsdConnection>> = Mutex::new(None);
 
 pub fn set_rppairing_file(pairing_file_string: String) -> Result<(), IdeviceError> {
     let pairing_file =
         idevice::remote_pairing::RpPairingFile::from_bytes(pairing_file_string.as_bytes())?;
-    if RPPAIRING_FILE.set(pairing_file).is_err() {
-        error!("pairing_file was already initialized, keeping existing value");
-    }
+    
+    let mut file_guard = RPPAIRING_FILE.lock().unwrap();
+    *file_guard = Some(pairing_file);
+
+    let mut conn_guard = RPPAIRING_RSD_CONNECTION.lock().unwrap();
+    *conn_guard = None;
 
     Ok(())
 }
 
 pub async fn connect_to_rsd_services<Service: RsdService>() -> Result<Service, IdeviceError> {
-    if let Some(connection) = RPPAIRING_RSD_CONNECTION.get() {
-        let mut guard = connection.lock().unwrap();
-        let conn = &mut *guard;
-        match Service::connect_rsd(&mut conn.adapter, &mut conn.handshake).await {
-            Ok(r) => {
-                info!("using existing connection");
-                return Ok(r);
-            }
-            Err(e) => {
-                match e {
-                    IdeviceError::Socket(_) => {
-                        // reconnect
-                    }
-                    _ => {
-                        return Err(e);
+    {
+        let mut guard = RPPAIRING_RSD_CONNECTION.lock().unwrap();
+        if let Some(ref mut conn) = *guard {
+            match Service::connect_rsd(&mut conn.adapter, &mut conn.handshake).await {
+                Ok(r) => {
+                    info!("using existing connection");
+                    return Ok(r);
+                }
+                Err(e) => {
+                    match e {
+                        IdeviceError::Socket(_) => {
+                            // reconnect
+                        }
+                        _ => {
+                            return Err(e);
+                        }
                     }
                 }
             }
@@ -57,16 +61,9 @@ pub async fn connect_to_rsd_services<Service: RsdService>() -> Result<Service, I
     match create_rppairing_rsd_connection().await {
         Ok(conn) => {
             info!("creating new connection");
-            let mut guard: std::sync::MutexGuard<'_, CachedRsdConnection>;
-            if let Some(old_connection) = RPPAIRING_RSD_CONNECTION.get() {
-                guard = old_connection.lock().unwrap();
-                guard.adapter = conn.adapter;
-                guard.handshake = conn.handshake;
-            } else {
-                RPPAIRING_RSD_CONNECTION.set(Mutex::new(conn)).ok();
-                guard = RPPAIRING_RSD_CONNECTION.get().unwrap().lock().unwrap();
-            }
-            let conn = &mut *guard;
+            let mut guard = RPPAIRING_RSD_CONNECTION.lock().unwrap();
+            *guard = Some(conn);
+            let conn = guard.as_mut().unwrap();
             match Service::connect_rsd(&mut conn.adapter, &mut conn.handshake).await {
                 Ok(r) => return Ok(r),
                 Err(e) => {
@@ -79,30 +76,25 @@ pub async fn connect_to_rsd_services<Service: RsdService>() -> Result<Service, I
 }
 
 pub async fn get_or_create_rppairing_rsd_connection(
-) -> Result<std::sync::MutexGuard<'static, CachedRsdConnection>, IdeviceError> {
-    if let Some(connection) = RPPAIRING_RSD_CONNECTION.get() {
-        let mut guard = connection.lock().unwrap();
-        let conn = &mut *guard;
-        if HeartbeatClient::connect_rsd(&mut conn.adapter, &mut conn.handshake)
-            .await
-            .is_ok()
-        {
-            error!("using existing connection");
-            return Ok(guard);
+) -> Result<std::sync::MutexGuard<'static, Option<CachedRsdConnection>>, IdeviceError> {
+    {
+        let mut guard = RPPAIRING_RSD_CONNECTION.lock().unwrap();
+        if let Some(ref mut conn) = *guard {
+            if HeartbeatClient::connect_rsd(&mut conn.adapter, &mut conn.handshake)
+                .await
+                .is_ok()
+            {
+                error!("using existing connection");
+                return Ok(guard);
+            }
         }
     }
     match create_rppairing_rsd_connection().await {
         Ok(conn) => {
             error!("creating new connection");
-            if let Some(old_connection) = RPPAIRING_RSD_CONNECTION.get() {
-                let mut guard = old_connection.lock().unwrap();
-                guard.adapter = conn.adapter;
-                guard.handshake = conn.handshake;
-                return Ok(guard);
-            } else {
-                RPPAIRING_RSD_CONNECTION.set(Mutex::new(conn)).ok();
-                return Ok(RPPAIRING_RSD_CONNECTION.get().unwrap().lock().unwrap());
-            }
+            let mut guard = RPPAIRING_RSD_CONNECTION.lock().unwrap();
+            *guard = Some(conn);
+            return Ok(guard);
         }
         Err(e) => {
             error!("create_rppairing_rsd_connection failed: {}", e);
@@ -112,7 +104,7 @@ pub async fn get_or_create_rppairing_rsd_connection(
 }
 
 async fn create_rppairing_rsd_connection() -> Result<CachedRsdConnection, IdeviceError> {
-    let mut pairing_file = match RPPAIRING_FILE.get() {
+    let mut pairing_file = match &*RPPAIRING_FILE.lock().unwrap() {
         Some(p) => p.clone(),
         None => {
             error!("No PairingFile");

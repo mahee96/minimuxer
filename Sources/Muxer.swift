@@ -38,12 +38,7 @@ public class Muxer {
         verboseLog("[minimuxer] getenv(USBMUXD_SOCKET_ADDRESS) = \(value)")
     }
 
-    public static func start(pairingFile: String) throws {
-        if started {
-            verboseLog("[minimuxer] Already started minimuxer, skipping")
-            return
-        }
-
+    public static func reinitializePairingData(pairingFile: String) throws {
         guard let pairingData = pairingFile.data(using: .utf8),
               let pairingDict = try? PropertyListSerialization.propertyList(from: pairingData, options: [], format: nil) as? [String: Any]
         else {
@@ -74,11 +69,22 @@ public class Muxer {
         cachedPairingDict = pairingDict
         cachedPairingXml  = pairingXml
 
-        started = true
-
         if isrppairing {
             try RustIdevice.setRpPairingFile(pairingFile)
-        } else {
+        }
+    }
+
+    public static func start(pairingFile: String) throws {
+        if started {
+            verboseLog("[minimuxer] Already started minimuxer, skipping")
+            return
+        }
+
+        try reinitializePairingData(pairingFile: pairingFile)
+
+        started = true
+
+        if !isrppairing {
             Task.detached(priority: .userInitiated) { listenLoop() }
             // Heartbeat is started/stopped by NetworkObserver when VPN peer changes
             // Heartbeat.startBeat()

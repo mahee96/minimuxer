@@ -129,6 +129,10 @@ public struct Minimuxer {
         Minimuxer.isLoggingEnabled = enabled
     }
 
+    public static func reinitializePairingData(pairingFile: String) throws {
+        try Muxer.reinitializePairingData(pairingFile: pairingFile)
+    }
+
     public static func start(pairingFile: String) throws {
         try Muxer.start(pairingFile: pairingFile)
     }

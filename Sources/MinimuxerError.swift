@@ -24,16 +24,8 @@ public enum MinimuxerError: Error, Equatable, CustomStringConvertible, Localized
     case NoVPN
     case PairingFile
     case RestartAlreadyInProgressError
-
-
-    public static var connectionError: MinimuxerError {
-        let network = Minimuxer.network
-        if !network.isWifiSatisfied && !network.isWiredSatisfied && !network.isBridgeSatisfied {
-            return .NoConnection
-        } else {
-            return .NoVPN
-        }
-    }
+    case InvalidVPN
+    case InvalidPairing
 
     case CreateDebug
     case CreateInstproxy
@@ -82,6 +74,8 @@ public enum MinimuxerError: Error, Equatable, CustomStringConvertible, Localized
         case .NoVPN: return "NoVPN"
         case .PairingFile: return "PairingFile"
         case .RestartAlreadyInProgressError: return "RestartAlreadyInProgressError"
+        case .InvalidVPN: return "InvalidVPN"
+        case .InvalidPairing: return "InvalidPairing"
         case .CreateDebug: return "CreateDebug"
         case .CreateInstproxy: return "CreateInstproxy"
         case .CreateLockdown: return "CreateLockdown"
@@ -122,5 +116,22 @@ public enum MinimuxerError: Error, Equatable, CustomStringConvertible, Localized
 
     public var errorDescription: String? {
         return self.description
+    }
+}
+
+public enum RustBridgeError: Error, LocalizedError, Equatable {
+    case pairingFileRejected(description: String)
+    case connectionReset(description: String)
+    case unknown(code: Int, description: String)
+    
+    public var errorDescription: String? {
+        switch self {
+        case .pairingFileRejected(let description):
+            return description
+        case .connectionReset(let description):
+            return description
+        case .unknown(_, let description):
+            return description
+        }
     }
 }

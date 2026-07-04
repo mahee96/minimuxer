@@ -51,7 +51,7 @@ final internal class LockDownInstall: InstallProvider {
         verboseLog("[minimuxer] AFC: verifying device connectivity at \(deviceIP)...")
         guard Minimuxer.shared.testDeviceConnection(ifaddr: deviceIP) else {
             debugLog("[minimuxer] ERROR: DeviceService not reachable before AFC start")
-            throw MinimuxerError.connectionError
+            throw MinimuxerError.NoVPN
         }
         verboseLog("[minimuxer] AFC: device reachable, fetching device handle")
 
@@ -116,18 +116,12 @@ final internal class LockDownInstall: InstallProvider {
 
 final internal class RPInstall: InstallProvider {
     func yeetAppAfc(bundleId: String, ipaBytes: Data) throws {
-        try adaptingBridgeError {
-            try RustIdevice.yeetAppAfc(bundleId: bundleId, ipaBytes: ipaBytes)
-        }
+        try IdeviceGateway.shared.yeetAppAfc(bundleId: bundleId, ipaBytes: ipaBytes)
     }
     func installIpa(bundleId: String) throws {
-        try adaptingBridgeError {
-            try RustIdevice.installIpa(bundleId: bundleId)
-        }
+        try IdeviceGateway.shared.installIpa(bundleId: bundleId)
     }
     func removeApp(bundleId: String) throws {
-        try adaptingBridgeError {
-            try RustIdevice.removeApp(bundleId: bundleId)
-        }
+        try IdeviceGateway.shared.removeApp(bundleId: bundleId)
     }
 }

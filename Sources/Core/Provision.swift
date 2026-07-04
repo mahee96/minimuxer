@@ -123,22 +123,14 @@ final internal class LockDownProvision: ProvisionProvider {
 
 final internal class RPProvision: ProvisionProvider {
     func dumpProfiles(docsPath: String) throws -> String {
-        let path = docsPath.hasPrefix("file://") ? String(docsPath.dropFirst(7)) : docsPath
-        try adaptingBridgeError {
-            try RustIdevice.dumpProfiles(path)
-        }
-        return "\(path)/PROVISION"
+        try IdeviceGateway.shared.dumpProfiles(docsPath: docsPath)
     }
     
     func installProvisioningProfile(profile: Data) throws {
-        try adaptingBridgeError {
-            try RustIdevice.installProvisioningProfile(profile)
-        }
+        try IdeviceGateway.shared.installProvisioningProfile(profile: profile)
     }
     
     func removeProvisioningProfile(id: String) throws {
-        try adaptingBridgeError {
-            try RustIdevice.removeProvisioningProfile(id: id)
-        }
+        try IdeviceGateway.shared.removeProvisioningProfile(id: id)
     }
 }

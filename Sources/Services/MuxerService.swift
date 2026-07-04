@@ -80,9 +80,7 @@ final internal class MuxerService {
         cachedPairingXml  = pairingXml
 
         if isrppairing {
-            try adaptingBridgeError {
-                try RustIdevice.setRpPairingFile(pairingFile)
-            }
+            try IdeviceGateway.shared.start(pairingFileContent: pairingFile)
         }
     }
 
@@ -249,7 +247,7 @@ final internal class MuxerService {
     // libimobiledevice actually needs from us:
     private static func handlePacket(_ packet: RawPacket, fd: Int32) throws -> [String: Any] {
         guard let messageType = packet.plist["MessageType"] as? String else {
-            throw MinimuxerError.connectionError
+            throw MinimuxerError.Connect
         }
 
         verboseLog("[minimuxer] usbmux message: \(messageType)")
@@ -288,7 +286,7 @@ final internal class MuxerService {
 
             default:
                 debugLog("[minimuxer] WARN: unknown message type: \(messageType)")
-                throw MinimuxerError.connectionError
+                throw MinimuxerError.Connect
         }
     }
     

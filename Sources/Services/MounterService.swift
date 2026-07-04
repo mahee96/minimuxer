@@ -229,7 +229,7 @@ final internal class LockDownMounterService: MounterServiceProvider {
         } else {
             verboseLog("[minimuxer] ERROR: Failed to mount DDI (code \(result))")
             switch result {
-                case 1: throw MinimuxerError.connectionError
+                case 1: throw MinimuxerError.NoVPN
                 case 4: throw MinimuxerError.CreateLockdown
                 case 5: throw MinimuxerError.GetLockdownValue
                 case 6: throw MinimuxerError.ImageLookup
@@ -379,9 +379,7 @@ final internal class RPMounterService: MounterServiceProvider {
                     continue
                 }
                 do {
-                    try adaptingBridgeError {
-                        try RustIdevice.mountPersonalizedDDI(image: imageData, trustcache: trustcacheData, manifest: manifestData)
-                    }
+                    try IdeviceGateway.shared.mountPersonalizedDdi(image: imageData, trustcache: trustcacheData, manifest: manifestData)
                     verboseLog("[minimuxer] DDI mounted successfully")
                     self.dmgMounted = true
                     self.lastErrorDescription = nil

@@ -24,6 +24,11 @@ let package = Package(
             name: "RustBridgeLib",
             path: "RustBridge/lib/RustBridge.xcframework"
         ),
+        .binaryTarget(
+            name: "IDevice",
+            url: "https://github.com/jkcoxson/idevice/releases/download/v0.1.64/idevice-xcframework-v0.1.64.zip",
+            checksum: "b8250402a23c850f80b9be1d4add309aae6c935ee6a797b73616e4d8f170be5d"
+        ),
         .target(
             name: "RustBridge",
             dependencies: ["RustBridgeLib"],
@@ -34,14 +39,19 @@ let package = Package(
                 "src",
                 "Makefile",
                 "lib",
+                // "MinimuxerBridgeIdevice.swift"
             ],
-            sources: ["MinimuxerBridge.swift", "MinimuxerBridgeIdevice.swift"]
+            sources: [
+                "MinimuxerBridge.swift",
+                // "MinimuxerBridgeIdevice.swift"
+            ]
         ),
         // MARK: Main SPM target
         .target(
             name: "Minimuxer",
             dependencies: [
                 "RustBridge",
+                "IDevice",
                 .product(name: "ZIPFoundation", package: "ZIPFoundation")
             ],
             path: "Sources"

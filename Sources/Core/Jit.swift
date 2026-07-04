@@ -73,7 +73,7 @@ final internal class LockDownJIT: JITProvider {
             let result = rustBridgeDebugAppPost17(appId, muxerAddr: muxerAddr, deviceIp: try DeviceEndpoint.shared.ip())
             if result != 0 {
                 switch result {
-                case 1: throw MinimuxerError.connectionError
+                case 1: throw MinimuxerError.NoVPN
                 case 2: throw MinimuxerError.CreateCoreDevice
                 case 3: throw MinimuxerError.CreateSoftwareTunnel
                 case 4: throw MinimuxerError.Connect
@@ -153,14 +153,10 @@ final internal class LockDownJIT: JITProvider {
 
 final internal class RPJit: JITProvider {
     func debugApp(appId: String) throws {
-        try adaptingBridgeError {
-            try RustIdevice.debugApp(appId: appId)
-        }
+        try IdeviceGateway.shared.debugApp(appId: appId)
     }
     
     func attachDebugger(pid: UInt32) throws {
-        try adaptingBridgeError {
-            try RustIdevice.debugApp(pid: pid)
-        }
+        try IdeviceGateway.shared.debugProcess(pid: pid)
     }
 }

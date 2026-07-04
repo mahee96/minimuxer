@@ -16,7 +16,6 @@ import Glibc
 
 final internal class MinimuxerImpl: MinimuxerAPI {
     
-    
     private actor MutableState {
         var continuation: CheckedContinuation<Void, Error>?
         var docsPath: String?
@@ -53,6 +52,14 @@ final internal class MinimuxerImpl: MinimuxerAPI {
     }
     
     func ready() -> Result<Bool, MinimuxerError> {
+        if !(Minimuxer.network.isWifiSatisfied  ||
+             Minimuxer.network.isWiredSatisfied ||
+             Minimuxer.network.isBridgeSatisfied
+        ){
+            debugLog("[minimuxer] minimuxer not ready: no network connection")
+            return .failure(MinimuxerError.NoConnection)
+        }
+
         let deviceIP: String
         do {
             deviceIP = try DeviceEndpoint.shared.ip()
@@ -62,17 +69,20 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         }
         
         let deviceConnection = testDeviceConnection(ifaddr: deviceIP)
+        if !deviceConnection {
+            debugLog("[minimuxer] minimuxer not ready: failed to connect to device IP")
+            return .failure(MinimuxerError.InvalidVPN)
+        }
+
         if MuxerService.isrppairing {
-            guard deviceConnection, MounterService.isReady() else {
+            guard MounterService.isReady() else {
                 verboseLog(
-                    "minimuxer not ready: " +
-                    "conn=\(deviceConnection) " +
-                    "hb=\(HeartbeatService.lastBeatSuccessful) " +
+                    "minimuxer not ready (RSD): " +
                     "dmg=\(MounterService.isReady()) " +
                     "started=\(MuxerService.started) " +
                     "ready=\(MuxerService.usbmuxdReady)"
                 )
-                return .failure(MinimuxerError.connectionError)
+                return .failure(MinimuxerError.InvalidPairing)
             }
             return .success(true)
         }
@@ -84,17 +94,16 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         } catch {
             deviceExists = false
         }
-        guard deviceConnection, deviceExists, HeartbeatService.lastBeatSuccessful, MounterService.isReady(), MuxerService.started, MuxerService.usbmuxdReady else {
+        guard deviceExists, HeartbeatService.lastBeatSuccessful, MounterService.isReady(), MuxerService.started, MuxerService.usbmuxdReady else {
             verboseLog(
-                "minimuxer not ready: " +
-                "conn=\(deviceConnection) " +
+                "minimuxer not ready (usbmuxd): " +
                 "dev=\(deviceExists) " +
                 "hb=\(HeartbeatService.lastBeatSuccessful) " +
                 "dmg=\(MounterService.isReady()) " +
                 "started=\(MuxerService.started) " +
                 "ready=\(MuxerService.usbmuxdReady)"
             )
-            return .failure(MinimuxerError.connectionError)
+            return .failure(MinimuxerError.InvalidPairing)
         }
         
         if #available(iOS 26.4, *) {
@@ -106,7 +115,8 @@ final internal class MinimuxerImpl: MinimuxerAPI {
     }
     
     func setLogging(_ enabled: Bool) {
-        rustBridgeSetDebug(enabled)
+//        rustBridgeSetDebug(enabled)
+//        _rust_bridge_idevice_set_logging(enabled)
         self.isLoggingEnabled = enabled
     }
     
@@ -130,7 +140,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         }
         let udid: String?
         if MuxerService.isrppairing {
-            udid = RustIdevice.fetchUDID()
+            udid = IdeviceGateway.shared.fetchUDID()
         } else {
             udid = (try? DeviceService.getFirstDevice())?.getUDID()
         }

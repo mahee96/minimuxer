@@ -7,8 +7,8 @@
 
 pub use errors::IdeviceFfiError;
 
+// pub mod bridge_idevice;
+// mod idevice_support;
 pub mod bridge;
-pub mod bridge_idevice;
 mod errors;
-mod idevice_support;
 mod post17;

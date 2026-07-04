@@ -52,7 +52,7 @@ public final class NetworkObserver {
                 verboseLog("[minimuxer] [net] update the device endpoint with discovered peer on the vpn interface")
                 DeviceEndpoint.shared.update(peer)
                 Muxer.notifyDeviceAttached(deviceIP: peer)
-                if !Muxer.isrppairing {
+                if Muxer.started && !Muxer.isrppairing {
                     Task { 
                         await Heartbeat.start()
                     }

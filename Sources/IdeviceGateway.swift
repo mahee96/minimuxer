@@ -8,10 +8,6 @@
 
 import Foundation
 import IDevice
-#if canImport(Darwin)
-import Darwin
-import MachO
-#endif
 
 public enum IdeviceGatewayError: LocalizedError {
     case invalidPairingFile
@@ -36,73 +32,7 @@ public enum IdeviceGatewayError: LocalizedError {
 public final class IdeviceGateway {
     public static let shared = IdeviceGateway()
 
-    #if canImport(Darwin)
-    private static let rustLibHandle: UnsafeMutableRawPointer? = {
-        let count = _dyld_image_count()
-        for i in 0..<count {
-            if let namePtr = _dyld_get_image_name(i) {
-                let name = String(cString: namePtr)
-                if name.contains("Minimuxer.framework") || name.contains("IDevice.framework") || name.hasSuffix("/Minimuxer") || name.hasSuffix("/IDevice") {
-                    if let handle = dlopen(name, RTLD_LAZY) {
-                        return handle
-                    }
-                }
-            }
-        }
-        return nil
-    }()
-
-    private typealias PlistFreeType = @convention(c) (_ plist: plist_t?) -> Void
-    private typealias PlistGetStringValType = @convention(c) (_ plist: plist_t?, _ val: UnsafeMutablePointer<UnsafeMutablePointer<Int8>?>?) -> Void
-    private typealias PlistDictGetItemType = @convention(c) (_ plist: plist_t?, _ key: UnsafePointer<Int8>?) -> plist_t?
-    private typealias PlistGetUintValType = @convention(c) (_ plist: plist_t?, _ val: UnsafeMutablePointer<UInt64>?) -> Void
-
-    private static let rust_plist_free: PlistFreeType? = {
-        guard let handle = rustLibHandle else { return nil }
-        if let sym = dlsym(handle, "plist_free") {
-            return unsafeBitCast(sym, to: PlistFreeType.self)
-        }
-        return nil
-    }()
-
-    private static let rust_plist_get_string_val: PlistGetStringValType? = {
-        guard let handle = rustLibHandle else { return nil }
-        if let sym = dlsym(handle, "plist_get_string_val") {
-            return unsafeBitCast(sym, to: PlistGetStringValType.self)
-        }
-        return nil
-    }()
-
-    private static let rust_plist_dict_get_item: PlistDictGetItemType? = {
-        guard let handle = rustLibHandle else { return nil }
-        if let sym = dlsym(handle, "plist_dict_get_item") {
-            return unsafeBitCast(sym, to: PlistDictGetItemType.self)
-        }
-        return nil
-    }()
-
-    private static let rust_plist_get_uint_val: PlistGetUintValType? = {
-        guard let handle = rustLibHandle else { return nil }
-        if let sym = dlsym(handle, "plist_get_uint_val") {
-            return unsafeBitCast(sym, to: PlistGetUintValType.self)
-        }
-        return nil
-    }()
-    #endif
-
     private func getRustPlistString(_ node: plist_t) -> String? {
-        #if canImport(Darwin)
-        if let getFn = Self.rust_plist_get_string_val {
-            var valPtr: UnsafeMutablePointer<Int8>? = nil
-            getFn(node, &valPtr)
-            if let ptr = valPtr {
-                let val = String(cString: ptr)
-                free(ptr)
-                return val
-            }
-        }
-        return nil
-        #else
         var valPtr: UnsafeMutablePointer<Int8>? = nil
         plist_get_string_val(node, &valPtr)
         if let ptr = valPtr {
@@ -111,34 +41,9 @@ public final class IdeviceGateway {
             return val
         }
         return nil
-        #endif
     }
 
-    private func getRustPlistUint(_ node: plist_t) -> UInt64? {
-        #if canImport(Darwin)
-        if let getFn = Self.rust_plist_get_uint_val {
-            var val: UInt64 = 0
-            getFn(node, &val)
-            return val
-        }
-        return nil
-        #else
-        var val: UInt64 = 0
-        plist_get_uint_val(node, &val)
-        return val
-        #endif
-    }
 
-    private func getRustPlistDictItem(_ node: plist_t, key: String) -> plist_t? {
-        #if canImport(Darwin)
-        if let getFn = Self.rust_plist_dict_get_item {
-            return getFn(node, key)
-        }
-        return nil
-        #else
-        return plist_dict_get_item(node, key)
-        #endif
-    }
     private var pairingFile: OpaquePointer? = nil
     private var adapter: OpaquePointer? = nil
     private var handshake: OpaquePointer? = nil
@@ -180,8 +85,8 @@ public final class IdeviceGateway {
     }
 
     public func setLogging(_ enabled: Bool) {
-        // idevice_init_logger(enabled ? IdeviceLogLevel(rawValue: 4) : IdeviceLogLevel(rawValue: 0), IdeviceLogLevel(rawValue: 0), nil)
-        idevice_init_logger(IdeviceLogLevel(rawValue: 0), IdeviceLogLevel(rawValue: 0), nil)
+        idevice_init_logger(enabled ? IdeviceLogLevel(rawValue: 4) : IdeviceLogLevel(rawValue: 0), IdeviceLogLevel(rawValue: 0), nil)
+        // idevice_init_logger(IdeviceLogLevel(rawValue: 0), IdeviceLogLevel(rawValue: 0), nil)
     }
 
     public func start(pairingFileContent: String) throws {
@@ -384,18 +289,14 @@ public final class IdeviceGateway {
             defer { lockdownd_client_free(client) }
 
             var plistVal: plist_t? = nil
-            let valErr = IDevice.lockdownd_get_value(client, "UniqueDeviceID", nil, &plistVal)
+            let valErr = lockdownd_get_value(client, nil, "UniqueDeviceID", &plistVal)
             if let valErr = valErr {
                 idevice_error_free(valErr)
                 return nil
             }
             if let plistVal = plistVal {
                 defer {
-                    #if canImport(Darwin)
-                    Self.rust_plist_free?(plistVal)
-                    #else
                     plist_free(plistVal)
-                    #endif
                 }
                 return getRustPlistString(plistVal)
             }
@@ -432,22 +333,14 @@ public final class IdeviceGateway {
             serviceName: "lockdownd"
         ) { client in
             var plistVal: plist_t? = nil
-            #if canImport(Darwin)
-            let valErr = IDevice.lockdownd_get_value(client, key, nil, &plistVal)
-            #else
             let valErr = lockdownd_get_value(client, nil, key, &plistVal)
-            #endif
             if let valErr = valErr {
                 defer { idevice_error_free(valErr) }
                 throw IdeviceGatewayError.serviceError("Failed to get lockdown value for key \(key)")
             }
             if let plistVal = plistVal {
                 defer {
-                    #if canImport(Darwin)
-                    Self.rust_plist_free?(plistVal)
-                    #else
                     plist_free(plistVal)
-                    #endif
                 }
                 return getRustPlistString(plistVal)
             }
@@ -596,8 +489,7 @@ public final class IdeviceGateway {
             for i in 0..<outLen {
                 if let plistVal = plistArray[i] {
                     // Container
-                    #if canImport(Darwin)
-                    let containerPlist = getRustPlistDictItem(plistVal, key: "Container")
+                    let containerPlist = plist_dict_get_item(plistVal, "Container")
                     if let containerPlist = containerPlist {
                         if let ptr = getRustPlistString(containerPlist) {
                             container = ptr
@@ -605,34 +497,12 @@ public final class IdeviceGateway {
                     }
                     
                     // Path
-                    let pathPlist = getRustPlistDictItem(plistVal, key: "Path")
+                    let pathPlist = plist_dict_get_item(plistVal, "Path")
                     if let pathPlist = pathPlist {
                         if let ptr = getRustPlistString(pathPlist) {
                             bundlePath = ptr
                         }
                     }
-                    #else
-                    let containerPlist = plist_dict_get_item(plistVal, "Container")
-                    if let containerPlist = containerPlist {
-                        var valPtr: UnsafeMutablePointer<Int8>? = nil
-                        plist_get_string_val(containerPlist, &valPtr)
-                        if let ptr = valPtr {
-                            container = String(cString: ptr)
-                            free(ptr)
-                        }
-                    }
-                    
-                    // Path
-                    let pathPlist = plist_dict_get_item(plistVal, "Path")
-                    if let pathPlist = pathPlist {
-                        var valPtr: UnsafeMutablePointer<Int8>? = nil
-                        plist_get_string_val(pathPlist, &valPtr)
-                        if let ptr = valPtr {
-                            bundlePath = String(cString: ptr)
-                            free(ptr)
-                        }
-                    }
-                    #endif
                 }
             }
             free(outResult)
@@ -684,11 +554,7 @@ public final class IdeviceGateway {
             var ssl: Bool = false
             
             let err = "com.apple.debugserver".withCString { serviceNamePtr in
-                #if canImport(Darwin)
-                return IDevice.lockdownd_start_service(lockdownClient, serviceNamePtr, &port, &ssl)
-                #else
                 return lockdownd_start_service(lockdownClient, serviceNamePtr, &port, &ssl)
-                #endif
             }
             if let err = err {
                 defer { idevice_error_free(err) }
@@ -811,11 +677,7 @@ public final class IdeviceGateway {
 
     private func getDummyFfiError() -> UnsafeMutablePointer<IdeviceFfiError>? {
         var client: OpaquePointer? = nil
-        #if canImport(Darwin)
-        return IDevice.lockdownd_connect(nil, &client)
-        #else
         return lockdownd_connect(nil, &client)
-        #endif
     }
 
     public func debugApp(appId: String) throws {
@@ -935,26 +797,18 @@ public final class IdeviceGateway {
             lockdownd_client_free(client)
         }, serviceName: "lockdownd") { lockdownClient in
             var plistVal: plist_t? = nil
-            #if canImport(Darwin)
-            let valErr = IDevice.lockdownd_get_value(lockdownClient, "UniqueChipID", nil, &plistVal)
-            #else
             let valErr = lockdownd_get_value(lockdownClient, nil, "UniqueChipID", &plistVal)
-            #endif
             if let valErr = valErr {
                 defer { idevice_error_free(valErr) }
                 throw IdeviceGatewayError.serviceError("Failed to get UniqueChipID")
             }
             if let plistVal = plistVal {
                 defer {
-                    #if canImport(Darwin)
-                    Self.rust_plist_free?(plistVal)
-                    #else
                     plist_free(plistVal)
-                    #endif
                 }
-                if let val = getRustPlistUint(plistVal) {
-                    chipID = val
-                }
+                var val: UInt64 = 0
+                plist_get_uint_val(plistVal, &val)
+                chipID = val
             }
         }
 

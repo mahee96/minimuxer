@@ -138,7 +138,7 @@ public final class IdeviceGateway {
         if let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any] {
             if plist["private_key"] != nil {
                 verboseLog("[IdeviceGateway] start() detected private_key, isRPPairing = true")
-//                isRPPairing = true
+                isRPPairing = true
             } else {
                 verboseLog("[IdeviceGateway] start() plist did not contain private_key")
             }
@@ -1287,39 +1287,21 @@ public final class IdeviceGateway {
         }
         defer { image_mounter_free(mounterClient) }
 
-        let personalizedManifest = try buildPersonalizationManifest(
-            mounterClient: mounterClient,
-            buildManifest: manifest,
-            uniqueChipID: chipID
-        )
-
         try image.withUnsafeBytes { imgBuf in
             try trustcache.withUnsafeBytes { tcBuf in
-                try personalizedManifest.withUnsafeBytes { manBuf in
-                    verboseLog("[IdeviceGateway] mountPersonalizedDdiIdevice() uploading personalized image")
-                    let uploadErr = image_mounter_upload_image(
+                try manifest.withUnsafeBytes { manBuf in
+                    verboseLog("[IdeviceGateway] mountPersonalizedDdiIdevice() mounting personalized image via idevice")
+                    let mountErr = image_mounter_mount_personalized(
                         mounterClient,
-                        "Personalized",
+                        provider,
                         imgBuf.bindMemory(to: UInt8.self).baseAddress,
                         image.count,
-                        manBuf.bindMemory(to: UInt8.self).baseAddress,
-                        personalizedManifest.count
-                    )
-                    if let uploadErr = uploadErr {
-                        debugLog("[IdeviceGateway] mountPersonalizedDdiIdevice() upload failed")
-                        defer { idevice_error_free(uploadErr) }
-                        throw IdeviceGatewayError.serviceError("Failed to upload personalized DDI")
-                    }
-
-                    verboseLog("[IdeviceGateway] mountPersonalizedDdiIdevice() mounting personalized image")
-                    let mountErr = image_mounter_mount_image(
-                        mounterClient,
-                        "Personalized",
-                        manBuf.bindMemory(to: UInt8.self).baseAddress,
-                        personalizedManifest.count,
                         tcBuf.bindMemory(to: UInt8.self).baseAddress,
                         trustcache.count,
-                        nil
+                        manBuf.bindMemory(to: UInt8.self).baseAddress,
+                        manifest.count,
+                        nil,
+                        chipID
                     )
                     if let mountErr = mountErr {
                         debugLog("[IdeviceGateway] mountPersonalizedDdiIdevice() mount failed")
@@ -1330,300 +1312,6 @@ public final class IdeviceGateway {
                 }
             }
         }
-    }
-
-    private func buildPersonalizationManifest(
-        mounterClient: OpaquePointer,
-        buildManifest: Data,
-        uniqueChipID: UInt64
-    ) throws -> Data {
-        let imageType = "DeveloperDiskImage"
-        let identifiers = try queryPersonalizationIdentifiers(mounterClient: mounterClient, imageType: imageType)
-        let nonce = try queryPersonalizationNonce(mounterClient: mounterClient, imageType: imageType)
-
-        let manifestObject = try PropertyListSerialization.propertyList(from: buildManifest, options: [], format: nil)
-        guard let buildManifestDict = manifestObject as? [String: Any],
-              let identities = buildManifestDict["BuildIdentities"] as? [[String: Any]] else {
-            throw IdeviceGatewayError.serviceError("Invalid build manifest")
-        }
-
-        let boardID = try plistUnsignedValue(identifiers["BoardId"], label: "BoardId")
-        let chipID = try plistUnsignedValue(identifiers["ChipID"], label: "ChipID")
-
-        guard let buildIdentity = identities.first(where: { identity in
-            guard
-                let boardHex = identity["ApBoardID"] as? String,
-                let chipHex = identity["ApChipID"] as? String,
-                let identityBoardID = UInt64(boardHex.replacingOccurrences(of: "0x", with: ""), radix: 16),
-                let identityChipID = UInt64(chipHex.replacingOccurrences(of: "0x", with: ""), radix: 16)
-            else { return false }
-            return identityBoardID == boardID && identityChipID == chipID
-        }) else {
-            throw IdeviceGatewayError.serviceError("No matching build identity found")
-        }
-
-        guard let manifest = buildIdentity["Manifest"] as? [String: Any] else {
-            throw IdeviceGatewayError.serviceError("Build identity missing Manifest")
-        }
-
-        var request: [String: Any] = [
-            "@HostPlatformInfo": "mac",
-            "@VersionInfo": "libauthinstall-1033.0.2",
-            "@UUID": UUID().uuidString.uppercased(),
-            "@ApImg4Ticket": true,
-            "@BBTicket": true,
-            "ApBoardID": boardID,
-            "ApChipID": chipID,
-            "ApECID": uniqueChipID,
-            "ApNonce": nonce,
-            "ApProductionMode": true,
-            "ApSecurityDomain": 1,
-            "ApSecurityMode": true,
-            "SepNonce": Data(repeating: 0, count: 20),
-            "UID_MODE": false
-        ]
-
-        for (key, value) in identifiers where key.hasPrefix("Ap,") {
-            request[key] = value
-        }
-
-        let parameters: [String: Any] = [
-            "ApProductionMode": true,
-            "ApSecurityMode": true,
-            "ApSupportsImg4": true
-        ]
-
-        let loadableTrustCacheInfo = (manifest["LoadableTrustCache"] as? [String: Any])?["Info"] as? [String: Any]
-        let restoreRequestRules = loadableTrustCacheInfo?["RestoreRequestRules"] as? [Any]
-
-        for (key, value) in manifest {
-            guard var tssEntry = value as? [String: Any] else { continue }
-            guard tssEntry["Info"] != nil else { continue }
-            guard (tssEntry["Trusted"] as? Bool) == true else { continue }
-
-            tssEntry.removeValue(forKey: "Info")
-            if let restoreRequestRules {
-                applyRestoreRequestRules(input: &tssEntry, parameters: parameters, rules: restoreRequestRules)
-            }
-            if tssEntry["Digest"] == nil {
-                tssEntry["Digest"] = Data()
-            }
-
-            request[key] = tssEntry
-        }
-
-        return try sendTssRequest(request)
-    }
-
-    private func queryPersonalizationIdentifiers(
-        mounterClient: OpaquePointer,
-        imageType: String
-    ) throws -> [String: Any] {
-        var plistVal: plist_t? = nil
-        let err = imageType.withCString { imageTypeC in
-            image_mounter_query_personalization_identifiers(mounterClient, imageTypeC, &plistVal)
-        }
-        if let err = err {
-            defer { idevice_error_free(err) }
-            throw IdeviceGatewayError.serviceError("Failed to query personalization identifiers")
-        }
-        guard let plistVal = plistVal else {
-            throw IdeviceGatewayError.serviceError("Personalization identifiers plist was nil")
-        }
-        defer { plist_free(plistVal) }
-
-        guard let xml = plistNodeToData(plistVal),
-              let dict = try? PropertyListSerialization.propertyList(from: xml, options: [], format: nil) as? [String: Any] else {
-            throw IdeviceGatewayError.serviceError("Failed to decode personalization identifiers")
-        }
-        return dict
-    }
-
-    private func queryPersonalizationNonce(
-        mounterClient: OpaquePointer,
-        imageType: String
-    ) throws -> Data {
-        var noncePtr: UnsafeMutablePointer<UInt8>? = nil
-        var nonceLen: Int = 0
-        let err = imageType.withCString { imageTypeC in
-            image_mounter_query_nonce(mounterClient, imageTypeC, &noncePtr, &nonceLen)
-        }
-        if let err = err {
-            defer { idevice_error_free(err) }
-            throw IdeviceGatewayError.serviceError("Failed to query personalization nonce")
-        }
-        guard let noncePtr = noncePtr else {
-            throw IdeviceGatewayError.serviceError("Personalization nonce was nil")
-        }
-        defer { idevice_data_free(noncePtr, UInt(nonceLen)) }
-        return Data(bytes: noncePtr, count: nonceLen)
-    }
-
-    private func sendTssRequest(_ request: [String: Any]) throws -> Data {
-        let url = URL(string: "http://gs.apple.com/TSS/controller?action=2")!
-        let requestData = try PropertyListSerialization.data(fromPropertyList: request, format: .xml, options: 0)
-        var urlRequest = URLRequest(url: url)
-        urlRequest.httpMethod = "POST"
-        urlRequest.cachePolicy = .reloadIgnoringLocalCacheData
-        urlRequest.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
-        urlRequest.setValue("text/xml; charset=\"utf-8\"", forHTTPHeaderField: "Content-type")
-        urlRequest.setValue("InetURL/1.0", forHTTPHeaderField: "User-Agent")
-        urlRequest.httpBody = requestData
-
-        let semaphore = DispatchSemaphore(value: 0)
-        var taskResult: Result<Data, Error>?
-        URLSession.shared.dataTask(with: urlRequest) { data, _, error in
-            if let error = error {
-                taskResult = .failure(error)
-            } else {
-                taskResult = .success(data ?? Data())
-            }
-            semaphore.signal()
-        }.resume()
-        semaphore.wait()
-
-        guard let taskResult else {
-            throw IdeviceGatewayError.serviceError("TSS request did not return a response")
-        }
-
-        let data: Data
-        switch taskResult {
-        case .success(let responseData):
-            data = responseData
-        case .failure(let error):
-            throw IdeviceGatewayError.serviceError("TSS request failed: \(error.localizedDescription)")
-        }
-
-        let responseText = String(decoding: data, as: UTF8.self)
-        let trimmed = responseText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let withoutStatus = trimmed.replacingOccurrences(of: "STATUS=0&", with: "")
-        let withoutMessage = withoutStatus.replacingOccurrences(of: "MESSAGE=", with: "", options: .anchored)
-        guard withoutMessage.hasPrefix("SUCCESS") else {
-            throw IdeviceGatewayError.serviceError("TSS server returned non-success response")
-        }
-        guard let requestStringRange = withoutMessage.range(of: "REQUEST_STRING=") else {
-            throw IdeviceGatewayError.serviceError("TSS response missing REQUEST_STRING")
-        }
-        let plistString = String(withoutMessage[requestStringRange.upperBound...])
-        guard let plistData = plistString.data(using: .utf8),
-              let responsePlist = try PropertyListSerialization.propertyList(from: plistData, options: [], format: nil) as? [String: Any],
-              let ticket = responsePlist["ApImg4Ticket"] as? Data else {
-            throw IdeviceGatewayError.serviceError("TSS response missing ApImg4Ticket")
-        }
-        return ticket
-    }
-
-    private func plistNodeToData(_ node: plist_t) -> Data? {
-        var xmlPtr: UnsafeMutablePointer<Int8>? = nil
-        var xmlLen: UInt32 = 0
-        let err = plist_to_xml(node, &xmlPtr, &xmlLen)
-        guard err == PLIST_ERR_SUCCESS, let xmlPtr else {
-            return nil
-        }
-        defer { free(xmlPtr) }
-        return Data(bytes: xmlPtr, count: Int(xmlLen))
-    }
-
-    private func plistUnsignedValue(_ value: Any?, label: String) throws -> UInt64 {
-        if let value = value as? UInt64 {
-            return value
-        }
-        if let value = value as? UInt32 {
-            return UInt64(value)
-        }
-        if let value = value as? UInt {
-            return UInt64(value)
-        }
-        if let value = value as? Int, value >= 0 {
-            return UInt64(value)
-        }
-        if let value = value as? NSNumber {
-            return value.uint64Value
-        }
-        if let value = value as? String {
-            if let parsed = UInt64(value), value.allSatisfy({ $0.isNumber }) {
-                return parsed
-            }
-            if let parsed = UInt64(value.replacingOccurrences(of: "0x", with: ""), radix: 16) {
-                return parsed
-            }
-        }
-        throw IdeviceGatewayError.serviceError("Invalid \(label) value")
-    }
-
-    private func applyRestoreRequestRules(
-        input: inout [String: Any],
-        parameters: [String: Any],
-        rules: [Any]
-    ) {
-        for ruleAny in rules {
-            guard
-                let rule = ruleAny as? [String: Any],
-                let conditions = rule["Conditions"] as? [String: Any],
-                let actions = rule["Actions"] as? [String: Any]
-            else {
-                continue
-            }
-
-            var conditionsFulfilled = true
-            for (key, value) in conditions {
-                let value2: Any?
-                switch key {
-                case "ApRawProductionMode", "ApCurrentProductionMode":
-                    value2 = parameters["ApProductionMode"]
-                case "ApRawSecurityMode":
-                    value2 = parameters["ApSecurityMode"]
-                case "ApRequiresImage4":
-                    value2 = parameters["ApSupportsImg4"]
-                case "ApDemotionPolicyOverride":
-                    value2 = parameters["DemotionPolicy"]
-                case "ApInRomDFU":
-                    value2 = parameters["ApInRomDFU"]
-                default:
-                    value2 = nil
-                }
-
-                if !plistValue(value2, equals: value) {
-                    conditionsFulfilled = false
-                    break
-                }
-            }
-
-            guard conditionsFulfilled else { continue }
-
-            for (key, value) in actions {
-                if plistShouldIgnore(value) {
-                    continue
-                }
-                input.removeValue(forKey: key)
-                input[key] = value
-            }
-        }
-    }
-
-    private func plistValue(_ lhs: Any?, equals rhs: Any) -> Bool {
-        switch (lhs, rhs) {
-        case let (l as Bool, r as Bool):
-            return l == r
-        case let (l as NSNumber, r as NSNumber):
-            return l == r
-        case let (l as String, r as String):
-            return l == r
-        case let (l as Data, r as Data):
-            return l == r
-        default:
-            return false
-        }
-    }
-
-    private func plistShouldIgnore(_ value: Any) -> Bool {
-        if let number = value as? NSNumber {
-            return number.intValue == 255
-        }
-        if let int = value as? Int {
-            return int == 255
-        }
-        return false
     }
 
     public func mountDeveloperImage(image: Data, signature: Data) throws {

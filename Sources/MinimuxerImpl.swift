@@ -132,10 +132,6 @@ final internal class MinimuxerImpl: MinimuxerAPI {
     
     func fetchUDID() throws -> String? {
         verboseLog("[minimuxer] Getting UDID for first device")
-        guard MuxerService.started else {
-            debugLog("[minimuxer] ERROR: minimuxer has not started!")
-            return nil
-        }
         let udid = try DeviceService.getFirstDevice().getUDID()
         verboseLog("[minimuxer] Device UDID = \(udid)")
         return udid

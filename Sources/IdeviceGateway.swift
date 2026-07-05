@@ -14,6 +14,7 @@ public enum IdeviceGatewayError: LocalizedError {
     case connectionFailed(String)
     case serviceError(String)
     case noConnection
+    case notInitialized
 
     public var errorDescription: String? {
         switch self {
@@ -25,12 +26,19 @@ public enum IdeviceGatewayError: LocalizedError {
             return "Service operation failed: \(reason)"
         case .noConnection:
             return "No connection to the device."
+        case .notInitialized:
+            return "IdeviceGateway not initialized. start() should be called first."
         }
+    }
+
+    public var failureReason: String? {
+        return errorDescription
     }
 }
 
 public final class IdeviceGateway {
     public static let shared = IdeviceGateway()
+    public var lastError: Error? = nil
 
     private func getRustPlistString(_ node: plist_t) -> String? {
         var valPtr: UnsafeMutablePointer<Int8>? = nil
@@ -49,6 +57,7 @@ public final class IdeviceGateway {
     private var handshake: OpaquePointer? = nil
     private var deviceIP: String = "10.7.0.1"
     private var isRPPairing: Bool = false
+    private var isInitialized = false
 
     private init() {}
 
@@ -58,6 +67,9 @@ public final class IdeviceGateway {
 
     private func cleanup() {
         debugLog("[IdeviceGateway] cleanup() called")
+        isInitialized = false
+        isRPPairing = false
+        lastError = nil
         if let handshake = handshake {
             verboseLog("[IdeviceGateway] cleanup() freeing handshake")
             rsd_handshake_free(handshake)
@@ -72,6 +84,13 @@ public final class IdeviceGateway {
             verboseLog("[IdeviceGateway] cleanup() freeing pairingFile")
             rp_pairing_file_free(pairingFile)
             self.pairingFile = nil
+        }
+    }
+
+    private func verifyInitialized() throws {
+        guard isInitialized else {
+            debugLog("[IdeviceGateway] verifyInitialized() failed: Gateway has not been initialized.")
+            throw IdeviceGatewayError.notInitialized
         }
     }
 
@@ -92,6 +111,7 @@ public final class IdeviceGateway {
     }
 
     public func setLogging(_ enabled: Bool) {
+        debugLog("[IdeviceGateway] setLogging(\(enabled)) called")
         // idevice_init_logger(enabled ? IdeviceLogLevel(rawValue: 4) : IdeviceLogLevel(rawValue: 0), IdeviceLogLevel(rawValue: 0), nil)
         idevice_init_logger(IdeviceLogLevel(rawValue: 1), IdeviceLogLevel(rawValue: 0), nil)
     }
@@ -136,6 +156,7 @@ public final class IdeviceGateway {
             verboseLog("[IdeviceGateway] start() setting isRPPairing = false (traditional pathway)")
             isRPPairing = false
         }
+        isInitialized = true
     }
 
     private func ensureRPConnection() throws {
@@ -178,11 +199,44 @@ public final class IdeviceGateway {
         }
 
         if let err = err {
+            let ffiErr = err.pointee
+            let code = ffiErr.code
+            let subCode = ffiErr.sub_code
+            var msg = ""
+            if let msgPtr = ffiErr.message {
+                msg = String(cString: msgPtr)
+            }
+            debugLog("[IdeviceGateway] ensureRPConnection() tunnel_create_rppairing failed with code: \(code), subCode: \(subCode), message: \(msg)")
             defer { idevice_error_free(err) }
-            debugLog("[IdeviceGateway] ensureRPConnection() tunnel_create_rppairing failed")
-            throw IdeviceGatewayError.connectionFailed("Tunnel creation failed")
+            
+            if isPairingError(err) {
+                lastError = IdeviceGatewayError.invalidPairingFile
+                throw IdeviceGatewayError.invalidPairingFile
+            } else {
+                let error = IdeviceGatewayError.connectionFailed(msg.isEmpty ? "Tunnel creation failed" : msg)
+                lastError = error
+                throw error
+            }
         }
         debugLog("[IdeviceGateway] ensureRPConnection() tunnel_create_rppairing succeeded, adapter: \(String(describing: adapter)), handshake: \(String(describing: handshake))")
+    }
+
+    private func isPairingError(_ err: UnsafeMutablePointer<IdeviceFfiError>) -> Bool {
+        let code = err.pointee.code
+        // 103: RemotePairing, 18: InvalidHostID, 30: PairingDialogResponsePending, 31: UserDeniedPairing, 32: PasswordProtected
+        if code == 103 || code == 18 || code == 30 || code == 31 || code == 32 {
+            return true
+        }
+        
+        if let msgPtr = err.pointee.message {
+            let msg = String(cString: msgPtr).lowercased()
+            if msg.contains("invalidconf") || msg.contains("pairing") || msg.contains("handshake") ||
+                msg.contains("connection reset") || msg.contains("connectionreset") ||
+                msg.contains("broken pipe") || msg.contains("brokenpipe") {
+                return true
+            }
+        }
+        return false
     }
 
     private func performWithService<T>(
@@ -196,9 +250,24 @@ public final class IdeviceGateway {
         var client: OpaquePointer? = nil
         let err = connect(adapter, handshake, &client)
         if let err = err {
-            debugLog("[IdeviceGateway] performWithService(\(serviceName)) connect failed")
+            let ffiErr = err.pointee
+            let code = ffiErr.code
+            let subCode = ffiErr.sub_code
+            var msg = ""
+            if let msgPtr = ffiErr.message {
+                msg = String(cString: msgPtr)
+            }
+            debugLog("[IdeviceGateway] performWithService(\(serviceName)) connect failed with code: \(code), subCode: \(subCode), message: \(msg)")
             defer { idevice_error_free(err) }
-            throw IdeviceGatewayError.serviceError("Failed to connect to \(serviceName)")
+            
+            if isPairingError(err) {
+                lastError = IdeviceGatewayError.invalidPairingFile
+                throw IdeviceGatewayError.invalidPairingFile
+            } else {
+                let error = IdeviceGatewayError.serviceError("Failed to connect to \(serviceName): \(msg.isEmpty ? "Unknown FFI error" : msg)")
+                lastError = error
+                throw error
+            }
         }
         guard let client = client else {
             debugLog("[IdeviceGateway] performWithService(\(serviceName)) client is nil")
@@ -320,8 +389,9 @@ public final class IdeviceGateway {
         }
     }
 
-    public func fetchUDID() -> String? {
+    public func fetchUDID() throws -> String? {
         debugLog("[IdeviceGateway] fetchUDID() started, isRPPairing: \(isRPPairing)")
+        try verifyInitialized()
         if isRPPairing {
             do {
                 verboseLog("[IdeviceGateway] fetchUDID() calling ensureRPConnection()")
@@ -388,6 +458,7 @@ public final class IdeviceGateway {
 
     public func getLockdownValue(key: String) throws -> String? {
         debugLog("[IdeviceGateway] getLockdownValue(key: \(key)) started, isRPPairing: \(isRPPairing)")
+        try verifyInitialized()
         if isRPPairing && key == "ProductVersion" {
             verboseLog("[IdeviceGateway] getLockdownValue returning mock 17.0 for ProductVersion")
             return "17.0"
@@ -422,6 +493,7 @@ public final class IdeviceGateway {
 
     public func installProvisioningProfile(profile: Data) throws {
         debugLog("[IdeviceGateway] installProvisioningProfile() called, profile length: \(profile.count)")
+        try verifyInitialized()
         try performWithEitherService(
             connectRP: misagent_connect_rsd,
             connectUsbmuxd: misagent_connect,
@@ -445,6 +517,7 @@ public final class IdeviceGateway {
 
     public func removeProvisioningProfile(id: String) throws {
         debugLog("[IdeviceGateway] removeProvisioningProfile() called, id: \(id)")
+        try verifyInitialized()
         try performWithEitherService(
             connectRP: misagent_connect_rsd,
             connectUsbmuxd: misagent_connect,
@@ -466,6 +539,7 @@ public final class IdeviceGateway {
 
     public func removeApp(bundleId: String) throws {
         debugLog("[IdeviceGateway] removeApp() called, bundleId: \(bundleId)")
+        try verifyInitialized()
         try performWithEitherService(
             connectRP: installation_proxy_connect_rsd,
             connectUsbmuxd: installation_proxy_connect,
@@ -487,6 +561,7 @@ public final class IdeviceGateway {
 
     public func yeetAppAfc(bundleId: String, ipaBytes: Data) throws {
         debugLog("[IdeviceGateway] yeetAppAfc() called, bundleId: \(bundleId), ipaBytes size: \(ipaBytes.count)")
+        try verifyInitialized()
         try performWithEitherService(
             connectRP: afc_client_connect_rsd,
             connectUsbmuxd: afc_client_connect,
@@ -538,6 +613,7 @@ public final class IdeviceGateway {
 
     public func installIpa(bundleId: String) throws {
         debugLog("[IdeviceGateway] installIpa() called, bundleId: \(bundleId)")
+        try verifyInitialized()
         try performWithEitherService(
             connectRP: installation_proxy_connect_rsd,
             connectUsbmuxd: installation_proxy_connect,
@@ -827,6 +903,7 @@ public final class IdeviceGateway {
 
     public func debugApp(appId: String) throws {
         debugLog("[IdeviceGateway] debugApp() called, appId: \(appId)")
+        try verifyInitialized()
         guard let versionStr = try getLockdownValue(key: "ProductVersion"),
               let majorStr = versionStr.split(separator: ".").first,
               let major = Int(majorStr) else {
@@ -854,6 +931,7 @@ public final class IdeviceGateway {
 
     public func debugProcess(pid: UInt32) throws {
         debugLog("[IdeviceGateway] debugProcess() called, pid: \(pid)")
+        try verifyInitialized()
         try performWithEitherService(
             connectRP: debug_proxy_connect_rsd,
             connectUsbmuxd: { [weak self] _, _ in
@@ -872,6 +950,7 @@ public final class IdeviceGateway {
 
     public func dumpProfiles(docsPath: String) throws -> String {
         debugLog("[IdeviceGateway] dumpProfiles() called, docsPath: \(docsPath)")
+        try verifyInitialized()
         return try performWithEitherService(
             connectRP: misagent_connect_rsd,
             connectUsbmuxd: misagent_connect,
@@ -926,6 +1005,7 @@ public final class IdeviceGateway {
 
     public func performHeartbeat(interval: UInt64, newInterval: UnsafeMutablePointer<UInt64>) throws {
         debugLog("[IdeviceGateway] performHeartbeat() called, interval: \(interval)")
+        try verifyInitialized()
         try performWithEitherService(
             connectRP: heartbeat_connect_rsd,
             connectUsbmuxd: heartbeat_connect,
@@ -952,6 +1032,7 @@ public final class IdeviceGateway {
 
     public func mountPersonalizedDdi(image: Data, trustcache: Data, manifest: Data) throws {
         debugLog("[IdeviceGateway] mountPersonalizedDdi() called, image size: \(image.count), trustcache size: \(trustcache.count), manifest size: \(manifest.count)")
+        try verifyInitialized()
         guard isRPPairing else {
             debugLog("[IdeviceGateway] mountPersonalizedDdi() failed: isRPPairing is false")
             throw IdeviceGatewayError.serviceError("Personalized DDI mounting is only supported over Remote Pairing (iOS 17+).")
@@ -1011,6 +1092,7 @@ public final class IdeviceGateway {
 
     public func mountDeveloperImage(image: Data, signature: Data) throws {
         debugLog("[IdeviceGateway] mountDeveloperImage() called, image size: \(image.count), signature size: \(signature.count)")
+        try verifyInitialized()
         try performWithEitherService(
             connectRP: image_mounter_connect_rsd,
             connectUsbmuxd: image_mounter_connect,

@@ -115,8 +115,6 @@ final internal class MinimuxerImpl: MinimuxerAPI {
     }
     
     func setLogging(_ enabled: Bool) {
-//        rustBridgeSetDebug(enabled)
-//        _rust_bridge_idevice_set_logging(enabled)
         self.isLoggingEnabled = enabled
     }
     
@@ -132,24 +130,14 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         MuxerService.retargetUsbmuxdAddr()
     }
     
-    func fetchUDID() -> String? {
+    func fetchUDID() throws -> String? {
         verboseLog("[minimuxer] Getting UDID for first device")
         guard MuxerService.started else {
             debugLog("[minimuxer] ERROR: minimuxer has not started!")
             return nil
         }
-        let udid: String?
-        if MuxerService.isrppairing {
-            udid = IdeviceGateway.shared.fetchUDID()
-        } else {
-            udid = (try? DeviceService.getFirstDevice())?.getUDID()
-        }
-        
-        if let udid = udid {
-            verboseLog("[minimuxer] UDID: \(udid)")
-        } else {
-            debugLog("[minimuxer] ERROR: Failed to get UDID")
-        }
+        let udid = try DeviceService.getFirstDevice().getUDID()
+        verboseLog("[minimuxer] Device UDID = \(udid)")
         return udid
     }
     
@@ -177,26 +165,6 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         var pfd = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
         let result = poll(&pfd, 1, 100)
         return result > 0 && (pfd.revents & Int16(POLLOUT)) != 0
-    }
-    
-    func yeetAppAfc(bundleId: String, ipaBytes: Data) throws {
-        try Install.yeetAppAfc(bundleId: bundleId, ipaBytes: ipaBytes)
-    }
-    
-    func installIpa(bundleId: String) throws {
-        try Install.installIpa(bundleId: bundleId)
-    }
-    
-    func removeApp(bundleId: String) throws {
-        try Install.removeApp(bundleId: bundleId)
-    }
-    
-    func debugApp(appId: String) throws {
-        try JIT.debugApp(appId: appId)
-    }
-    
-    func attachDebugger(pid: UInt32) throws {
-        try JIT.attachDebugger(pid: pid)
     }
     
     func startAutoMounter(docsPath: String) async {
@@ -243,18 +211,6 @@ final internal class MinimuxerImpl: MinimuxerAPI {
                     await onBackgroundError?(wrappedError)
                 }
         }
-    }
-    
-    func installProvisioningProfile(profile: Data) throws {
-        try Provision.installProvisioningProfile(profile: profile)
-    }
-    
-    func removeProvisioningProfile(id: String) throws {
-        try Provision.removeProvisioningProfile(id: id)
-    }
-    
-    func dumpProfiles(docsPath: String) throws -> String {
-        return try Provision.dumpProfiles(docsPath: docsPath)
     }
 }
 

@@ -92,8 +92,8 @@ public final class IdeviceGateway {
     }
 
     public func setLogging(_ enabled: Bool) {
-        idevice_init_logger(enabled ? IdeviceLogLevel(rawValue: 4) : IdeviceLogLevel(rawValue: 0), IdeviceLogLevel(rawValue: 0), nil)
-        // idevice_init_logger(IdeviceLogLevel(rawValue: 0), IdeviceLogLevel(rawValue: 0), nil)
+        // idevice_init_logger(enabled ? IdeviceLogLevel(rawValue: 4) : IdeviceLogLevel(rawValue: 0), IdeviceLogLevel(rawValue: 0), nil)
+        idevice_init_logger(IdeviceLogLevel(rawValue: 1), IdeviceLogLevel(rawValue: 0), nil)
     }
 
     public func start(pairingFileContent: String) throws {

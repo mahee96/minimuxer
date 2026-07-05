@@ -184,7 +184,7 @@ final internal class LockDownMounterService: MounterServiceProvider {
     private func handlePost17Mount(dmgDocsPath: String) async throws {
         let (imageData, trustcacheData, manifestData) = try LockDownMounterService.loadPost17Image(dmgDocsPath: dmgDocsPath)
 
-        verboseLog(
+        debugLog(
             "[minimuxer] Mounting DDI " +
             "(image=\(imageData.count) bytes, " +
             "trustcache=\(trustcacheData.count) bytes, " +

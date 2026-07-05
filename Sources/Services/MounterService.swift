@@ -131,6 +131,16 @@ final internal class LockDownMounterService: MounterServiceProvider {
                 logIfNeeded("\(error)", prefix: "mount-task: ERROR: Mount failed with .NoDevice error: ")
                 await Minimuxer.shared.checkAndNotify(.failed(.mounter, error))
                 return
+            } catch let error as IdeviceGatewayError {
+                switch error {
+                case .connectionFailed, .noConnection:
+                    // Keep retrying if the device is not yet present on usbmuxd or connection is pending
+                    continue
+                default:
+                    logIfNeeded("\(error)", prefix: "mount-task: ERROR: Mount failed with gateway error: ")
+                    await Minimuxer.shared.checkAndNotify(.failed(.mounter, error))
+                    return
+                }
             } catch {
                 logIfNeeded("\(error)", prefix: "mount-task: ERROR: Mount failed with unknown error: ")
                 await Minimuxer.shared.checkAndNotify(.failed(.mounter, error))
@@ -181,15 +191,10 @@ final internal class LockDownMounterService: MounterServiceProvider {
             "manifest=\(manifestData.count) bytes)"
         )
 
-        do {
-            try IdeviceGateway.shared.mountPersonalizedDdi(image: imageData, trustcache: trustcacheData, manifest: manifestData)
-            verboseLog("[minimuxer] DDI mounted successfully")
-            dmgMounted = true
-            await Minimuxer.shared.checkAndNotify(.ready(.mounter))
-        } catch {
-            verboseLog("[minimuxer] ERROR: Failed to mount DDI: \(error)")
-            throw MinimuxerError.Mount
-        }
+        try IdeviceGateway.shared.mountPersonalizedDdi(image: imageData, trustcache: trustcacheData, manifest: manifestData)
+        verboseLog("[minimuxer] DDI mounted successfully")
+        dmgMounted = true
+        await Minimuxer.shared.checkAndNotify(.ready(.mounter))
     }
 
     static func loadPost17Image(dmgDocsPath: String) throws -> (Data, Data, Data){

@@ -49,7 +49,7 @@ final internal class MuxerService {
             verboseLog("[minimuxer] Already started minimuxer, skipping")
             return
         }
-        Task.detached { listenLoop() }
+        Thread.detachNewThread { listenLoop() }
         started = true
         verboseLog("[minimuxer] minimuxer has started!")
     }
@@ -133,7 +133,12 @@ final internal class MuxerService {
     }
     
     private static func handleClient(fd: Int32) {
-        defer { close(fd) }
+        var shouldCloseFd = true
+        defer {
+            if shouldCloseFd {
+                close(fd)
+            }
+        }
 
         let bufLen = 0xfff
         var buffer = [UInt8](repeating: 0, count: bufLen)
@@ -154,6 +159,12 @@ final internal class MuxerService {
             let data = Data(buffer[0..<totalRead])
             guard let packet = RawPacket(data: data) else { return }
 
+            if let messageType = packet.plist["MessageType"] as? String, messageType == "Connect" {
+                shouldCloseFd = false
+                handleConnectPacket(packet, clientFd: fd)
+                return
+            }
+
             do {
                 let response = try handlePacket(packet, fd: fd)
                 let responsePacket = RawPacket(plist: response, version: 1, message: 8, tag: packet.tag)
@@ -163,6 +174,166 @@ final internal class MuxerService {
                 }
             } catch {}
         }
+    }
+
+    private static func handleConnectPacket(_ packet: RawPacket, clientFd: Int32) {
+        verboseLog("[minimuxer] usbmux message: Connect")
+        guard let portVal = packet.plist["PortNumber"] as? Int,
+              let deviceIP = currentDeviceIP else {
+            verboseLog("[minimuxer] Connect failed: port or deviceIP is nil")
+            let response: [String: Any] = ["MessageType": "Result", "Number": 3] // Connection refused
+            let responsePacket = RawPacket(plist: response, version: 1, message: 8, tag: packet.tag)
+            let responseData = responsePacket.data
+            responseData.withUnsafeBytes { ptr in
+                _ = send(clientFd, ptr.baseAddress!, responseData.count, 0)
+            }
+            return
+        }
+
+        verboseLog("[minimuxer] Connect request for device \(deviceIP) on port \(portVal)")
+
+        var activeFd: Int32 = -1
+        var connectResult: Int32 = -1
+        var chosenPort = portVal
+
+        // 1. Try first with portVal
+        let deviceFd1 = socket(AF_INET, SOCK_STREAM, 0)
+        if deviceFd1 >= 0 {
+            var deviceAddr = sockaddr_in()
+            deviceAddr.sin_family = sa_family_t(AF_INET)
+            deviceAddr.sin_port = UInt16(portVal)
+            deviceAddr.sin_addr.s_addr = deviceIP.withCString { inet_addr($0) }
+            #if os(macOS) || os(iOS)
+            deviceAddr.sin_len = __uint8_t(MemoryLayout<sockaddr_in>.size)
+            #endif
+
+            let r1 = withUnsafePointer(to: &deviceAddr) {
+                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                    connect(deviceFd1, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+                }
+            }
+
+            if r1 == 0 {
+                // Wait briefly for the WireGuard interface to route and establish (or reject)
+                Thread.sleep(forTimeInterval: 0.05)
+                let flags = fcntl(deviceFd1, F_GETFL, 0)
+                _ = fcntl(deviceFd1, F_SETFL, flags | O_NONBLOCK)
+                var tempBuf = [UInt8](repeating: 0, count: 1)
+                let peekRead = recv(deviceFd1, &tempBuf, 1, MSG_PEEK)
+                _ = fcntl(deviceFd1, F_SETFL, flags) // restore blocking
+
+                if peekRead == 0 {
+                    verboseLog("[minimuxer] connect to \(deviceIP):\(portVal) was immediately closed by peer. Trying swapped port.")
+                    close(deviceFd1)
+                } else {
+                    activeFd = deviceFd1
+                    connectResult = 0
+                }
+            } else {
+                close(deviceFd1)
+            }
+        }
+
+        // 2. If first attempt failed/closed, try the byte-swapped port
+        if activeFd < 0 {
+            let swappedPort = UInt16(portVal).byteSwapped
+            chosenPort = Int(swappedPort)
+            let deviceFd2 = socket(AF_INET, SOCK_STREAM, 0)
+            if deviceFd2 >= 0 {
+                var deviceAddr = sockaddr_in()
+                deviceAddr.sin_family = sa_family_t(AF_INET)
+                deviceAddr.sin_port = swappedPort
+                deviceAddr.sin_addr.s_addr = deviceIP.withCString { inet_addr($0) }
+                #if os(macOS) || os(iOS)
+                deviceAddr.sin_len = __uint8_t(MemoryLayout<sockaddr_in>.size)
+                #endif
+
+                let r2 = withUnsafePointer(to: &deviceAddr) {
+                    $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                        connect(deviceFd2, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+                    }
+                }
+
+                if r2 == 0 {
+                    Thread.sleep(forTimeInterval: 0.05)
+                    let flags = fcntl(deviceFd2, F_GETFL, 0)
+                    _ = fcntl(deviceFd2, F_SETFL, flags | O_NONBLOCK)
+                    var tempBuf = [UInt8](repeating: 0, count: 1)
+                    let peekRead = recv(deviceFd2, &tempBuf, 1, MSG_PEEK)
+                    _ = fcntl(deviceFd2, F_SETFL, flags) // restore blocking
+
+                    if peekRead == 0 {
+                        verboseLog("[minimuxer] connect to swapped \(deviceIP):\(swappedPort) was also closed.")
+                        close(deviceFd2)
+                    } else {
+                        activeFd = deviceFd2
+                        connectResult = 0
+                    }
+                } else {
+                    close(deviceFd2)
+                }
+            }
+        }
+
+        verboseLog("[minimuxer] connect to \(deviceIP) result: \(connectResult == 0 ? "success" : "failed") on port \(chosenPort)")
+
+        if activeFd < 0 {
+            let response: [String: Any] = ["MessageType": "Result", "Number": 3] // Connection refused
+            let responsePacket = RawPacket(plist: response, version: 1, message: 8, tag: packet.tag)
+            let responseData = responsePacket.data
+            responseData.withUnsafeBytes { ptr in
+                _ = send(clientFd, ptr.baseAddress!, responseData.count, 0)
+            }
+            return
+        }
+
+        let deviceFd = activeFd
+
+        // Respond success
+        let response: [String: Any] = ["MessageType": "Result", "Number": 0]
+        let responsePacket = RawPacket(plist: response, version: 1, message: 8, tag: packet.tag)
+        let responseData = responsePacket.data
+        responseData.withUnsafeBytes { ptr in
+            _ = send(clientFd, ptr.baseAddress!, responseData.count, 0)
+        }
+
+        verboseLog("[minimuxer] Connect success. Starting proxy loops.")
+
+        // Proxy bi-directionally
+        Thread.detachNewThread {
+            var proxyBuf = [UInt8](repeating: 0, count: 4096)
+            while true {
+                let r = recv(deviceFd, &proxyBuf, proxyBuf.count, 0)
+                if r <= 0 {
+                    verboseLog("[minimuxer] proxy: device closed connection or failed: \(r)")
+                    break
+                }
+                verboseLog("[minimuxer] proxy: forwarding \(r) bytes from device to client")
+                let s = send(clientFd, proxyBuf, r, 0)
+                if s <= 0 {
+                    verboseLog("[minimuxer] proxy: failed to forward to client: \(s)")
+                    break
+                }
+            }
+            close(deviceFd)
+            close(clientFd)
+        }
+
+        var proxyBuf = [UInt8](repeating: 0, count: 4096)
+        while true {
+            let r = recv(clientFd, &proxyBuf, proxyBuf.count, 0)
+            if r <= 0 {
+                verboseLog("[minimuxer] proxy: client closed connection or failed: \(r)")
+                break
+            }
+            verboseLog("[minimuxer] proxy: forwarding \(r) bytes from client to device")
+            let s = send(deviceFd, proxyBuf, r, 0)
+            if s <= 0 {
+                verboseLog("[minimuxer] proxy: failed to forward to device: \(s)")
+                break
+            }
+        }
+        close(deviceFd)
     }
 
     

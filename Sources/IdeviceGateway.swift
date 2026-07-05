@@ -68,6 +68,17 @@ public final class IdeviceGateway {
     private func cleanup() {
         debugLog("[IdeviceGateway] cleanup() called")
         isInitialized = false
+        
+        if let pairingFile = self.pairingFile {
+            verboseLog("[IdeviceGateway] cleanup() freeing pairingFile")
+            if isRPPairing {
+                rp_pairing_file_free(pairingFile)
+            } else {
+                idevice_pairing_file_free(pairingFile)
+            }
+            self.pairingFile = nil
+        }
+
         isRPPairing = false
         lastError = nil
         if let handshake = handshake {
@@ -79,11 +90,6 @@ public final class IdeviceGateway {
             verboseLog("[IdeviceGateway] cleanup() freeing adapter")
             adapter_free(adapter)
             self.adapter = nil
-        }
-        if let pairingFile = pairingFile {
-            verboseLog("[IdeviceGateway] cleanup() freeing pairingFile")
-            rp_pairing_file_free(pairingFile)
-            self.pairingFile = nil
         }
     }
 
@@ -158,6 +164,19 @@ public final class IdeviceGateway {
             // For pre-iOS 17 devices, a default connection can be established without RPPairing tunnel
             verboseLog("[IdeviceGateway] start() setting isRPPairing = false (traditional pathway)")
             isRPPairing = false
+
+            // Parse pairing file content XML plist to self.pairingFile IdevicePairingFile*
+            try data.withUnsafeBytes { (buf: UnsafeRawBufferPointer) in
+                if let baseAddress = buf.baseAddress?.assumingMemoryBound(to: UInt8.self) {
+                    verboseLog("[IdeviceGateway] start() loading traditional pairing file bytes")
+                    let err = idevice_pairing_file_from_bytes(baseAddress, UInt(data.count), &pairingFile)
+                    if err != nil {
+                        debugLog("[IdeviceGateway] start() idevice_pairing_file_from_bytes failed")
+                        throw IdeviceGatewayError.invalidPairingFile
+                    }
+                    verboseLog("[IdeviceGateway] start() loaded traditional pairingFile successfully")
+                }
+            }
         }
         isInitialized = true
     }
@@ -293,16 +312,55 @@ public final class IdeviceGateway {
         verboseLog("[IdeviceGateway] performWithUsbmuxdService(\(serviceName)) started")
         
         var addr: OpaquePointer? = nil
-        let err = idevice_usbmuxd_default_addr_new(&addr)
+        var err: UnsafeMutablePointer<IdeviceFfiError>? = nil
+
+        if let envVal = getenv("USBMUXD_SOCKET_ADDRESS") {
+            let envAddr = String(cString: envVal)
+            verboseLog("[IdeviceGateway] performWithUsbmuxdService(\(serviceName)) using USBMUXD_SOCKET_ADDRESS: \(envAddr)")
+            if envAddr.contains(":") {
+                let parts = envAddr.split(separator: ":")
+                if parts.count == 2, let portVal = UInt16(parts[1]) {
+                    let host = String(parts[0])
+                    var sockAddr = sockaddr_in()
+                    sockAddr.sin_family = sa_family_t(AF_INET)
+                    sockAddr.sin_port = portVal.bigEndian
+                    sockAddr.sin_addr.s_addr = host.withCString { inet_addr($0) }
+                    #if os(macOS) || os(iOS)
+                    sockAddr.sin_len = __uint8_t(MemoryLayout<sockaddr_in>.size)
+                    #endif
+                    
+                    err = withUnsafePointer(to: &sockAddr) { ptr in
+                        ptr.withMemoryRebound(to: idevice_sockaddr.self, capacity: 1) { reboundPtr in
+                            return idevice_usbmuxd_tcp_addr_new(reboundPtr, socklen_t(MemoryLayout<sockaddr_in>.size), &addr)
+                        }
+                    }
+                } else {
+                    debugLog("[IdeviceGateway] performWithUsbmuxdService(\(serviceName)) invalid USBMUXD_SOCKET_ADDRESS format: \(envAddr)")
+                }
+            } else {
+                #if os(macOS) || os(iOS)
+                err = envAddr.withCString { pathPtr in
+                    return idevice_usbmuxd_unix_addr_new(pathPtr, &addr)
+                }
+                #else
+                debugLog("[IdeviceGateway] performWithUsbmuxdService(\(serviceName)) Unix socket not supported on this platform")
+                #endif
+            }
+        }
+
+        if addr == nil {
+            err = idevice_usbmuxd_default_addr_new(&addr)
+        }
+
         if let err = err {
             let msg = err.pointee.message != nil ? String(cString: err.pointee.message!) : "No message"
-            debugLog("[IdeviceGateway] performWithUsbmuxdService(\(serviceName)) default_addr_new failed: code=\(err.pointee.code), message=\(msg)")
+            debugLog("[IdeviceGateway] performWithUsbmuxdService(\(serviceName)) addr creation failed: code=\(err.pointee.code), message=\(msg)")
             defer { idevice_error_free(err) }
-            throw IdeviceGatewayError.connectionFailed("Failed to get usbmuxd default addr: \(msg)")
+            throw IdeviceGatewayError.connectionFailed("Failed to get usbmuxd addr: \(msg)")
         }
         guard let addr = addr else {
-            debugLog("[IdeviceGateway] performWithUsbmuxdService(\(serviceName)) usbmuxd default addr is nil")
-            throw IdeviceGatewayError.connectionFailed("Usbmuxd default addr was nil")
+            debugLog("[IdeviceGateway] performWithUsbmuxdService(\(serviceName)) usbmuxd addr is nil")
+            throw IdeviceGatewayError.connectionFailed("Usbmuxd addr was nil")
         }
         
         var provider: OpaquePointer? = nil
@@ -1064,30 +1122,34 @@ public final class IdeviceGateway {
     public func mountPersonalizedDdi(image: Data, trustcache: Data, manifest: Data) throws {
         debugLog("[IdeviceGateway] mountPersonalizedDdi() called, image size: \(image.count), trustcache size: \(trustcache.count), manifest size: \(manifest.count)")
         try verifyInitialized()
-        guard isRPPairing else {
-            debugLog("[IdeviceGateway] mountPersonalizedDdi() failed: isRPPairing is false")
-            throw IdeviceGatewayError.serviceError("Personalized DDI mounting is only supported over Remote Pairing (iOS 17+).")
+
+        if isRPPairing {
+            try mountPersonalizedDdiRsd(image: image, trustcache: trustcache, manifest: manifest)
+            return
         }
+
+        try mountPersonalizedDdiIdevice(image: image, trustcache: trustcache, manifest: manifest)
+    }
+
+    private func mountPersonalizedDdiRsd(image: Data, trustcache: Data, manifest: Data) throws {
         var chipID: UInt64 = 0
         try performWithService(connect: lockdownd_connect_rsd, cleanup: { client in
             lockdownd_client_free(client)
         }, serviceName: "lockdownd") { lockdownClient in
             var plistVal: plist_t? = nil
-            verboseLog("[IdeviceGateway] mountPersonalizedDdi() getting UniqueChipID")
+            verboseLog("[IdeviceGateway] mountPersonalizedDdiRsd() getting UniqueChipID")
             let valErr = lockdownd_get_value(lockdownClient, "UniqueChipID", nil, &plistVal)
             if let valErr = valErr {
-                debugLog("[IdeviceGateway] mountPersonalizedDdi() lockdownd_get_value failed")
+                debugLog("[IdeviceGateway] mountPersonalizedDdiRsd() lockdownd_get_value failed")
                 defer { idevice_error_free(valErr) }
                 throw IdeviceGatewayError.serviceError("Failed to get UniqueChipID")
             }
             if let plistVal = plistVal {
-                defer {
-                    plist_free(plistVal)
-                }
+                defer { plist_free(plistVal) }
                 var val: UInt64 = 0
                 plist_get_uint_val(plistVal, &val)
                 chipID = val
-                verboseLog("[IdeviceGateway] mountPersonalizedDdi() got chipID: \(chipID)")
+                verboseLog("[IdeviceGateway] mountPersonalizedDdiRsd() got chipID: \(chipID)")
             }
         }
 
@@ -1095,7 +1157,7 @@ public final class IdeviceGateway {
             try image.withUnsafeBytes { imgBuf in
                 try trustcache.withUnsafeBytes { tcBuf in
                     try manifest.withUnsafeBytes { manBuf in
-                        verboseLog("[IdeviceGateway] mountPersonalizedDdi() mounting image on Remote Pairing client")
+                        verboseLog("[IdeviceGateway] mountPersonalizedDdiRsd() mounting image on Remote Pairing client")
                         let mountErr = image_mounter_mount_personalized_rsd(
                             mounterClient,
                             adapter,
@@ -1109,17 +1171,460 @@ public final class IdeviceGateway {
                             nil,
                             chipID
                         )
-                         if let mountErr = mountErr {
-                             debugLog("[IdeviceGateway] mountPersonalizedDdi() mount failed")
-                             defer { idevice_error_free(mountErr) }
-                             throw IdeviceGatewayError.serviceError("Failed to mount personalized DDI")
-                         }
-                         debugLog("[IdeviceGateway] mountPersonalizedDdi() mount succeeded")
-                      }
-                  }
-              }
-          }
-      }
+                        if let mountErr = mountErr {
+                            debugLog("[IdeviceGateway] mountPersonalizedDdiRsd() mount failed")
+                            defer { idevice_error_free(mountErr) }
+                            throw IdeviceGatewayError.serviceError("Failed to mount personalized DDI")
+                        }
+                        debugLog("[IdeviceGateway] mountPersonalizedDdiRsd() mount succeeded")
+                    }
+                }
+            }
+        }
+    }
+
+    private func mountPersonalizedDdiIdevice(image: Data, trustcache: Data, manifest: Data) throws {
+        verboseLog("[IdeviceGateway] mountPersonalizedDdiIdevice() starting traditional/TCP provider mounting")
+
+        var sockAddr = sockaddr_in()
+        sockAddr.sin_family = sa_family_t(AF_INET)
+        sockAddr.sin_port = UInt16(62078).bigEndian
+        sockAddr.sin_addr.s_addr = inet_addr(deviceIP)
+
+        guard let pairingFile = self.pairingFile else {
+            throw IdeviceGatewayError.connectionFailed("pairingFile is nil")
+        }
+
+        var provider: OpaquePointer? = nil
+        let provErr = withUnsafePointer(to: &sockAddr) { ptr in
+            ptr.withMemoryRebound(to: idevice_sockaddr.self, capacity: 1) { reboundPtr in
+                return idevice_tcp_provider_new(reboundPtr, pairingFile, "minimuxer", &provider)
+            }
+        }
+        if let provErr = provErr {
+            defer { idevice_error_free(provErr) }
+            throw IdeviceGatewayError.connectionFailed("Failed to create TCP provider")
+        }
+        guard let provider = provider else {
+            throw IdeviceGatewayError.connectionFailed("TCP Provider was nil")
+        }
+        self.pairingFile = nil
+
+        var providerToFree: OpaquePointer? = provider
+        defer {
+            if let ptr = providerToFree {
+                idevice_provider_free(ptr)
+            }
+        }
+
+        var chipID: UInt64 = 0
+        do {
+            var lockdownClient: OpaquePointer? = nil
+            let connectErr = lockdownd_connect(provider, &lockdownClient)
+            if let connectErr = connectErr {
+                providerToFree = nil
+                defer { idevice_error_free(connectErr) }
+                throw IdeviceGatewayError.noConnection
+            }
+            guard let lockdownClient = lockdownClient else {
+                throw IdeviceGatewayError.noConnection
+            }
+            defer {
+                verboseLog("[IdeviceGateway] mountPersonalizedDdiIdevice() freeing lockdown client before mounter connect")
+                lockdownd_client_free(lockdownClient)
+            }
+
+            var plistVal: plist_t? = nil
+            verboseLog("[IdeviceGateway] mountPersonalizedDdiIdevice() getting UniqueChipID (no TLS session)")
+            let valErr = lockdownd_get_value(lockdownClient, "UniqueChipID", nil, &plistVal)
+            if let valErr = valErr {
+                debugLog("[IdeviceGateway] mountPersonalizedDdiIdevice() lockdownd_get_value failed without session, trying with session")
+                idevice_error_free(valErr)
+                var pf: OpaquePointer? = nil
+                let getPfErr = idevice_provider_get_pairing_file(provider, &pf)
+                if let getPfErr = getPfErr {
+                    defer { idevice_error_free(getPfErr) }
+                    throw IdeviceGatewayError.connectionFailed("Failed to get pairing file for session retry")
+                }
+                guard let pf = pf else {
+                    throw IdeviceGatewayError.connectionFailed("Pairing file nil for session retry")
+                }
+                defer { idevice_pairing_file_free(pf) }
+                let sessionErr = lockdownd_start_session(lockdownClient, pf)
+                if let sessionErr = sessionErr {
+                    defer { idevice_error_free(sessionErr) }
+                    throw IdeviceGatewayError.noConnection
+                }
+                let valErr2 = lockdownd_get_value(lockdownClient, "UniqueChipID", nil, &plistVal)
+                if let valErr2 = valErr2 {
+                    debugLog("[IdeviceGateway] mountPersonalizedDdiIdevice() lockdownd_get_value failed with session too")
+                    defer { idevice_error_free(valErr2) }
+                    throw IdeviceGatewayError.serviceError("Failed to get UniqueChipID")
+                }
+            }
+            if let plistVal = plistVal {
+                defer { plist_free(plistVal) }
+                if plist_dict_get_item(plistVal, "Error") != nil {
+                    debugLog("[IdeviceGateway] mountPersonalizedDdiIdevice() UniqueChipID returned GetProhibited/Error")
+                    throw IdeviceGatewayError.serviceError("Failed to get UniqueChipID: Prohibited")
+                }
+                var val: UInt64 = 0
+                plist_get_uint_val(plistVal, &val)
+                chipID = val
+                verboseLog("[IdeviceGateway] mountPersonalizedDdiIdevice() got chipID: \(chipID)")
+            }
+        }
+
+        var mounterClient: OpaquePointer? = nil
+        let mounterConnectErr = image_mounter_connect(provider, &mounterClient)
+        if let mounterConnectErr = mounterConnectErr {
+            providerToFree = nil
+            defer { idevice_error_free(mounterConnectErr) }
+            throw IdeviceGatewayError.serviceError("Failed to connect to image mounter")
+        }
+        guard let mounterClient = mounterClient else {
+            throw IdeviceGatewayError.serviceError("Mounter client was nil")
+        }
+        defer { image_mounter_free(mounterClient) }
+
+        let personalizedManifest = try buildPersonalizationManifest(
+            mounterClient: mounterClient,
+            buildManifest: manifest,
+            uniqueChipID: chipID
+        )
+
+        try image.withUnsafeBytes { imgBuf in
+            try trustcache.withUnsafeBytes { tcBuf in
+                try personalizedManifest.withUnsafeBytes { manBuf in
+                    verboseLog("[IdeviceGateway] mountPersonalizedDdiIdevice() uploading personalized image")
+                    let uploadErr = image_mounter_upload_image(
+                        mounterClient,
+                        "Personalized",
+                        imgBuf.bindMemory(to: UInt8.self).baseAddress,
+                        image.count,
+                        manBuf.bindMemory(to: UInt8.self).baseAddress,
+                        personalizedManifest.count
+                    )
+                    if let uploadErr = uploadErr {
+                        debugLog("[IdeviceGateway] mountPersonalizedDdiIdevice() upload failed")
+                        defer { idevice_error_free(uploadErr) }
+                        throw IdeviceGatewayError.serviceError("Failed to upload personalized DDI")
+                    }
+
+                    verboseLog("[IdeviceGateway] mountPersonalizedDdiIdevice() mounting personalized image")
+                    let mountErr = image_mounter_mount_image(
+                        mounterClient,
+                        "Personalized",
+                        manBuf.bindMemory(to: UInt8.self).baseAddress,
+                        personalizedManifest.count,
+                        tcBuf.bindMemory(to: UInt8.self).baseAddress,
+                        trustcache.count,
+                        nil
+                    )
+                    if let mountErr = mountErr {
+                        debugLog("[IdeviceGateway] mountPersonalizedDdiIdevice() mount failed")
+                        defer { idevice_error_free(mountErr) }
+                        throw IdeviceGatewayError.serviceError("Failed to mount personalized DDI")
+                    }
+                    debugLog("[IdeviceGateway] mountPersonalizedDdiIdevice() mount succeeded")
+                }
+            }
+        }
+    }
+
+    private func buildPersonalizationManifest(
+        mounterClient: OpaquePointer,
+        buildManifest: Data,
+        uniqueChipID: UInt64
+    ) throws -> Data {
+        let imageType = "DeveloperDiskImage"
+        let identifiers = try queryPersonalizationIdentifiers(mounterClient: mounterClient, imageType: imageType)
+        let nonce = try queryPersonalizationNonce(mounterClient: mounterClient, imageType: imageType)
+
+        let manifestObject = try PropertyListSerialization.propertyList(from: buildManifest, options: [], format: nil)
+        guard let buildManifestDict = manifestObject as? [String: Any],
+              let identities = buildManifestDict["BuildIdentities"] as? [[String: Any]] else {
+            throw IdeviceGatewayError.serviceError("Invalid build manifest")
+        }
+
+        let boardID = try plistUnsignedValue(identifiers["BoardId"], label: "BoardId")
+        let chipID = try plistUnsignedValue(identifiers["ChipID"], label: "ChipID")
+
+        guard let buildIdentity = identities.first(where: { identity in
+            guard
+                let boardHex = identity["ApBoardID"] as? String,
+                let chipHex = identity["ApChipID"] as? String,
+                let identityBoardID = UInt64(boardHex.replacingOccurrences(of: "0x", with: ""), radix: 16),
+                let identityChipID = UInt64(chipHex.replacingOccurrences(of: "0x", with: ""), radix: 16)
+            else { return false }
+            return identityBoardID == boardID && identityChipID == chipID
+        }) else {
+            throw IdeviceGatewayError.serviceError("No matching build identity found")
+        }
+
+        guard let manifest = buildIdentity["Manifest"] as? [String: Any] else {
+            throw IdeviceGatewayError.serviceError("Build identity missing Manifest")
+        }
+
+        var request: [String: Any] = [
+            "@HostPlatformInfo": "mac",
+            "@VersionInfo": "libauthinstall-1033.0.2",
+            "@UUID": UUID().uuidString.uppercased(),
+            "@ApImg4Ticket": true,
+            "@BBTicket": true,
+            "ApBoardID": boardID,
+            "ApChipID": chipID,
+            "ApECID": uniqueChipID,
+            "ApNonce": nonce,
+            "ApProductionMode": true,
+            "ApSecurityDomain": 1,
+            "ApSecurityMode": true,
+            "SepNonce": Data(repeating: 0, count: 20),
+            "UID_MODE": false
+        ]
+
+        for (key, value) in identifiers where key.hasPrefix("Ap,") {
+            request[key] = value
+        }
+
+        let parameters: [String: Any] = [
+            "ApProductionMode": true,
+            "ApSecurityMode": true,
+            "ApSupportsImg4": true
+        ]
+
+        let loadableTrustCacheInfo = (manifest["LoadableTrustCache"] as? [String: Any])?["Info"] as? [String: Any]
+        let restoreRequestRules = loadableTrustCacheInfo?["RestoreRequestRules"] as? [Any]
+
+        for (key, value) in manifest {
+            guard var tssEntry = value as? [String: Any] else { continue }
+            guard tssEntry["Info"] != nil else { continue }
+            guard (tssEntry["Trusted"] as? Bool) == true else { continue }
+
+            tssEntry.removeValue(forKey: "Info")
+            if let restoreRequestRules {
+                applyRestoreRequestRules(input: &tssEntry, parameters: parameters, rules: restoreRequestRules)
+            }
+            if tssEntry["Digest"] == nil {
+                tssEntry["Digest"] = Data()
+            }
+
+            request[key] = tssEntry
+        }
+
+        return try sendTssRequest(request)
+    }
+
+    private func queryPersonalizationIdentifiers(
+        mounterClient: OpaquePointer,
+        imageType: String
+    ) throws -> [String: Any] {
+        var plistVal: plist_t? = nil
+        let err = imageType.withCString { imageTypeC in
+            image_mounter_query_personalization_identifiers(mounterClient, imageTypeC, &plistVal)
+        }
+        if let err = err {
+            defer { idevice_error_free(err) }
+            throw IdeviceGatewayError.serviceError("Failed to query personalization identifiers")
+        }
+        guard let plistVal = plistVal else {
+            throw IdeviceGatewayError.serviceError("Personalization identifiers plist was nil")
+        }
+        defer { plist_free(plistVal) }
+
+        guard let xml = plistNodeToData(plistVal),
+              let dict = try? PropertyListSerialization.propertyList(from: xml, options: [], format: nil) as? [String: Any] else {
+            throw IdeviceGatewayError.serviceError("Failed to decode personalization identifiers")
+        }
+        return dict
+    }
+
+    private func queryPersonalizationNonce(
+        mounterClient: OpaquePointer,
+        imageType: String
+    ) throws -> Data {
+        var noncePtr: UnsafeMutablePointer<UInt8>? = nil
+        var nonceLen: Int = 0
+        let err = imageType.withCString { imageTypeC in
+            image_mounter_query_nonce(mounterClient, imageTypeC, &noncePtr, &nonceLen)
+        }
+        if let err = err {
+            defer { idevice_error_free(err) }
+            throw IdeviceGatewayError.serviceError("Failed to query personalization nonce")
+        }
+        guard let noncePtr = noncePtr else {
+            throw IdeviceGatewayError.serviceError("Personalization nonce was nil")
+        }
+        defer { idevice_data_free(noncePtr, UInt(nonceLen)) }
+        return Data(bytes: noncePtr, count: nonceLen)
+    }
+
+    private func sendTssRequest(_ request: [String: Any]) throws -> Data {
+        let url = URL(string: "http://gs.apple.com/TSS/controller?action=2")!
+        let requestData = try PropertyListSerialization.data(fromPropertyList: request, format: .xml, options: 0)
+        var urlRequest = URLRequest(url: url)
+        urlRequest.httpMethod = "POST"
+        urlRequest.cachePolicy = .reloadIgnoringLocalCacheData
+        urlRequest.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        urlRequest.setValue("text/xml; charset=\"utf-8\"", forHTTPHeaderField: "Content-type")
+        urlRequest.setValue("InetURL/1.0", forHTTPHeaderField: "User-Agent")
+        urlRequest.httpBody = requestData
+
+        let semaphore = DispatchSemaphore(value: 0)
+        var taskResult: Result<Data, Error>?
+        URLSession.shared.dataTask(with: urlRequest) { data, _, error in
+            if let error = error {
+                taskResult = .failure(error)
+            } else {
+                taskResult = .success(data ?? Data())
+            }
+            semaphore.signal()
+        }.resume()
+        semaphore.wait()
+
+        guard let taskResult else {
+            throw IdeviceGatewayError.serviceError("TSS request did not return a response")
+        }
+
+        let data: Data
+        switch taskResult {
+        case .success(let responseData):
+            data = responseData
+        case .failure(let error):
+            throw IdeviceGatewayError.serviceError("TSS request failed: \(error.localizedDescription)")
+        }
+
+        let responseText = String(decoding: data, as: UTF8.self)
+        let trimmed = responseText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let withoutStatus = trimmed.replacingOccurrences(of: "STATUS=0&", with: "")
+        let withoutMessage = withoutStatus.replacingOccurrences(of: "MESSAGE=", with: "", options: .anchored)
+        guard withoutMessage.hasPrefix("SUCCESS") else {
+            throw IdeviceGatewayError.serviceError("TSS server returned non-success response")
+        }
+        guard let requestStringRange = withoutMessage.range(of: "REQUEST_STRING=") else {
+            throw IdeviceGatewayError.serviceError("TSS response missing REQUEST_STRING")
+        }
+        let plistString = String(withoutMessage[requestStringRange.upperBound...])
+        guard let plistData = plistString.data(using: .utf8),
+              let responsePlist = try PropertyListSerialization.propertyList(from: plistData, options: [], format: nil) as? [String: Any],
+              let ticket = responsePlist["ApImg4Ticket"] as? Data else {
+            throw IdeviceGatewayError.serviceError("TSS response missing ApImg4Ticket")
+        }
+        return ticket
+    }
+
+    private func plistNodeToData(_ node: plist_t) -> Data? {
+        var xmlPtr: UnsafeMutablePointer<Int8>? = nil
+        var xmlLen: UInt32 = 0
+        let err = plist_to_xml(node, &xmlPtr, &xmlLen)
+        guard err == PLIST_ERR_SUCCESS, let xmlPtr else {
+            return nil
+        }
+        defer { free(xmlPtr) }
+        return Data(bytes: xmlPtr, count: Int(xmlLen))
+    }
+
+    private func plistUnsignedValue(_ value: Any?, label: String) throws -> UInt64 {
+        if let value = value as? UInt64 {
+            return value
+        }
+        if let value = value as? UInt32 {
+            return UInt64(value)
+        }
+        if let value = value as? UInt {
+            return UInt64(value)
+        }
+        if let value = value as? Int, value >= 0 {
+            return UInt64(value)
+        }
+        if let value = value as? NSNumber {
+            return value.uint64Value
+        }
+        if let value = value as? String {
+            if let parsed = UInt64(value), value.allSatisfy({ $0.isNumber }) {
+                return parsed
+            }
+            if let parsed = UInt64(value.replacingOccurrences(of: "0x", with: ""), radix: 16) {
+                return parsed
+            }
+        }
+        throw IdeviceGatewayError.serviceError("Invalid \(label) value")
+    }
+
+    private func applyRestoreRequestRules(
+        input: inout [String: Any],
+        parameters: [String: Any],
+        rules: [Any]
+    ) {
+        for ruleAny in rules {
+            guard
+                let rule = ruleAny as? [String: Any],
+                let conditions = rule["Conditions"] as? [String: Any],
+                let actions = rule["Actions"] as? [String: Any]
+            else {
+                continue
+            }
+
+            var conditionsFulfilled = true
+            for (key, value) in conditions {
+                let value2: Any?
+                switch key {
+                case "ApRawProductionMode", "ApCurrentProductionMode":
+                    value2 = parameters["ApProductionMode"]
+                case "ApRawSecurityMode":
+                    value2 = parameters["ApSecurityMode"]
+                case "ApRequiresImage4":
+                    value2 = parameters["ApSupportsImg4"]
+                case "ApDemotionPolicyOverride":
+                    value2 = parameters["DemotionPolicy"]
+                case "ApInRomDFU":
+                    value2 = parameters["ApInRomDFU"]
+                default:
+                    value2 = nil
+                }
+
+                if !plistValue(value2, equals: value) {
+                    conditionsFulfilled = false
+                    break
+                }
+            }
+
+            guard conditionsFulfilled else { continue }
+
+            for (key, value) in actions {
+                if plistShouldIgnore(value) {
+                    continue
+                }
+                input.removeValue(forKey: key)
+                input[key] = value
+            }
+        }
+    }
+
+    private func plistValue(_ lhs: Any?, equals rhs: Any) -> Bool {
+        switch (lhs, rhs) {
+        case let (l as Bool, r as Bool):
+            return l == r
+        case let (l as NSNumber, r as NSNumber):
+            return l == r
+        case let (l as String, r as String):
+            return l == r
+        case let (l as Data, r as Data):
+            return l == r
+        default:
+            return false
+        }
+    }
+
+    private func plistShouldIgnore(_ value: Any) -> Bool {
+        if let number = value as? NSNumber {
+            return number.intValue == 255
+        }
+        if let int = value as? Int {
+            return int == 255
+        }
+        return false
+    }
 
     public func mountDeveloperImage(image: Data, signature: Data) throws {
         debugLog("[IdeviceGateway] mountDeveloperImage() called, image size: \(image.count), signature size: \(signature.count)")

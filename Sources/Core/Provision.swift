@@ -7,7 +7,7 @@
 //
 
 import Foundation
-import RustBridge
+// import RustBridge
 
 internal protocol ProvisionProvider {
     func installProvisioningProfile(profile: Data) throws;
@@ -44,6 +44,8 @@ final internal class Provision {
 
 final internal class LockDownProvision: ProvisionProvider {
     func installProvisioningProfile(profile: Data) throws {
+        
+        /*
         verboseLog("[minimuxer] Installing provisioning profile")
         let device = try DeviceService.getFirstDevice()
         guard let misagent = RustMisagent.connect(device: device.instance, label: "minimuxer-install-prov") else {
@@ -56,9 +58,14 @@ final internal class LockDownProvision: ProvisionProvider {
             throw MinimuxerError.ProfileInstall
         }
         verboseLog("[minimuxer] Successfully installed provisioning profile!")
+        */
+        
+        try IdeviceGateway.shared.installProvisioningProfile(profile: profile)
     }
 
     func removeProvisioningProfile(id: String) throws {
+        
+        /*
         verboseLog("[minimuxer] Removing profile with ID: \(id)")
         let device = try DeviceService.getFirstDevice()
         guard let misagent = RustMisagent.connect(device: device.instance, label: "minimuxer-install-prov") else {
@@ -71,9 +78,14 @@ final internal class LockDownProvision: ProvisionProvider {
             throw MinimuxerError.ProfileRemove
         }
         verboseLog("[minimuxer] Successfully removed profile")
+        */
+        
+        try IdeviceGateway.shared.removeProvisioningProfile(id: id)
     }
 
     func dumpProfiles(docsPath: String) throws -> String {
+        
+        /*
         verboseLog("[minimuxer] Dumping profiles")
         let device = try DeviceService.getFirstDevice()
         guard let misagent = RustMisagent.connect(device: device.instance, label: "minimuxer-install-prov") else {
@@ -117,6 +129,9 @@ final internal class LockDownProvision: ProvisionProvider {
         }
         verboseLog("[minimuxer] Profile dump success")
         return dumpDir
+        */
+        
+        return try IdeviceGateway.shared.dumpProfiles(docsPath: docsPath)
     }
 }
 

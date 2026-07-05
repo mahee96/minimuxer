@@ -7,7 +7,7 @@
 //
 
 import Foundation
-import RustBridge
+// import RustBridge
 
 final internal class HeartbeatService {
     
@@ -83,7 +83,8 @@ final internal class HeartbeatService {
         }
         verboseLog("[minimuxer] heartbeat-task: usbmuxd is ready")
 
-        // outer loop
+        var currentInterval: UInt64 = 1000
+
         while await state.running {
             let deviceIP: String
             do {
@@ -102,67 +103,18 @@ final internal class HeartbeatService {
                 try? await Task.sleep(nanoseconds: MinimuxerConstants.heartbeatSleepNs)
                 continue
             }
-            
-            let device: DeviceService
+
             do {
-                device = try DeviceService.getFirstDevice()
+                var newInterval: UInt64 = 0
+                try IdeviceGateway.shared.performHeartbeat(interval: currentInterval, newInterval: &newInterval)
+                currentInterval = newInterval > 0 ? newInterval : 1000
+                lastBeatSuccessful = true
+                await Minimuxer.shared.checkAndNotify(.ready(.heartbeat))
+                lastErrorDescription = nil
             } catch {
-                logIfNeeded("WARN: Could not query device from usbmuxd for heartbeat: \(error)")
+                logIfNeeded("Heartbeat failed: \(error)")
                 lastBeatSuccessful = false
                 try? await Task.sleep(nanoseconds: MinimuxerConstants.heartbeatSleepNs)
-                continue
-            }
-
-            // Check lockdown first — heartbeat wraps InvalidConf as UnknownError
-            switch RustLockdown.connect(device: device.instance, label: "minimuxer") {
-                case .success: break
-                case .error(let err):
-                    if err.contains("InvalidConf") {
-                        debugLog("[minimuxer] heartbeat-task: ERROR: Invalid pairing file — the device rejected the SSL handshake. Please redo-pairing for your device.")
-                        verboseLog("[minimuxer] heartbeat-task: exiting due to invalid pairing")
-                        await Minimuxer.shared.checkAndNotify(.failed(.heartbeat, MinimuxerError.PairingFile))
-                        lastBeatSuccessful = false
-                        await state.stop()
-                        return
-                    } else {
-                        logIfNeeded("WARN: Could not connect to lockdown for heartbeat: \(err)")
-                    }
-                    lastBeatSuccessful = false
-                    try? await Task.sleep(nanoseconds: MinimuxerConstants.heartbeatSleepNs)
-                    continue
-            }
-
-            let heartbeat: RustHeartbeat
-            switch RustHeartbeat.connect(device: device.instance, label: "minimuxer") {
-                case .success(let hb): heartbeat = hb
-                case .error(let err):
-                    logIfNeeded("ERROR: Failed to create heartbeat client: \(err)")
-                    lastBeatSuccessful = false
-                    try? await Task.sleep(nanoseconds: MinimuxerConstants.heartbeatSleepNs)
-                    continue
-            }
-
-            // reset lastErrorDescription if we get this far (i.e. successfully connected to heartbeat)
-            lastErrorDescription = nil
-            verboseLog("[minimuxer] heartbeat-task: device IP reachable at: \(deviceIP)")
-
-            // Inner loop: keep receiving and sending heartbeats
-            while await state.running {
-                guard let plist = heartbeat.receive(timeoutMs: MinimuxerConstants.heartbeatTimeoutMs) else {
-                    logIfNeeded("ERROR: HeartbeatService recv failed")
-                    lastBeatSuccessful = false
-                    break
-                }
-
-                if heartbeat.send(plistXml: plist) {
-                    lastBeatSuccessful = true
-                    await Minimuxer.shared.checkAndNotify(.ready(.heartbeat))
-                    lastErrorDescription = nil
-                } else {
-                    logIfNeeded("ERROR: HeartbeatService send failed")
-                    lastBeatSuccessful = false
-                    break
-                }
             }
         }
     }

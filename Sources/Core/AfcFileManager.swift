@@ -7,7 +7,7 @@
 //
 
 import Foundation
-import RustBridge
+// import RustBridge
 
 internal struct RustDirectoryEntry {
     let path: String
@@ -17,6 +17,8 @@ internal struct RustDirectoryEntry {
     let children: [RustDirectoryEntry]
 }
 
+// Commented out to exclude RustBridge:
+/*
 final internal class AfcFileManager {
     private static func getClient() throws -> RustAfc {
         let device = try DeviceService.getFirstDevice()
@@ -101,3 +103,4 @@ final internal class AfcFileManager {
         return entries
     }
 }
+*/

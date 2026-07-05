@@ -7,7 +7,7 @@
 //
 
 import Foundation
-import RustBridge
+// import RustBridge
 
 public struct MinimuxerServiceError: Error, CustomStringConvertible {
     public let component: MinimuxerComponent
@@ -65,7 +65,7 @@ public enum MinimuxerError: Error, Equatable, CustomStringConvertible, Localized
     case ImageLookup
     case ImageRead
     case Mount
-    case bridgeError(RustBridgeError)
+//    case bridgeError(RustBridgeError)
 
     public var description: String {
         switch self {
@@ -110,7 +110,7 @@ public enum MinimuxerError: Error, Equatable, CustomStringConvertible, Localized
         case .ImageLookup: return "ImageLookup"
         case .ImageRead: return "ImageRead"
         case .Mount: return "Mount"
-        case .bridgeError(let err): return "bridgeError(\(err))"
+//        case .bridgeError(let err): return "bridgeError(\(err))"
         }
     }
 
@@ -119,19 +119,19 @@ public enum MinimuxerError: Error, Equatable, CustomStringConvertible, Localized
     }
 }
 
-public enum RustBridgeError: Error, LocalizedError, Equatable {
-    case pairingFileRejected(description: String)
-    case connectionReset(description: String)
-    case unknown(code: Int, description: String)
-    
-    public var errorDescription: String? {
-        switch self {
-        case .pairingFileRejected(let description):
-            return description
-        case .connectionReset(let description):
-            return description
-        case .unknown(_, let description):
-            return description
-        }
-    }
-}
+// public enum RustBridgeError: Error, LocalizedError, Equatable {
+//     case pairingFileRejected(description: String)
+//     case connectionReset(description: String)
+//     case unknown(code: Int, description: String)
+//     
+//     public var errorDescription: String? {
+//         switch self {
+//         case .pairingFileRejected(let description):
+//             return description
+//         case .connectionReset(let description):
+//             return description
+//         case .unknown(_, let description):
+//             return description
+//         }
+//     }
+// }

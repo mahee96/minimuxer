@@ -7,7 +7,7 @@
 //
 
 import Foundation
-import RustBridge
+// import RustBridge
 #if canImport(Darwin)
 import Darwin
 #elseif canImport(Glibc)

@@ -7,7 +7,7 @@
 //
 
 import Foundation
-import RustBridge
+// import RustBridge
 
 internal enum MinimuxerInternalError: Error, LocalizedError {
     case deviceEndpointNotInitialized
@@ -25,6 +25,8 @@ internal enum MinimuxerInternalError: Error, LocalizedError {
 
 // MARK: - Internal Helpers
 
+
+/*
 @inline(__always)
 internal func adaptingBridgeError<T>(_ action: () throws -> T) throws -> T {
     do {
@@ -42,3 +44,4 @@ internal func adaptingBridgeError<T>(_ action: () throws -> T) throws -> T {
         throw error
     }
 }
+*/

@@ -7,7 +7,7 @@
 //
 
 import Foundation
-import RustBridge
+// import RustBridge
 
 internal protocol InstallProvider {
     func yeetAppAfc(bundleId: String, ipaBytes: Data) throws
@@ -45,6 +45,8 @@ final internal class Install {
 
 final internal class LockDownInstall: InstallProvider {
     func yeetAppAfc(bundleId: String, ipaBytes: Data) throws {
+        
+        /*
         verboseLog("[minimuxer] Yeeting IPA for bundle ID: \(bundleId)")
 
         let deviceIP = try DeviceEndpoint.shared.ip()
@@ -72,8 +74,13 @@ final internal class LockDownInstall: InstallProvider {
             throw MinimuxerError.RwAfc
         }
         verboseLog("[minimuxer] Successfully staged IPA")
+        */
+        
+        try IdeviceGateway.shared.yeetAppAfc(bundleId: bundleId, ipaBytes: ipaBytes)
     }
     
+    
+    /*
     private func mkdirP(_ path: String, afc: RustAfc) {
         var current = ""
         for part in path.split(separator: "/") {
@@ -81,8 +88,11 @@ final internal class LockDownInstall: InstallProvider {
             _ = afc.mkdir(path: current)
         }
     }
+    */
 
     func installIpa(bundleId: String) throws {
+        
+        /*
         verboseLog("[minimuxer] Installing app for bundle ID: \(bundleId)")
         let device = try DeviceService.getFirstDevice()
         guard let inst = RustInstProxy.connect(device: device.instance, label: "ideviceinstaller") else {
@@ -96,9 +106,14 @@ final internal class LockDownInstall: InstallProvider {
             throw MinimuxerError.InstallApp("Failed to install")
         }
         verboseLog("[minimuxer] Install done!")
+        */
+        
+        try IdeviceGateway.shared.installIpa(bundleId: bundleId)
     }
 
     func removeApp(bundleId: String) throws {
+        
+        /*
         verboseLog("[minimuxer] Removing app: \(bundleId)")
         let device = try DeviceService.getFirstDevice()
         guard let inst = RustInstProxy.connect(device: device.instance, label: "minimuxer-remove-app") else {
@@ -111,6 +126,9 @@ final internal class LockDownInstall: InstallProvider {
             throw MinimuxerError.UninstallApp
         }
         verboseLog("[minimuxer] Remove done!")
+        */
+        
+        try IdeviceGateway.shared.removeApp(bundleId: bundleId)
     }
 }
 

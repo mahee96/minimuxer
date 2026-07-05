@@ -7,7 +7,7 @@
 //
 
 import Foundation
-import RustBridge
+// import RustBridge
 import ZIPFoundation
 
 internal protocol MounterServiceProvider: AnyObject {
@@ -113,6 +113,8 @@ final internal class LockDownMounterService: MounterServiceProvider {
             try? await Task.sleep(nanoseconds: MinimuxerConstants.mounterSleepNs)
             do {
                 let device = try DeviceService.getFirstDevice()
+                
+                /*
                 let lockdown: RustLockdown
                 switch RustLockdown.connect(device: device.instance, label: "minimuxer") {
                     case .success(let ld): 
@@ -120,16 +122,22 @@ final internal class LockDownMounterService: MounterServiceProvider {
                         self.lastErrorDescription = nil
                     case .error(let err):
                           if err.contains("InvalidConf") {
-                              debugLog("[minimuxer] mounter-task: ERROR: Invalid pairing file — the device rejected the SSL handshake. Please redo-pairing for your device.")
-                              debugLog("[minimuxer] mounter-task: exiting due to invalid pairing")
-                              await Minimuxer.shared.checkAndNotify(.failed(.mounter, MinimuxerError.PairingFile))
-                              return
-                       } else {
-                         logIfNeeded(err, prefix: "mount-task: WARN: Could not connect to lockdown for mounter: ")
-                     }
-                     continue
+                               debugLog("[minimuxer] mounter-task: ERROR: Invalid pairing file — the device rejected the SSL handshake. Please redo-pairing for your device.")
+                               debugLog("[minimuxer] mounter-task: exiting due to invalid pairing")
+                               await Minimuxer.shared.checkAndNotify(.failed(.mounter, MinimuxerError.PairingFile))
+                               return
+                        } else {
+                          logIfNeeded(err, prefix: "mount-task: WARN: Could not connect to lockdown for mounter: ")
+                      }
+                      continue
                 }
                 guard let versionStr = lockdown.getValue(key: "ProductVersion") else {
+                    logIfNeeded("Could not get device version for mounter", prefix: "mount-task: WARN: ")
+                    continue
+                }
+                */
+                
+                guard let versionStr = try IdeviceGateway.shared.getLockdownValue(key: "ProductVersion") else {
                     logIfNeeded("Could not get device version for mounter", prefix: "mount-task: WARN: ")
                     continue
                 }
@@ -157,6 +165,8 @@ final internal class LockDownMounterService: MounterServiceProvider {
     }
 
     private func handlePre17Mount(device: DeviceService, iosVersion: String, dmgDocsPath: String) async throws {
+        
+        /*
         verboseLog("[minimuxer] Starting image mounter (pre-17)")
         guard let mounter = RustMounter.connect(device: device.instance, label: "sidestore-image-reeeee") else {
             debugLog("[minimuxer] ERROR: Unable to start mobile image mounter")
@@ -181,7 +191,6 @@ final internal class LockDownMounterService: MounterServiceProvider {
         
         if !FileManager.default.fileExists(atPath: dmgPath) {
             verboseLog("[minimuxer] Downloading iOS \(iosVersion) DMG...")
-//             try downloadPre17Image(iosVersion: iosVersion, dmgDocsPath: dmgDocsPath)
             try LockDownMounterService.downloadPre17Image(iosVersion: iosVersion, dmgDocsPath: dmgDocsPath)
         }
 
@@ -203,9 +212,42 @@ final internal class LockDownMounterService: MounterServiceProvider {
          verboseLog("[minimuxer] Successfully mounted the image")
          dmgMounted = true
          await Minimuxer.shared.checkAndNotify(.ready(.mounter))
+        */
+        
+        verboseLog("[minimuxer] Starting image mounter (pre-17)")
+        
+        let dmgPath = "\(dmgDocsPath)/\(iosVersion).dmg"
+        let sigPath = "\(dmgPath).signature"
+        
+        verboseLog("[minimuxer] Pre17 DMG: \(dmgPath)")
+        verboseLog("[minimuxer] Pre17 Signature: \(sigPath)")
+        
+        if !FileManager.default.fileExists(atPath: dmgPath) {
+            verboseLog("[minimuxer] Downloading iOS \(iosVersion) DMG...")
+            try LockDownMounterService.downloadPre17Image(iosVersion: iosVersion, dmgDocsPath: dmgDocsPath)
+        }
+
+        guard let dmgData = try? Data(contentsOf: URL(fileURLWithPath: dmgPath)),
+              let sigData = try? Data(contentsOf: URL(fileURLWithPath: sigPath)) else {
+            debugLog("[minimuxer] ERROR: Unable to read developer disk image or signature files")
+            throw MinimuxerError.Mount
+        }
+
+        verboseLog("[minimuxer] Uploading and mounting image (dmg=\(dmgData.count) bytes, sig=\(sigData.count) bytes)...")
+        do {
+            try IdeviceGateway.shared.mountDeveloperImage(image: dmgData, signature: sigData)
+            verboseLog("[minimuxer] Successfully mounted the image")
+            dmgMounted = true
+            await Minimuxer.shared.checkAndNotify(.ready(.mounter))
+        } catch {
+            debugLog("[minimuxer] ERROR: Unable to mount developer image: \(error)")
+            throw MinimuxerError.Mount
+        }
     }
 
     private func handlePost17Mount(dmgDocsPath: String) async throws {
+        
+        /*
         let (imageData, trustcacheData, manifestData) = try LockDownMounterService.loadPost17Image(dmgDocsPath: dmgDocsPath)
 
          verboseLog(
@@ -236,6 +278,26 @@ final internal class LockDownMounterService: MounterServiceProvider {
                 case 8: throw MinimuxerError.Mount
             default: throw MinimuxerError.Mount
             }
+        }
+        */
+        
+        let (imageData, trustcacheData, manifestData) = try LockDownMounterService.loadPost17Image(dmgDocsPath: dmgDocsPath)
+
+        verboseLog(
+            "[minimuxer] Mounting DDI " +
+            "(image=\(imageData.count) bytes, " +
+            "trustcache=\(trustcacheData.count) bytes, " +
+            "manifest=\(manifestData.count) bytes)"
+        )
+
+        do {
+            try IdeviceGateway.shared.mountPersonalizedDdi(image: imageData, trustcache: trustcacheData, manifest: manifestData)
+            verboseLog("[minimuxer] DDI mounted successfully")
+            dmgMounted = true
+            await Minimuxer.shared.checkAndNotify(.ready(.mounter))
+        } catch {
+            verboseLog("[minimuxer] ERROR: Failed to mount DDI: \(error)")
+            throw MinimuxerError.Mount
         }
     }
 

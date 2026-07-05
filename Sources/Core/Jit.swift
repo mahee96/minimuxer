@@ -7,7 +7,7 @@
 //
 
 import Foundation
-import RustBridge
+// import RustBridge
 
 internal protocol JITProvider {
     func debugApp(appId: String) throws;
@@ -42,6 +42,8 @@ final internal class JIT {
 
 final internal class LockDownJIT: JITProvider {
     func debugApp(appId: String) throws {
+        
+        /*
         verboseLog("[minimuxer] Debugging app ID: \(appId)")
         let device = try DeviceService.getFirstDevice()
 
@@ -88,8 +90,13 @@ final internal class LockDownJIT: JITProvider {
                 }
             }
         }
+        */
+        
+        try IdeviceGateway.shared.debugApp(appId: appId)
     }
 
+    
+    /*
     private func debugPre17(device: DeviceService, appId: String) throws {
         guard let debugServer = RustDebugserver.connect(device: device.instance, label: "minimuxer") else {
             debugLog("[minimuxer] ERROR: Failed to start debug server")
@@ -135,8 +142,11 @@ final internal class LockDownJIT: JITProvider {
         verboseLog("[minimuxer] Detaching debugserver")
         _ = debugServer.sendCommand("D")
     }
+    */
 
     func attachDebugger(pid: UInt32) throws {
+        
+        /*
         verboseLog("[minimuxer] Debugging process ID: \(pid)")
         let device = try DeviceService.getFirstDevice()
         guard let debugServer = RustDebugserver.connect(device: device.instance, label: "minimuxer") else {
@@ -148,6 +158,9 @@ final internal class LockDownJIT: JITProvider {
         verboseLog("[minimuxer] Sending command: \(command)")
         _ = debugServer.sendCommand(command)
         _ = debugServer.sendCommand("D")
+        */
+        
+        try IdeviceGateway.shared.debugProcess(pid: pid)
     }
 }
 

@@ -97,6 +97,7 @@ public final class IdeviceGateway {
     public func setDeviceIP(_ ip: String) {
         debugLog("[IdeviceGateway] setDeviceIP(\(ip)) called")
         self.deviceIP = ip
+        
         // Invalidate current cached connections
         if handshake != nil {
             debugLog("[IdeviceGateway] setDeviceIP invalidating handshake")
@@ -119,6 +120,8 @@ public final class IdeviceGateway {
     public func start(pairingFileContent: String) throws {
         debugLog("[IdeviceGateway] start() called, pairingFileContent length: \(pairingFileContent.count)")
         cleanup()
+        
+        idevice_init_logger(IdeviceLogLevel(rawValue: 5), IdeviceLogLevel(rawValue: 0), nil)
 
         guard let data = pairingFileContent.data(using: .utf8) else {
             debugLog("[IdeviceGateway] start() failed to decode pairingFileContent data as UTF-8")
@@ -129,7 +132,7 @@ public final class IdeviceGateway {
         if let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any] {
             if plist["private_key"] != nil {
                 verboseLog("[IdeviceGateway] start() detected private_key, isRPPairing = true")
-                isRPPairing = true
+//                isRPPairing = true
             } else {
                 verboseLog("[IdeviceGateway] start() plist did not contain private_key")
             }
@@ -287,13 +290,15 @@ public final class IdeviceGateway {
         serviceName: String,
         action: (OpaquePointer) throws -> T
     ) throws -> T {
-        debugLog("[IdeviceGateway] performWithUsbmuxdService(\(serviceName)) started")
+        verboseLog("[IdeviceGateway] performWithUsbmuxdService(\(serviceName)) started")
+        
         var addr: OpaquePointer? = nil
-        var err = idevice_usbmuxd_default_addr_new(&addr)
+        let err = idevice_usbmuxd_default_addr_new(&addr)
         if let err = err {
-            debugLog("[IdeviceGateway] performWithUsbmuxdService(\(serviceName)) failed to get default addr")
+            let msg = err.pointee.message != nil ? String(cString: err.pointee.message!) : "No message"
+            debugLog("[IdeviceGateway] performWithUsbmuxdService(\(serviceName)) default_addr_new failed: code=\(err.pointee.code), message=\(msg)")
             defer { idevice_error_free(err) }
-            throw IdeviceGatewayError.connectionFailed("Failed to get usbmuxd default addr")
+            throw IdeviceGatewayError.connectionFailed("Failed to get usbmuxd default addr: \(msg)")
         }
         guard let addr = addr else {
             debugLog("[IdeviceGateway] performWithUsbmuxdService(\(serviceName)) usbmuxd default addr is nil")
@@ -306,10 +311,11 @@ public final class IdeviceGateway {
         var conn: OpaquePointer? = nil
         let connErr = idevice_usbmuxd_new_default_connection(0, &conn)
         if let connErr = connErr {
-            debugLog("[IdeviceGateway] performWithUsbmuxdService(\(serviceName)) usbmuxd connection failed")
+            let msg = connErr.pointee.message != nil ? String(cString: connErr.pointee.message!) : "No message"
+            debugLog("[IdeviceGateway] performWithUsbmuxdService(\(serviceName)) new_default_connection failed: code=\(connErr.pointee.code), message=\(msg)")
             defer { idevice_error_free(connErr) }
             idevice_usbmuxd_addr_free(addr)
-            throw IdeviceGatewayError.connectionFailed("Failed to connect to usbmuxd")
+            throw IdeviceGatewayError.connectionFailed("Failed to connect to usbmuxd: \(msg)")
         }
         
         if let conn = conn {
@@ -318,10 +324,11 @@ public final class IdeviceGateway {
             var count: Int32 = 0
             let devErr = idevice_usbmuxd_get_devices(conn, &devices, &count)
             if let devErr = devErr {
-                debugLog("[IdeviceGateway] performWithUsbmuxdService(\(serviceName)) failed to get devices")
+                let msg = devErr.pointee.message != nil ? String(cString: devErr.pointee.message!) : "No message"
+                debugLog("[IdeviceGateway] performWithUsbmuxdService(\(serviceName)) get_devices failed: code=\(devErr.pointee.code), message=\(msg)")
                 defer { idevice_error_free(devErr) }
                 idevice_usbmuxd_addr_free(addr)
-                throw IdeviceGatewayError.connectionFailed("Failed to list usbmuxd devices")
+                throw IdeviceGatewayError.connectionFailed("Failed to list usbmuxd devices: \(msg)")
             }
             verboseLog("[IdeviceGateway] performWithUsbmuxdService(\(serviceName)) found \(count) devices")
             if count > 0, let devicesPtr = devices, let firstDev = devicesPtr.pointee {
@@ -345,22 +352,30 @@ public final class IdeviceGateway {
         }
         
         if let provErr = provErr {
-            debugLog("[IdeviceGateway] performWithUsbmuxdService(\(serviceName)) provider creation failed")
+            let msg = provErr.pointee.message != nil ? String(cString: provErr.pointee.message!) : "No message"
+            debugLog("[IdeviceGateway] performWithUsbmuxdService(\(serviceName)) provider creation failed: code=\(provErr.pointee.code), message=\(msg)")
             defer { idevice_error_free(provErr) }
-            throw IdeviceGatewayError.connectionFailed("Failed to create usbmuxd provider")
+            throw IdeviceGatewayError.connectionFailed("Failed to create usbmuxd provider: \(msg)")
         }
         guard let provider = provider else {
             debugLog("[IdeviceGateway] performWithUsbmuxdService(\(serviceName)) provider is nil")
             throw IdeviceGatewayError.connectionFailed("Usbmuxd provider was nil")
         }
-        defer { idevice_provider_free(provider) }
+        var providerToFree: OpaquePointer? = provider
+        defer {
+            if let ptr = providerToFree {
+                idevice_provider_free(ptr)
+            }
+        }
 
         var client: OpaquePointer? = nil
         let connectErr = connect(provider, &client)
         if let connectErr = connectErr {
-            debugLog("[IdeviceGateway] performWithUsbmuxdService(\(serviceName)) connect failed")
+            providerToFree = nil
+            let msg = connectErr.pointee.message != nil ? String(cString: connectErr.pointee.message!) : "No message"
+            debugLog("[IdeviceGateway] performWithUsbmuxdService(\(serviceName)) connect failed: code=\(connectErr.pointee.code), message=\(msg)")
             defer { idevice_error_free(connectErr) }
-            throw IdeviceGatewayError.serviceError("Failed to connect to \(serviceName)")
+            throw IdeviceGatewayError.serviceError("Failed to connect to \(serviceName): \(msg)")
         }
         guard let client = client else {
             debugLog("[IdeviceGateway] performWithUsbmuxdService(\(serviceName)) client is nil")
@@ -417,7 +432,7 @@ public final class IdeviceGateway {
                 return nil
             }
             defer { lockdownd_client_free(client) }
-
+            
             var plistVal: plist_t? = nil
             verboseLog("[IdeviceGateway] fetchUDID() calling lockdownd_get_value for UniqueDeviceID")
             let valErr = lockdownd_get_value(client, "UniqueDeviceID", nil, &plistVal)
@@ -438,19 +453,35 @@ public final class IdeviceGateway {
             return nil
         } else {
             var conn: OpaquePointer? = nil
-            var err = idevice_usbmuxd_new_default_connection(0, &conn)
-            if err == nil, let conn = conn {
-                 defer { idevice_usbmuxd_connection_free(conn) }
-                 var devices: UnsafeMutablePointer<OpaquePointer?>? = nil
-                 var count: Int32 = 0
-                 err = idevice_usbmuxd_get_devices(conn, &devices, &count)
-                 if err == nil, count > 0, let devicesPtr = devices, let firstDev = devicesPtr.pointee {
-                     if let udidPtr = idevice_usbmuxd_device_get_udid(firstDev) {
-                         let udid = String(cString: udidPtr)
-                         idevice_string_free(udidPtr)
-                         return udid
-                     }
-                 }
+            let err = idevice_usbmuxd_new_default_connection(0, &conn)
+            if let err = err {
+                let msg = err.pointee.message != nil ? String(cString: err.pointee.message!) : "No message"
+                debugLog("[IdeviceGateway] fetchUDID new_default_connection failed: code=\(err.pointee.code), message=\(msg)")
+                idevice_error_free(err)
+                return nil
+            }
+            
+            if let conn = conn {
+                defer { idevice_usbmuxd_connection_free(conn) }
+                var devices: UnsafeMutablePointer<OpaquePointer?>? = nil
+                var count: Int32 = 0
+                let devErr = idevice_usbmuxd_get_devices(conn, &devices, &count)
+                if let devErr = devErr {
+                    let msg = devErr.pointee.message != nil ? String(cString: devErr.pointee.message!) : "No message"
+                    debugLog("[IdeviceGateway] fetchUDID get_devices failed: code=\(devErr.pointee.code), message=\(msg)")
+                    idevice_error_free(devErr)
+                    return nil
+                }
+                
+                verboseLog("[IdeviceGateway] fetchUDID get_devices count: \(count)")
+                if count > 0, let devicesPtr = devices, let firstDev = devicesPtr.pointee {
+                    defer { idevice_usbmuxd_device_list_free(devices, count) }
+                    if let udidPtr = idevice_usbmuxd_device_get_udid(firstDev) {
+                        let udid = String(cString: udidPtr)
+                        idevice_string_free(udidPtr)
+                        return udid
+                    }
+                }
             }
             return nil
         }
@@ -459,10 +490,10 @@ public final class IdeviceGateway {
     public func getLockdownValue(key: String) throws -> String? {
         debugLog("[IdeviceGateway] getLockdownValue(key: \(key)) started, isRPPairing: \(isRPPairing)")
         try verifyInitialized()
-        if isRPPairing && key == "ProductVersion" {
-            verboseLog("[IdeviceGateway] getLockdownValue returning mock 17.0 for ProductVersion")
-            return "17.0"
-        }
+//        if isRPPairing && key == "ProductVersion" {
+//            verboseLog("[IdeviceGateway] getLockdownValue returning mock 17.0 for ProductVersion")
+//            return "17.0"
+//        }
 
         return try performWithEitherService(
             connectRP: lockdownd_connect_rsd,
@@ -1004,30 +1035,30 @@ public final class IdeviceGateway {
     }
 
     public func performHeartbeat(interval: UInt64, newInterval: UnsafeMutablePointer<UInt64>) throws {
-        debugLog("[IdeviceGateway] performHeartbeat() called, interval: \(interval)")
-        try verifyInitialized()
-        try performWithEitherService(
-            connectRP: heartbeat_connect_rsd,
-            connectUsbmuxd: heartbeat_connect,
-            cleanup: heartbeat_client_free,
-            serviceName: "heartbeat"
-        ) { client in
-            verboseLog("[IdeviceGateway] performHeartbeat() calling heartbeat_get_marco")
-            let getErr = heartbeat_get_marco(client, interval, newInterval)
-            if let getErr = getErr {
-                debugLog("[IdeviceGateway] performHeartbeat() heartbeat_get_marco failed")
-                defer { idevice_error_free(getErr) }
-                throw IdeviceGatewayError.serviceError("Heartbeat receive failed")
-            }
-            verboseLog("[IdeviceGateway] performHeartbeat() calling heartbeat_send_polo")
-            let sendErr = heartbeat_send_polo(client)
-            if let sendErr = sendErr {
-                debugLog("[IdeviceGateway] performHeartbeat() heartbeat_send_polo failed")
-                defer { idevice_error_free(sendErr) }
-                throw IdeviceGatewayError.serviceError("Heartbeat send failed")
-            }
-            debugLog("[IdeviceGateway] performHeartbeat() succeeded, newInterval: \(newInterval.pointee)")
-        }
+//        debugLog("[IdeviceGateway] performHeartbeat() called, interval: \(interval)")
+//        try verifyInitialized()
+//        try performWithEitherService(
+//            connectRP: heartbeat_connect_rsd,
+//            connectUsbmuxd: heartbeat_connect,
+//            cleanup: heartbeat_client_free,
+//            serviceName: "heartbeat"
+//        ) { client in
+//            verboseLog("[IdeviceGateway] performHeartbeat() calling heartbeat_get_marco")
+//            let getErr = heartbeat_get_marco(client, interval, newInterval)
+//            if let getErr = getErr {
+//                debugLog("[IdeviceGateway] performHeartbeat() heartbeat_get_marco failed")
+//                defer { idevice_error_free(getErr) }
+//                throw IdeviceGatewayError.serviceError("Heartbeat receive failed")
+//            }
+//            verboseLog("[IdeviceGateway] performHeartbeat() calling heartbeat_send_polo")
+//            let sendErr = heartbeat_send_polo(client)
+//            if let sendErr = sendErr {
+//                debugLog("[IdeviceGateway] performHeartbeat() heartbeat_send_polo failed")
+//                defer { idevice_error_free(sendErr) }
+//                throw IdeviceGatewayError.serviceError("Heartbeat send failed")
+//            }
+//            debugLog("[IdeviceGateway] performHeartbeat() succeeded, newInterval: \(newInterval.pointee)")
+//        }
     }
 
     public func mountPersonalizedDdi(image: Data, trustcache: Data, manifest: Data) throws {

@@ -13,74 +13,26 @@ final internal class NetworkObserverService: NetworkObserverAPI, @unchecked Send
 
     private let monitor = NWPathMonitor()
     private let queue = DispatchQueue(label: "net.monitor")
+    private let state = State()
+    
+    private actor State {
+        private var started = false
 
-    private let lock = NSLock()
-    private var started = false
-
-    @discardableResult
-    func start() -> Bool {
-        lock.withLock {
+        func start(monitor: NWPathMonitor, queue: DispatchQueue, pathUpdateHandler: @escaping (NWPath) -> Void) -> Bool {
             guard !started else {
                 verboseLog("[minimuxer] [net] monitor already started")
                 return false
             }
 
-            monitor.pathUpdateHandler = { [weak self] path in
-                verboseLog("[minimuxer] [net] path changed, status: \(path.status)")
-                guard path.status == .satisfied else { return }
-                self?.refreshEndpoint()
-            }
-
+            monitor.pathUpdateHandler = pathUpdateHandler
             monitor.start(queue: queue)
             started = true
             verboseLog("[minimuxer] [net] monitor started")
             return true
         }
-    }
-    
-    func refreshEndpoint() {
-        verboseLog("[minimuxer] [net] refreshing interfaces list and peers")
-        IfaceScanner.shared.refresh()
 
-        verboseLog("[minimuxer] [net] retrive the first vpn interface info")
-        if let info = try? IfaceScanner.shared.probableVPN() {
-            verboseLog("[minimuxer] [net] vpn: \(info) peer: \(info.peerIP ?? "nil")")
-
-            if let peer = info.peerIP {
-                verboseLog("[minimuxer] [net] update the device endpoint with discovered peer on the vpn interface")
-                DeviceEndpoint.shared.update(peer)
-                MuxerService.notifyDeviceAttached(deviceIP: peer)
-                if MuxerService.started && !MuxerService.isrppairing {
-                    Task { 
-                        await HeartbeatService.start()
-                    }
-                }
-            } else {
-                verboseLog("[minimuxer] [net] peer not available for \(info.name)")
-                DeviceEndpoint.shared.clear()
-                MuxerService.notifyDeviceDetached()
-                if !MuxerService.isrppairing {
-                    Task { 
-                        await HeartbeatService.stop()
-                    }
-                }
-            }
-        } else {
-            verboseLog("[minimuxer] [net] no SideVPN endpoint detected")
-            DeviceEndpoint.shared.clear()
-            MuxerService.notifyDeviceDetached()
-            if !MuxerService.isrppairing {
-                Task {
-                    await HeartbeatService.stop()
-                }
-            }
-        }
-    }
-    
-    @discardableResult
-    func stop() -> Bool {
-        lock.withLock {
-            if !started {
+        func stop(monitor: NWPathMonitor) -> Bool {
+            guard started else {
                 verboseLog("[minimuxer] [net] monitor already stopped")
                 return false
             }
@@ -89,6 +41,73 @@ final internal class NetworkObserverService: NetworkObserverAPI, @unchecked Send
             verboseLog("[minimuxer] [net] monitor stopped")
             return true
         }
+    }
+
+    @discardableResult
+    func start() -> Bool {
+        let semaphore = DispatchSemaphore(value: 0)
+        var result = false
+        Task { [weak self] in
+            guard let self = self else {
+                semaphore.signal()
+                return
+            }
+            result = await self.state.start(monitor: self.monitor, queue: self.queue) { [weak self] path in
+                verboseLog("[minimuxer] [net] path changed, status: \(path.status)")
+                guard path.status == .satisfied else { return }
+                self?.refreshEndpoint()
+            }
+            semaphore.signal()
+        }
+        semaphore.wait()
+        return result
+    }
+    
+    func refreshEndpoint() {
+        Task {
+            await refreshEndpointAsync()
+        }
+    }
+
+    private func refreshEndpointAsync() async {
+        verboseLog("[minimuxer] [net] refreshing interfaces list and peers")
+        await IfaceScanner.shared.refresh()
+
+        verboseLog("[minimuxer] [net] retrive the first vpn interface info")
+        if let info = try? await IfaceScanner.shared.probableVPN() {
+            let peerIP = await info.peerIP
+            verboseLog("[minimuxer] [net] vpn: \(info) peer: \(peerIP ?? "nil")")
+
+            if let peer = peerIP {
+                verboseLog("[minimuxer] [net] update the device endpoint with discovered peer on the vpn interface")
+                await DeviceEndpoint.shared.update(peer)
+                MuxerService.notifyDeviceAttached(deviceIP: peer)
+            } else {
+                verboseLog("[minimuxer] [net] peer not available for \(info.name)")
+                await DeviceEndpoint.shared.clear()
+                MuxerService.notifyDeviceDetached()
+            }
+        } else {
+            verboseLog("[minimuxer] [net] no SideVPN endpoint detected")
+            await DeviceEndpoint.shared.clear()
+            MuxerService.notifyDeviceDetached()
+        }
+    }
+    
+    @discardableResult
+    func stop() -> Bool {
+        let semaphore = DispatchSemaphore(value: 0)
+        var result = false
+        Task { [weak self] in
+            guard let self = self else {
+                semaphore.signal()
+                return
+            }
+            result = await self.state.stop(monitor: self.monitor)
+            semaphore.signal()
+        }
+        semaphore.wait()
+        return result
     }
     
     var isWifiSatisfied: Bool {
@@ -106,8 +125,18 @@ final internal class NetworkObserverService: NetworkObserverAPI, @unchecked Send
         if path.status == .satisfied && path.usesInterfaceType(.other) {
             return true
         }
-        return IfaceScanner.shared.interfaces.contains { info in
-            info.name.lowercased().contains("bridge") || info.name.lowercased().contains("ap")
+        
+        let semaphore = DispatchSemaphore(value: 0)
+        var interfaces: Set<NetInfo> = []
+        Task {
+            interfaces = await IfaceScanner.shared.interfaces
+            semaphore.signal()
+        }
+        semaphore.wait()
+        
+        return interfaces.contains { info in
+            info.name.lowercased().contains("bridge") ||
+            info.name.lowercased().contains("ap")
         }
     }
 }

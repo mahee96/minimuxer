@@ -41,11 +41,13 @@ public struct TunnelConfigBinding: Sendable {
 }
 
 public protocol MinimuxerAPI: AnyObject {
+    var isrppairing: Bool { get }
+    func getPairingInfo() -> PairingInfo?
     var isLoggingEnabled: Bool { get }
     var onBackgroundError: ((Error) async -> Void)? { get set }
     
     func describeError(_ error: MinimuxerError) -> String
-    func bindTunnelConfig(_ binding: TunnelConfigBinding)
+    func bindTunnelConfig(_ binding: TunnelConfigBinding) async
     func ready() -> Result<Bool, MinimuxerError>
     func setLogging(_ enabled: Bool)
     func reinitializePairingData(pairingFile: String) throws

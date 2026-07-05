@@ -17,14 +17,19 @@ import Glibc
 final internal class MuxerService {
     static var started = false
     static var usbmuxdReady = false
-    static var isrppairing = false
-
-    private static var cachedPairingDict: [String: Any]?
-    private static var cachedPairingXml: Data?
 
     // Stable device state
     private static var currentDeviceIP: String?
     private static var currentEvent: String?
+
+    static func notifyDeviceAttached(deviceIP: String){
+        currentDeviceIP = deviceIP
+        currentEvent = MinimuxerConstants.deviceAttach
+    }
+    static func notifyDeviceDetached(){
+        currentDeviceIP = nil
+        currentEvent = MinimuxerConstants.deviceDetach
+    }
 
     private static var lastLogMessage: String?
 
@@ -39,67 +44,13 @@ final internal class MuxerService {
         }
     }
 
-    static func retargetUsbmuxdAddr() {
-        verboseLog("[minimuxer] unsetenv(USBMUXD_SOCKET_ADDRESS)")
-        unsetenv(MinimuxerConstants.usbmuxdEnvKey)
-        verboseLog("[minimuxer] setenv(USBMUXD_SOCKET_ADDRESS, \(MinimuxerConstants.usbmuxdSocket))")
-        setenv(MinimuxerConstants.usbmuxdEnvKey, MinimuxerConstants.usbmuxdSocket, 1)
-        let value = String(cString: getenv(MinimuxerConstants.usbmuxdEnvKey))
-        verboseLog("[minimuxer] getenv(USBMUXD_SOCKET_ADDRESS) = \(value)")
-    }
-
-    static func reinitializePairingData(pairingFile: String) throws {
-        guard let pairingData = pairingFile.data(using: .utf8),
-              let pairingDict = try? PropertyListSerialization.propertyList(from: pairingData, options: [], format: nil) as? [String: Any]
-        else {
-            debugLog("[minimuxer] ERROR: Failed to parse pairing file")
-            throw MinimuxerError.PairingFile
-        }
-
-        verboseLog("[minimuxer] DEBUG: loaded pairing file keys: \(pairingDict.keys)")
-
-        if let _ = pairingDict["private_key"] as? Data {
-            verboseLog("[minimuxer] INFO: RPPairing file detected")
-            isrppairing = true
-        } else if let _ = pairingDict["UDID"] as? String {
-            verboseLog("[minimuxer] INFO: Lockdown pairing file detected")
-        } else {
-            debugLog("[minimuxer] ERROR: Pairing file missing UDID")
-            throw MinimuxerError.PairingFile
-        }
-
-        var cleanPairingDict = pairingDict
-        cleanPairingDict.removeValue(forKey: "UDID")
-
-        guard let pairingXml = try? PropertyListSerialization.data(fromPropertyList: cleanPairingDict, format: .xml, options: 0) else {
-            debugLog("[minimuxer] ERROR: Failed to serialize clean pairing file")
-            throw MinimuxerError.PairingFile
-        }
-
-        cachedPairingDict = pairingDict
-        cachedPairingXml  = pairingXml
-
-        if isrppairing {
-            try IdeviceGateway.shared.start(pairingFileContent: pairingFile)
-        }
-    }
-
-    static func start(pairingFile: String) throws {
+    static func start() throws {
         if started {
             verboseLog("[minimuxer] Already started minimuxer, skipping")
             return
         }
-
-        try reinitializePairingData(pairingFile: pairingFile)
-
-        if !isrppairing {
-            Task.detached(priority: .userInitiated) { listenLoop() }
-            Task {
-                await HeartbeatService.start()
-            }
-        }
+        Task.detached { listenLoop() }
         started = true
-
         verboseLog("[minimuxer] minimuxer has started!")
     }
 
@@ -216,7 +167,7 @@ final internal class MuxerService {
 
     
     private static func buildPayload(deviceIP: String, event: String? = nil) throws -> [String: Any] {
-        guard let udid = cachedPairingDict?["UDID"] as? String else {
+        guard let udid = Minimuxer.shared.getPairingInfo()?.dictionary["UDID"] as? String else {
             throw MinimuxerError.PairingFile
         }
 
@@ -261,9 +212,9 @@ final internal class MuxerService {
                 return ["DeviceList": [payload]]
                 
             case "Listen":
-                if let deviceIP = currentDeviceIP{
+                if let deviceIP = currentDeviceIP {
                      Task.detached {
-                         if let payload = try? buildPayload(deviceIP: deviceIP, event: currentEvent){
+                         if let payload = try? buildPayload(deviceIP: deviceIP, event: currentEvent) {
                              let pkt = RawPacket(plist: payload, version: 1, message: 8, tag: 0)
                              let data = pkt.data
                              data.withUnsafeBytes { _ = send(fd, $0.baseAddress!, data.count, 0) }
@@ -273,11 +224,11 @@ final internal class MuxerService {
                 return ["MessageType": "Result", "Number": 0]
                 
             case "ReadBUID":
-                let buid = cachedPairingDict?["SystemBUID"] as? String ?? "00000000-0000-0000-0000-000000000000"
+                let buid = Minimuxer.shared.getPairingInfo()?.dictionary["SystemBUID"] as? String ?? "00000000-0000-0000-0000-000000000000"
                 return ["BUID": buid]
 
             case "ReadPairRecord":
-                let pairingData = cachedPairingXml ?? Data()
+                let pairingData = Minimuxer.shared.getPairingInfo()?.xmlData ?? Data()
                 return [
                     "MessageType": "Result",
                     "Number": 0,
@@ -288,16 +239,6 @@ final internal class MuxerService {
                 debugLog("[minimuxer] WARN: unknown message type: \(messageType)")
                 throw MinimuxerError.Connect
         }
-    }
-    
-    
-    static func notifyDeviceAttached(deviceIP: String){
-        currentDeviceIP = deviceIP
-        currentEvent = MinimuxerConstants.deviceAttach
-    }
-    static func notifyDeviceDetached(){
-        currentDeviceIP = nil
-        currentEvent = MinimuxerConstants.deviceDetach
     }
 
 

@@ -30,7 +30,7 @@ final internal class WirelessPairService: WirelessPairAPI {
         guard !isPairing else { return }
         isPairing = true
         
-        Task.detached(priority: .userInitiated) { [weak self] in
+        Task.detached { [weak self] in
             guard let self = self else { return }
             
             let outcome: Result<WirelessPairPairedDevice, Swift.Error>

@@ -60,7 +60,9 @@ internal struct NetInfo: Hashable, CustomStringConvertible, Sendable {
     }
     
     var peerIP: String? {
-        IfaceScanner.shared.getPeer(for: self).flatMap{ $0 }
+        get async {
+            await IfaceScanner.shared.getPeer(for: self)
+        }
     }
 
     var networkBase: UInt32 { host & mask }
@@ -72,65 +74,58 @@ internal struct NetInfo: Hashable, CustomStringConvertible, Sendable {
     
 }
 
-final internal class IfaceScanner: @unchecked Sendable {
+actor IfaceScanner {
 
     static let shared = IfaceScanner()
 
 
-    private let lock = NSLock()
     private var interfacesCache: Set<NetInfo> = []
     private var refreshed = false
     private var tunnelConfigCache: TunnelConfigBinding?
 
     func bindTunnelConfig(_ binding: TunnelConfigBinding) {
-        lock.withLock {
-            tunnelConfigCache = binding
-        }
+        tunnelConfigCache = binding
         
         // ask all observers to be refreshed
-        Minimuxer.network.refreshEndpoint()
+        Task {
+            await Minimuxer.network.refreshEndpoint()
+        }
     }
 
     var cachedOverrideFakeIP: String? {
-        lock.withLock {
-            tunnelConfigCache?.getOverrideFakeIP()
-        }
+        tunnelConfigCache?.getOverrideFakeIP()
     }
     
     private init() {}
 
-    func refresh() {
+    func refresh() async {
         let scannedInterfaces = Self.scan()
         
-        lock.withLock {
-            interfacesCache = scannedInterfaces
-            refreshed = true
+        interfacesCache = scannedInterfaces
+        refreshed = true
 
-            let vpnIface = try? probableVPNInternal()
-            tunnelConfigCache?.setDeviceIP(vpnIface?.hostIP)
-            tunnelConfigCache?.setSubnetMask(vpnIface?.maskIP)
-            let peerIP = vpnIface?.peerIP
-            let isOverrideActive = peerIP != nil && peerIP == tunnelConfigCache?.getOverrideFakeIP()
-            tunnelConfigCache?.setFakeIP(peerIP)
-            tunnelConfigCache?.setOverrideEffective(isOverrideActive)
-            
-            verboseLog("""
-            [minimuxer] [iface] rescan routes
-              • interfaces: \(interfacesCache.count)
-              • vpn host: \(vpnIface?.hostIP ?? "nil")
-              • vpn mask: \(vpnIface?.maskIP ?? "nil")
-              • vpn peer: \(peerIP ?? "nil")
-              • cachedOverrideFakeIP: \(tunnelConfigCache?.getOverrideFakeIP() ?? "nil")
-              • overrideEffective: \(isOverrideActive)
-              • refreshed: \(refreshed)
-            """)
-        }
+        let vpnIface = try? probableVPNInternal()
+        tunnelConfigCache?.setDeviceIP(vpnIface?.hostIP)
+        tunnelConfigCache?.setSubnetMask(vpnIface?.maskIP)
+        let peerIP = await vpnIface?.peerIP
+        let isOverrideActive = peerIP != nil && peerIP == tunnelConfigCache?.getOverrideFakeIP()
+        tunnelConfigCache?.setFakeIP(peerIP)
+        tunnelConfigCache?.setOverrideEffective(isOverrideActive)
+        
+        verboseLog("""
+        [minimuxer] [iface] rescan routes
+          • interfaces: \(interfacesCache.count)
+          • vpn host: \(vpnIface?.hostIP ?? "nil")
+          • vpn mask: \(vpnIface?.maskIP ?? "nil")
+          • vpn peer: \(peerIP ?? "nil")
+          • cachedOverrideFakeIP: \(tunnelConfigCache?.getOverrideFakeIP() ?? "nil")
+          • overrideEffective: \(isOverrideActive)
+          • refreshed: \(refreshed)
+        """)
     }
 
     var interfaces: Set<NetInfo> {
-        lock.withLock {
-            interfacesCache
-        }
+        interfacesCache
     }
 
     private func ensureReadyInternal() throws {
@@ -148,25 +143,19 @@ final internal class IfaceScanner: @unchecked Sendable {
     }
 
     func probableVPN() throws -> NetInfo? {
-        try lock.withLock {
-            try probableVPNInternal()
-        }
+        try probableVPNInternal()
     }
 
     func probableLAN() throws -> NetInfo? {
-        try lock.withLock {
-            try probableLANInternal()
-        }
+        try probableLANInternal()
     }
 
     func vpnPatched() -> Bool {
-        lock.withLock {
-            guard let lan = try? probableLANInternal(),
-                  let vpn = try? probableVPNInternal()
-            else { return false }
+        guard let lan = try? probableLANInternal(),
+              let vpn = try? probableVPNInternal()
+        else { return false }
 
-            return lan.maskIP == vpn.maskIP
-        }
+        return lan.maskIP == vpn.maskIP
     }
 
     // MARK: scan

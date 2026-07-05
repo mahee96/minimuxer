@@ -47,7 +47,7 @@ final internal class HeartbeatService {
         }
 
         verboseLog("[minimuxer] Starting heartbeat task...")
-        Task.detached(priority: .userInitiated) {
+        Task.detached {
             verboseLog("[minimuxer] heartbeat-task: started")
 
             await heartbeatLoop()
@@ -88,7 +88,7 @@ final internal class HeartbeatService {
         while await state.running {
             let deviceIP: String
             do {
-                deviceIP = try DeviceEndpoint.shared.ip()
+                deviceIP = try await DeviceEndpoint.shared.ip()
             } catch {
                 logIfNeeded("deviceIP unavailable", isVerbose: true)
                 lastBeatSuccessful = false

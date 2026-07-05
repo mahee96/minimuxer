@@ -7,14 +7,20 @@
 //
 
 import Foundation
+
+public struct PairingInfo {
+    public let dictionary: [String: Any]
+    public let xmlData: Data
+}
 // import RustBridge
-#if canImport(Darwin)
-import Darwin
-#elseif canImport(Glibc)
-import Glibc
-#endif
+// #if canImport(Darwin)
+// import Darwin
+// #elseif canImport(Glibc)
+// import Glibc
+// #endif
 
 final internal class MinimuxerImpl: MinimuxerAPI {
+    var isrppairing: Bool { isRpPairing }
     
     private actor MutableState {
         var continuation: CheckedContinuation<Void, Error>?
@@ -43,15 +49,33 @@ final internal class MinimuxerImpl: MinimuxerAPI {
     var isLoggingEnabled = true
     var onBackgroundError: ((Error) async -> Void)?
     
+    var isRpPairing: Bool = false
+    private var pairingInfo: PairingInfo? = nil
+    
+    func getPairingInfo() -> PairingInfo? {
+        return pairingInfo
+    }
+    
     func describeError(_ error: MinimuxerError) -> String {
         return error.description
     }
     
-    func bindTunnelConfig(_ binding: TunnelConfigBinding) {
-        IfaceScanner.shared.bindTunnelConfig(binding)
+    func bindTunnelConfig(_ binding: TunnelConfigBinding) async {
+        await IfaceScanner.shared.bindTunnelConfig(binding)
     }
     
     func ready() -> Result<Bool, MinimuxerError> {
+        let semaphore = DispatchSemaphore(value: 0)
+        var result: Result<Bool, MinimuxerError>!
+        Task {
+            result = await readyAsync()
+            semaphore.signal()
+        }
+        semaphore.wait()
+        return result
+    }
+
+    private func readyAsync() async -> Result<Bool, MinimuxerError> {
         if !(Minimuxer.network.isWifiSatisfied  ||
              Minimuxer.network.isWiredSatisfied ||
              Minimuxer.network.isBridgeSatisfied
@@ -62,7 +86,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
 
         let deviceIP: String
         do {
-            deviceIP = try DeviceEndpoint.shared.ip()
+            deviceIP = try await DeviceEndpoint.shared.ip()
         } catch {
             debugLog("[minimuxer] minimuxer not ready: device endpoint not initialized")
             return .failure(MinimuxerError.NoVPN)
@@ -74,7 +98,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
             return .failure(MinimuxerError.InvalidVPN)
         }
 
-        if MuxerService.isrppairing {
+        if isrppairing {
             guard MounterService.isReady() else {
                 verboseLog(
                     "minimuxer not ready (RSD): " +
@@ -87,27 +111,21 @@ final internal class MinimuxerImpl: MinimuxerAPI {
             return .success(true)
         }
         
-        let deviceExists: Bool
-        do {
-            _ = try DeviceService.getFirstDevice()
-            deviceExists = true
-        } catch {
-            deviceExists = false
-        }
-        guard deviceExists, HeartbeatService.lastBeatSuccessful, MounterService.isReady(), MuxerService.started, MuxerService.usbmuxdReady else {
-            verboseLog(
-                "minimuxer not ready (usbmuxd): " +
-                "dev=\(deviceExists) " +
-                "hb=\(HeartbeatService.lastBeatSuccessful) " +
-                "dmg=\(MounterService.isReady()) " +
-                "started=\(MuxerService.started) " +
-                "ready=\(MuxerService.usbmuxdReady)"
-            )
-            return .failure(MinimuxerError.InvalidPairing)
-        }
+        let deviceUDID = (try? IdeviceGateway.shared.fetchUDID())
+        verboseLog(
+            "minimuxer not ready (usbmuxd): " +
+            "devUDID=\(deviceUDID) " +
+            "hb=\(HeartbeatService.lastBeatSuccessful) " +
+            "dmg=\(MounterService.isReady()) " +
+            "started=\(MuxerService.started) " +
+            "ready=\(MuxerService.usbmuxdReady)"
+        )
+//        guard deviceUDID != nil, HeartbeatService.lastBeatSuccessful, MounterService.isReady(), MuxerService.started, MuxerService.usbmuxdReady else {
+//            return .failure(MinimuxerError.InvalidPairing)
+//        }
         
         if #available(iOS 26.4, *) {
-            if !IfaceScanner.shared.vpnPatched() {
+            if await !IfaceScanner.shared.vpnPatched() {
                 debugLog("[minimuxer] WARN: VPN subnet not patched")
             }
         }
@@ -119,21 +137,66 @@ final internal class MinimuxerImpl: MinimuxerAPI {
     }
     
     func reinitializePairingData(pairingFile: String) throws {
-        try MuxerService.reinitializePairingData(pairingFile: pairingFile)
+        guard let pairingData = pairingFile.data(using: .utf8),
+              let pairingDict = try? PropertyListSerialization.propertyList(from: pairingData, options: [], format: nil) as? [String: Any]
+        else {
+            debugLog("[minimuxer] ERROR: Failed to parse pairing file")
+            throw MinimuxerError.PairingFile
+        }
+
+        verboseLog("[minimuxer] DEBUG: loaded pairing file keys: \(pairingDict.keys)")
+
+        if let _ = pairingDict["private_key"] as? Data {
+            verboseLog("[minimuxer] INFO: RPPairing file detected")
+            isRpPairing = true
+        } else if let _ = pairingDict["UDID"] as? String {
+            verboseLog("[minimuxer] INFO: Lockdown pairing file detected")
+            isRpPairing = false
+        } else {
+            debugLog("[minimuxer] ERROR: Pairing file missing UDID")
+            throw MinimuxerError.PairingFile
+        }
+
+        var cleanPairingDict = pairingDict
+        cleanPairingDict.removeValue(forKey: "UDID")
+
+        guard let pairingXml = try? PropertyListSerialization.data(fromPropertyList: cleanPairingDict, format: .xml, options: 0) else {
+            debugLog("[minimuxer] ERROR: Failed to serialize clean pairing file")
+            throw MinimuxerError.PairingFile
+        }
+
+        self.pairingInfo = PairingInfo(dictionary: pairingDict, xmlData: pairingXml)
+
+        if isrppairing {
+            try IdeviceGateway.shared.start(pairingFileContent: pairingFile)
+        }
     }
     
     func start(pairingFile: String) throws {
-        try MuxerService.start(pairingFile: pairingFile)
+        // parse and update pairing file
+        try reinitializePairingData(pairingFile: pairingFile)
+        // retarget usbmuxd to our fake server
+        retargetUsbmuxdAddr()
+        // start our fake usbmuxd server for lockdown protocol based clients
+        if !isrppairing {
+            try MuxerService.start()
+        }
+        try IdeviceGateway.shared.start(pairingFileContent: pairingFile)
     }
     
     func retargetUsbmuxdAddr() {
-        MuxerService.retargetUsbmuxdAddr()
+        verboseLog("[minimuxer] unsetenv(USBMUXD_SOCKET_ADDRESS)")
+        unsetenv(MinimuxerConstants.usbmuxdEnvKey)
+        verboseLog("[minimuxer] setenv(USBMUXD_SOCKET_ADDRESS, \(MinimuxerConstants.usbmuxdSocket))")
+        setenv(MinimuxerConstants.usbmuxdEnvKey, MinimuxerConstants.usbmuxdSocket, 1)
+        let value = String(cString: getenv(MinimuxerConstants.usbmuxdEnvKey))
+        verboseLog("[minimuxer] getenv(USBMUXD_SOCKET_ADDRESS) = \(value)")
     }
     
     func fetchUDID() throws -> String? {
         verboseLog("[minimuxer] Getting UDID for first device")
-        let udid = try DeviceService.getFirstDevice().getUDID()
-        verboseLog("[minimuxer] Device UDID = \(udid)")
+        let udid = try IdeviceGateway.shared.fetchUDID()
+        verboseLog("[minimuxer] Device UDID = \(udid ?? "nil")")
         return udid
     }
     
@@ -142,7 +205,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         
         var addr = sockaddr_in()
         addr.sin_family = sa_family_t(AF_INET)
-        addr.sin_port = MuxerService.isrppairing ? MinimuxerConstants.rsdPort.bigEndian : MinimuxerConstants.lockdowndPort.bigEndian
+        addr.sin_port = isrppairing ? MinimuxerConstants.rsdPort.bigEndian : MinimuxerConstants.lockdowndPort.bigEndian
         inet_pton(AF_INET, ip, &addr.sin_addr)
 
         let fd = socket(AF_INET, SOCK_STREAM, 0)

@@ -23,7 +23,7 @@ final internal class MounterService {
         if let provider {
             return provider
         } else {
-            if MuxerService.isrppairing {
+            if Minimuxer.shared.isrppairing {
                 provider = RPMounterService()
             } else {
                 provider = LockDownMounterService()
@@ -78,7 +78,7 @@ final internal class LockDownMounterService: MounterServiceProvider {
         let dmgDocsPath = "\(path)/DMG"
 
         verboseLog("[minimuxer] mount-task: Starting mount task...")
-        Task.detached(priority: .userInitiated) { [weak self] in
+        Task.detached { [weak self] in
             guard let self = self else { return }
             verboseLog("[minimuxer] mount-task: started")
             
@@ -112,7 +112,6 @@ final internal class LockDownMounterService: MounterServiceProvider {
         while !self.dmgMounted {
             try? await Task.sleep(nanoseconds: MinimuxerConstants.mounterSleepNs)
             do {
-                let device = try DeviceService.getFirstDevice()
                 guard let versionStr = try IdeviceGateway.shared.getLockdownValue(key: "ProductVersion") else {
                     logIfNeeded("Could not get device version for mounter", prefix: "mount-task: WARN: ")
                     continue
@@ -120,7 +119,7 @@ final internal class LockDownMounterService: MounterServiceProvider {
 
                 let major = Int(versionStr.split(separator: ".").first ?? "0") ?? 0
                 if major < 17 {
-                    try await self.handlePre17Mount(device: device, iosVersion: versionStr, dmgDocsPath: dmgDocsPath)
+                    try await self.handlePre17Mount(iosVersion: versionStr, dmgDocsPath: dmgDocsPath)
                 } else {
                     try await self.handlePost17Mount(dmgDocsPath: dmgDocsPath)
                 }
@@ -140,7 +139,7 @@ final internal class LockDownMounterService: MounterServiceProvider {
         }
     }
 
-    private func handlePre17Mount(device: DeviceService, iosVersion: String, dmgDocsPath: String) async throws {
+    private func handlePre17Mount(iosVersion: String, dmgDocsPath: String) async throws {
         verboseLog("[minimuxer] Starting image mounter (pre-17)")
         
         let dmgPath = "\(dmgDocsPath)/\(iosVersion).dmg"
@@ -300,7 +299,7 @@ final internal class RPMounterService: MounterServiceProvider {
         let dmgDocsPath = (path.hasSuffix("/") ? String(path.dropLast()) : path) + "/DMG"
 
         verboseLog("[minimuxer] mount-task: Starting mount task...")
-        Task.detached(priority: .userInitiated) { [weak self] in
+        Task.detached { [weak self] in
             guard let self = self else { return }
             verboseLog("[minimuxer] mount-task: started")
             
@@ -329,7 +328,7 @@ final internal class RPMounterService: MounterServiceProvider {
 
             while !self.dmgMounted {
                 try? await Task.sleep(nanoseconds: MinimuxerConstants.mounterSleepNs)
-                guard (try? DeviceEndpoint.shared.ip()) != nil else {
+                guard (try? await DeviceEndpoint.shared.ip()) != nil else {
                     continue
                 }
                 do {

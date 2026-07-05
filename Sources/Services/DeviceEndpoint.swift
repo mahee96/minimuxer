@@ -8,39 +8,30 @@
 
 import Foundation
 
-final internal class DeviceEndpoint: @unchecked Sendable {
+actor DeviceEndpoint {
 
     static let shared = DeviceEndpoint()
 
-    private let lock = NSLock()
-    private var _ip: String? = nil
+    private var ipAddr: String? = nil
 
     private init() {}
 
     func ip() throws -> String {
-        try lock.withLock {
-            guard let ip = _ip else { throw MinimuxerInternalError.deviceEndpointNotInitialized }
-            return ip
-        }
+        guard let ip = ipAddr else { throw MinimuxerInternalError.deviceEndpointNotInitialized }
+        return ip
     }
 
     func update(_ newIP: String) {
-        lock.withLock {
-            _ip = newIP
-        }
+        ipAddr = newIP
         verboseLog("[minimuxer] device endpoint updated -> \(newIP)")
     }
 
     func clear() {
-        lock.withLock {
-            _ip = nil
-        }
+        ipAddr = nil
         verboseLog("[minimuxer] device endpoint cleared -> nil")
     }
 
     var isInitialized: Bool {
-        lock.withLock {
-            _ip != nil
-        }
+        ipAddr != nil
     }
 }

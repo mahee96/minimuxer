@@ -20,11 +20,21 @@ let package = Package(
         )
     ],
     targets: [
+//        .binaryTarget(
+//            name: "IDevice",
+//            url: "https://github.com/jkcoxson/idevice/releases/download/v0.1.64/idevice-xcframework-v0.1.64.zip",
+//            checksum: "b8250402a23c850f80b9be1d4add309aae6c935ee6a797b73616e4d8f170be5d"
+//        ),
         .binaryTarget(
             name: "IDevice",
             url: "https://github.com/SideStore/idevice/releases/download/v0.1.64-ss-b1dac43/idevice-xcframework-v0.1.64-ss-b1dac43.zip",
-            checksum: "2d0d102051ee0633d451e95faecf5536f85e35a2cb090bde48a85e49d6259e95"
+            checksum: "ee7cfc58aa64b97239fa9fdb57b1632a2f45725f7fa4187517184b32de43fb89"
         ),
+//         .binaryTarget(
+//             name: "IDevice",
+//             path: "../../local/idevice/swift/bundle.zip"
+//         ),
+        
         // MARK: Main SPM target
         .target(
             name: "Minimuxer",

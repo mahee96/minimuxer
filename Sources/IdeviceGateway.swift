@@ -51,8 +51,25 @@ public final class IdeviceGateway {
         return nil
     }
 
+    private func safeFreeError(_ err: UnsafeMutablePointer<IdeviceFfiError>?) {
+        guard let err = err else { return }
+        let addr = Int(bitPattern: err)
+        if addr > 0xff {
+            idevice_error_free(err)
+        }
+    }
+
+    private func safeFreePlist(_ plist: plist_t?) {
+        guard let plist = plist else { return }
+        let addr = Int(bitPattern: plist)
+        if addr > 0xff {
+            plist_free(plist)
+        }
+    }
+
 
     private var pairingFile: OpaquePointer? = nil
+    private var pairingFileData: Data? = nil
     private var adapter: OpaquePointer? = nil
     private var handshake: OpaquePointer? = nil
     private var deviceIP: String = "10.7.0.1"
@@ -68,6 +85,7 @@ public final class IdeviceGateway {
     private func cleanup() {
         debugLog("[IdeviceGateway] cleanup() called")
         isInitialized = false
+        self.pairingFileData = nil
         
         if let pairingFile = self.pairingFile {
             verboseLog("[IdeviceGateway] cleanup() freeing pairingFile")
@@ -119,31 +137,27 @@ public final class IdeviceGateway {
 
     public func setLogging(_ enabled: Bool) {
         debugLog("[IdeviceGateway] setLogging(\(enabled)) called")
-        #if DEBUG
-        idevice_init_logger(enabled ? IdeviceLogLevel(rawValue: 5) : IdeviceLogLevel(rawValue: 0), IdeviceLogLevel(rawValue: 0), nil)
-        #else
-        idevice_init_logger(enabled ? IdeviceLogLevel(rawValue: 1) : IdeviceLogLevel(rawValue: 0), IdeviceLogLevel(rawValue: 0), nil)
-        #endif
+        // idevice_init_logger(enabled ? IdeviceLogLevel(rawValue: 4) : IdeviceLogLevel(rawValue: 0), IdeviceLogLevel(rawValue: 0), nil)
+        idevice_init_logger(IdeviceLogLevel(rawValue: 1), IdeviceLogLevel(rawValue: 0), nil)
     }
 
     public func start(pairingFileContent: String) throws {
         debugLog("[IdeviceGateway] start() called, pairingFileContent length: \(pairingFileContent.count)")
         cleanup()
         
-        #if DEBUG
-        setLogging(true)
-        #endif
+        idevice_init_logger(IdeviceLogLevel(rawValue: 5), IdeviceLogLevel(rawValue: 0), nil)
 
         guard let data = pairingFileContent.data(using: .utf8) else {
             debugLog("[IdeviceGateway] start() failed to decode pairingFileContent data as UTF-8")
             throw IdeviceGatewayError.invalidPairingFile
         }
+        self.pairingFileData = data
 
         // Check if pairing file is RPPairing
         if let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any] {
             if plist["private_key"] != nil {
                 verboseLog("[IdeviceGateway] start() detected private_key, isRPPairing = true")
-//                isRPPairing = true
+               isRPPairing = true
             } else {
                 verboseLog("[IdeviceGateway] start() plist did not contain private_key")
             }
@@ -452,6 +466,81 @@ public final class IdeviceGateway {
         return try action(client)
     }
 
+    private func performWithTcpService<T>(
+        connect: @escaping (OpaquePointer?, UnsafeMutablePointer<OpaquePointer?>?) -> UnsafeMutablePointer<IdeviceFfiError>?,
+        cleanup: @escaping (OpaquePointer?) -> Void,
+        serviceName: String,
+        action: (OpaquePointer) throws -> T
+    ) throws -> T {
+        verboseLog("[IdeviceGateway] performWithTcpService(\(serviceName)) started")
+        
+        var sockAddr = sockaddr_in()
+        sockAddr.sin_family = sa_family_t(AF_INET)
+        sockAddr.sin_port = UInt16(62078).bigEndian
+        sockAddr.sin_addr.s_addr = inet_addr(deviceIP)
+        #if os(macOS) || os(iOS)
+        sockAddr.sin_len = __uint8_t(MemoryLayout<sockaddr_in>.size)
+        #endif
+
+        guard let pairingFileData = self.pairingFileData else {
+            debugLog("[IdeviceGateway] error: pairingFileData is nil")
+            throw IdeviceGatewayError.connectionFailed("pairingFileData is nil")
+        }
+
+        var tempPairingFile: OpaquePointer? = nil
+        let parseErr = pairingFileData.withUnsafeBytes { buf in
+            return idevice_pairing_file_from_bytes(buf.baseAddress?.assumingMemoryBound(to: UInt8.self), UInt(pairingFileData.count), &tempPairingFile)
+        }
+        if let parseErr = parseErr {
+            let msg = parseErr.pointee.message != nil ? String(cString: parseErr.pointee.message!) : "No message"
+            debugLog("[IdeviceGateway] error: Failed to parse temporary pairing file: \(msg)")
+            defer { safeFreeError(parseErr) }
+            throw IdeviceGatewayError.connectionFailed("Failed to parse temporary pairing file: \(msg)")
+        }
+        guard let tempPairingFile = tempPairingFile else {
+            throw IdeviceGatewayError.connectionFailed("Temporary pairing file was nil")
+        }
+
+        var provider: OpaquePointer? = nil
+        let provErr = withUnsafePointer(to: &sockAddr) { ptr in
+            ptr.withMemoryRebound(to: idevice_sockaddr.self, capacity: 1) { reboundPtr in
+                return idevice_tcp_provider_new(reboundPtr, tempPairingFile, "minimuxer", &provider)
+            }
+        }
+        if let provErr = provErr {
+            let msg = provErr.pointee.message != nil ? String(cString: provErr.pointee.message!) : "No message"
+            debugLog("[IdeviceGateway] error: Failed to create TCP provider: \(msg)")
+            defer { safeFreeError(provErr) }
+            throw IdeviceGatewayError.connectionFailed("Failed to create TCP provider: \(msg)")
+        }
+        guard let provider = provider else {
+            debugLog("[IdeviceGateway] error: TCP Provider was nil")
+            throw IdeviceGatewayError.connectionFailed("TCP Provider was nil")
+        }
+        var providerToFree: OpaquePointer? = provider
+        defer {
+            if let ptr = providerToFree {
+                idevice_provider_free(ptr)
+            }
+        }
+
+        var client: OpaquePointer? = nil
+        let connectErr = connect(provider, &client)
+        if let connectErr = connectErr {
+            providerToFree = nil
+            let msg = connectErr.pointee.message != nil ? String(cString: connectErr.pointee.message!) : "No message"
+            debugLog("[IdeviceGateway] error: \(serviceName) connect failed: code=\(connectErr.pointee.code), message=\(msg)")
+            defer { safeFreeError(connectErr) }
+            throw IdeviceGatewayError.serviceError("Failed to connect to \(serviceName): \(msg)")
+        }
+        guard let client = client else {
+            throw IdeviceGatewayError.noConnection
+        }
+        defer { cleanup(client) }
+
+        return try action(client)
+    }
+
     private func performWithEitherService<T>(
         connectRP: @escaping (OpaquePointer?, OpaquePointer?, UnsafeMutablePointer<OpaquePointer?>?) -> UnsafeMutablePointer<IdeviceFfiError>?,
         connectUsbmuxd: @escaping (OpaquePointer?, UnsafeMutablePointer<OpaquePointer?>?) -> UnsafeMutablePointer<IdeviceFfiError>?,
@@ -463,7 +552,7 @@ public final class IdeviceGateway {
         if isRPPairing {
             return try performWithService(connect: connectRP, cleanup: cleanup, serviceName: serviceName, action: action)
         } else {
-            return try performWithUsbmuxdService(connect: connectUsbmuxd, cleanup: cleanup, serviceName: serviceName, action: action)
+            return try performWithTcpService(connect: connectUsbmuxd, cleanup: cleanup, serviceName: serviceName, action: action)
         }
     }
 
@@ -501,12 +590,12 @@ public final class IdeviceGateway {
             let valErr = lockdownd_get_value(client, "UniqueDeviceID", nil, &plistVal)
             if let valErr = valErr {
                 debugLog("[IdeviceGateway] fetchUDID() lockdownd_get_value failed")
-                idevice_error_free(valErr)
+                safeFreeError(valErr)
                 return nil
             }
             if let plistVal = plistVal {
                 defer {
-                    plist_free(plistVal)
+                    safeFreePlist(plistVal)
                 }
                 let udid = getRustPlistString(plistVal)
                 verboseLog("[IdeviceGateway] fetchUDID() getRustPlistString returned UDID: \(String(describing: udid))")
@@ -569,12 +658,12 @@ public final class IdeviceGateway {
             let valErr = lockdownd_get_value(client, key, nil, &plistVal)
             if let valErr = valErr {
                 debugLog("[IdeviceGateway] getLockdownValue lockdownd_get_value failed for \(key)")
-                defer { idevice_error_free(valErr) }
+                defer { safeFreeError(valErr) }
                 throw IdeviceGatewayError.serviceError("Failed to get lockdown value for key \(key)")
             }
             if let plistVal = plistVal {
                 defer {
-                    plist_free(plistVal)
+                    safeFreePlist(plistVal)
                 }
                 let val = getRustPlistString(plistVal)
                 verboseLog("[IdeviceGateway] getLockdownValue getRustPlistString returned: \(String(describing: val))")
@@ -599,9 +688,10 @@ public final class IdeviceGateway {
                     verboseLog("[IdeviceGateway] installProvisioningProfile() calling misagent_install")
                     let installErr = misagent_install(client, baseAddress, profile.count)
                     if let installErr = installErr {
-                        debugLog("[IdeviceGateway] installProvisioningProfile() misagent_install failed")
-                        defer { idevice_error_free(installErr) }
-                        throw IdeviceGatewayError.serviceError("Failed to install profile")
+                        let msg = installErr.pointee.message != nil ? String(cString: installErr.pointee.message!) : "No message"
+                        debugLog("[IdeviceGateway] installProvisioningProfile() misagent_install failed: \(msg)")
+                        defer { safeFreeError(installErr) }
+                        throw IdeviceGatewayError.serviceError("Failed to install profile: \(msg)")
                     }
                     debugLog("[IdeviceGateway] installProvisioningProfile() misagent_install succeeded")
                 }
@@ -622,9 +712,10 @@ public final class IdeviceGateway {
                 verboseLog("[IdeviceGateway] removeProvisioningProfile() calling misagent_remove")
                 let removeErr = misagent_remove(client, idPtr)
                 if let removeErr = removeErr {
-                    debugLog("[IdeviceGateway] removeProvisioningProfile() misagent_remove failed")
-                    defer { idevice_error_free(removeErr) }
-                    throw IdeviceGatewayError.serviceError("Failed to remove profile")
+                    let msg = removeErr.pointee.message != nil ? String(cString: removeErr.pointee.message!) : "No message"
+                    debugLog("[IdeviceGateway] removeProvisioningProfile() misagent_remove failed: \(msg)")
+                    defer { safeFreeError(removeErr) }
+                    throw IdeviceGatewayError.serviceError("Failed to remove profile: \(msg)")
                 }
                 debugLog("[IdeviceGateway] removeProvisioningProfile() misagent_remove succeeded")
             }
@@ -924,12 +1015,12 @@ public final class IdeviceGateway {
             
             var stream: OpaquePointer? = nil
             verboseLog("[IdeviceGateway] launchAppPre17() converting debug device connection to stream")
-            let streamErr = idevice_to_stream(debugDevice, &stream)
-            if let streamErr = streamErr {
-                debugLog("[IdeviceGateway] launchAppPre17() idevice_to_stream failed")
-                defer { idevice_error_free(streamErr) }
-                throw IdeviceGatewayError.serviceError("Failed to convert device connection to stream")
-            }
+           let streamErr = idevice_to_stream(debugDevice, &stream)
+           if let streamErr = streamErr {
+               debugLog("[IdeviceGateway] launchAppPre17() idevice_to_stream failed")
+               defer { idevice_error_free(streamErr) }
+               throw IdeviceGatewayError.serviceError("Failed to convert device connection to stream")
+           }
             debugDeviceNeedsFree = false
             
             guard let stream = stream else {
@@ -1098,30 +1189,30 @@ public final class IdeviceGateway {
     }
 
     public func performHeartbeat(interval: UInt64, newInterval: UnsafeMutablePointer<UInt64>) throws {
-//        debugLog("[IdeviceGateway] performHeartbeat() called, interval: \(interval)")
-//        try verifyInitialized()
-//        try performWithEitherService(
-//            connectRP: heartbeat_connect_rsd,
-//            connectUsbmuxd: heartbeat_connect,
-//            cleanup: heartbeat_client_free,
-//            serviceName: "heartbeat"
-//        ) { client in
-//            verboseLog("[IdeviceGateway] performHeartbeat() calling heartbeat_get_marco")
-//            let getErr = heartbeat_get_marco(client, interval, newInterval)
-//            if let getErr = getErr {
-//                debugLog("[IdeviceGateway] performHeartbeat() heartbeat_get_marco failed")
-//                defer { idevice_error_free(getErr) }
-//                throw IdeviceGatewayError.serviceError("Heartbeat receive failed")
-//            }
-//            verboseLog("[IdeviceGateway] performHeartbeat() calling heartbeat_send_polo")
-//            let sendErr = heartbeat_send_polo(client)
-//            if let sendErr = sendErr {
-//                debugLog("[IdeviceGateway] performHeartbeat() heartbeat_send_polo failed")
-//                defer { idevice_error_free(sendErr) }
-//                throw IdeviceGatewayError.serviceError("Heartbeat send failed")
-//            }
-//            debugLog("[IdeviceGateway] performHeartbeat() succeeded, newInterval: \(newInterval.pointee)")
-//        }
+       debugLog("[IdeviceGateway] performHeartbeat() called, interval: \(interval)")
+       try verifyInitialized()
+       try performWithEitherService(
+           connectRP: heartbeat_connect_rsd,
+           connectUsbmuxd: heartbeat_connect,
+           cleanup: heartbeat_client_free,
+           serviceName: "heartbeat"
+       ) { client in
+           verboseLog("[IdeviceGateway] performHeartbeat() calling heartbeat_get_marco")
+           let getErr = heartbeat_get_marco(client, interval, newInterval)
+           if let getErr = getErr {
+               debugLog("[IdeviceGateway] performHeartbeat() heartbeat_get_marco failed")
+               defer { idevice_error_free(getErr) }
+               throw IdeviceGatewayError.serviceError("Heartbeat receive failed")
+           }
+           verboseLog("[IdeviceGateway] performHeartbeat() calling heartbeat_send_polo")
+           let sendErr = heartbeat_send_polo(client)
+           if let sendErr = sendErr {
+               debugLog("[IdeviceGateway] performHeartbeat() heartbeat_send_polo failed")
+               defer { idevice_error_free(sendErr) }
+               throw IdeviceGatewayError.serviceError("Heartbeat send failed")
+           }
+           debugLog("[IdeviceGateway] performHeartbeat() succeeded, newInterval: \(newInterval.pointee)")
+       }
     }
 
     public func mountPersonalizedDdi(image: Data, trustcache: Data, manifest: Data) throws {
@@ -1159,6 +1250,10 @@ public final class IdeviceGateway {
         }
 
         try performWithService(connect: image_mounter_connect_rsd, cleanup: image_mounter_free, serviceName: "image mounter") { mounterClient in
+            if try isDeveloperDiskImageMounted(mounterClient: mounterClient) {
+                verboseLog("[IdeviceGateway] DeveloperDiskImage already mounted. Bypassing personalization.")
+                return
+            }
             try image.withUnsafeBytes { imgBuf in
                 try trustcache.withUnsafeBytes { tcBuf in
                     try manifest.withUnsafeBytes { manBuf in
@@ -1196,24 +1291,41 @@ public final class IdeviceGateway {
         sockAddr.sin_port = UInt16(62078).bigEndian
         sockAddr.sin_addr.s_addr = inet_addr(deviceIP)
 
-        guard let pairingFile = self.pairingFile else {
-            throw IdeviceGatewayError.connectionFailed("pairingFile is nil")
+        guard let pairingFileData = self.pairingFileData else {
+            debugLog("[IdeviceGateway] error: pairingFileData is nil")
+            throw IdeviceGatewayError.connectionFailed("pairingFileData is nil")
         }
 
+        var tempPairingFile: OpaquePointer? = nil
+        let parseErr = pairingFileData.withUnsafeBytes { buf in
+            return idevice_pairing_file_from_bytes(buf.baseAddress?.assumingMemoryBound(to: UInt8.self), UInt(pairingFileData.count), &tempPairingFile)
+        }
+        if let parseErr = parseErr {
+            let msg = parseErr.pointee.message != nil ? String(cString: parseErr.pointee.message!) : "No message"
+            debugLog("[IdeviceGateway] error: Failed to parse temporary pairing file: \(msg)")
+            defer { safeFreeError(parseErr) }
+            throw IdeviceGatewayError.connectionFailed("Failed to parse temporary pairing file: \(msg)")
+        }
+        guard let tempPairingFile = tempPairingFile else {
+            throw IdeviceGatewayError.connectionFailed("Temporary pairing file was nil")
+        }
+
+        verboseLog("[IdeviceGateway] creating TCP provider to \(deviceIP):62078...")
         var provider: OpaquePointer? = nil
         let provErr = withUnsafePointer(to: &sockAddr) { ptr in
             ptr.withMemoryRebound(to: idevice_sockaddr.self, capacity: 1) { reboundPtr in
-                return idevice_tcp_provider_new(reboundPtr, pairingFile, "minimuxer", &provider)
+                return idevice_tcp_provider_new(reboundPtr, tempPairingFile, "minimuxer", &provider)
             }
         }
         if let provErr = provErr {
-            defer { idevice_error_free(provErr) }
+            debugLog("[IdeviceGateway] error: Failed to create TCP provider")
+            defer { safeFreeError(provErr) }
             throw IdeviceGatewayError.connectionFailed("Failed to create TCP provider")
         }
         guard let provider = provider else {
+            debugLog("[IdeviceGateway] error: TCP Provider was nil")
             throw IdeviceGatewayError.connectionFailed("TCP Provider was nil")
         }
-        self.pairingFile = nil
 
         var providerToFree: OpaquePointer? = provider
         defer {
@@ -1224,14 +1336,17 @@ public final class IdeviceGateway {
 
         var chipID: UInt64 = 0
         do {
+            verboseLog("[IdeviceGateway] connecting lockdownd...")
             var lockdownClient: OpaquePointer? = nil
             let connectErr = lockdownd_connect(provider, &lockdownClient)
             if let connectErr = connectErr {
+                debugLog("[IdeviceGateway] error: lockdownd_connect failed")
                 providerToFree = nil
                 defer { idevice_error_free(connectErr) }
                 throw IdeviceGatewayError.noConnection
             }
             guard let lockdownClient = lockdownClient else {
+                debugLog("[IdeviceGateway] error: lockdownClient was nil after connect")
                 throw IdeviceGatewayError.noConnection
             }
             defer {
@@ -1240,10 +1355,10 @@ public final class IdeviceGateway {
             }
 
             var plistVal: plist_t? = nil
-            verboseLog("[IdeviceGateway] mountPersonalizedDdiIdevice() getting UniqueChipID (no TLS session)")
+            verboseLog("[IdeviceGateway] querying UniqueChipID from lockdown...")
             let valErr = lockdownd_get_value(lockdownClient, "UniqueChipID", nil, &plistVal)
             if let valErr = valErr {
-                debugLog("[IdeviceGateway] mountPersonalizedDdiIdevice() lockdownd_get_value failed without session, trying with session")
+                verboseLog("[IdeviceGateway] lockdownd_get_value failed without session, starting session...")
                 idevice_error_free(valErr)
                 var pf: OpaquePointer? = nil
                 let getPfErr = idevice_provider_get_pairing_file(provider, &pf)
@@ -1257,12 +1372,14 @@ public final class IdeviceGateway {
                 defer { idevice_pairing_file_free(pf) }
                 let sessionErr = lockdownd_start_session(lockdownClient, pf)
                 if let sessionErr = sessionErr {
+                    debugLog("[IdeviceGateway] error: lockdownd_start_session failed")
                     defer { idevice_error_free(sessionErr) }
                     throw IdeviceGatewayError.noConnection
                 }
+                verboseLog("[IdeviceGateway] session started. Querying UniqueChipID again...")
                 let valErr2 = lockdownd_get_value(lockdownClient, "UniqueChipID", nil, &plistVal)
                 if let valErr2 = valErr2 {
-                    debugLog("[IdeviceGateway] mountPersonalizedDdiIdevice() lockdownd_get_value failed with session too")
+                    debugLog("[IdeviceGateway] error: lockdownd_get_value failed with session too")
                     defer { idevice_error_free(valErr2) }
                     throw IdeviceGatewayError.serviceError("Failed to get UniqueChipID")
                 }
@@ -1270,27 +1387,35 @@ public final class IdeviceGateway {
             if let plistVal = plistVal {
                 defer { plist_free(plistVal) }
                 if plist_dict_get_item(plistVal, "Error") != nil {
-                    debugLog("[IdeviceGateway] mountPersonalizedDdiIdevice() UniqueChipID returned GetProhibited/Error")
+                    debugLog("[IdeviceGateway] error: UniqueChipID returned error plist")
                     throw IdeviceGatewayError.serviceError("Failed to get UniqueChipID: Prohibited")
                 }
                 var val: UInt64 = 0
                 plist_get_uint_val(plistVal, &val)
                 chipID = val
-                verboseLog("[IdeviceGateway] mountPersonalizedDdiIdevice() got chipID: \(chipID)")
+                verboseLog("[IdeviceGateway] UniqueChipID (chipID) = \(chipID)")
             }
         }
 
+        verboseLog("[IdeviceGateway] connecting to image mounter service...")
         var mounterClient: OpaquePointer? = nil
         let mounterConnectErr = image_mounter_connect(provider, &mounterClient)
         if let mounterConnectErr = mounterConnectErr {
+            debugLog("[IdeviceGateway] error: image_mounter_connect failed")
             providerToFree = nil
             defer { idevice_error_free(mounterConnectErr) }
             throw IdeviceGatewayError.serviceError("Failed to connect to image mounter")
         }
         guard let mounterClient = mounterClient else {
+            debugLog("[IdeviceGateway] error: mounterClient was nil")
             throw IdeviceGatewayError.serviceError("Mounter client was nil")
         }
         defer { image_mounter_free(mounterClient) }
+
+        if try isDeveloperDiskImageMounted(mounterClient: mounterClient) {
+            verboseLog("[IdeviceGateway] DeveloperDiskImage already mounted. Bypassing personalization.")
+            return
+        }
 
         try image.withUnsafeBytes { imgBuf in
             try trustcache.withUnsafeBytes { tcBuf in
@@ -1309,21 +1434,73 @@ public final class IdeviceGateway {
                         chipID
                     )
                     if let mountErr = mountErr {
-                        let ffiErr = mountErr.pointee
-                        let code = ffiErr.code
-                        let subCode = ffiErr.sub_code
-                        var msg = "Unknown error"
-                        if let msgPtr = ffiErr.message {
-                            msg = String(cString: msgPtr)
-                        }
-                        debugLog("[IdeviceGateway] mountPersonalizedDdiIdevice() mount failed: code \(code), subCode \(subCode), message: \(msg)")
                         defer { idevice_error_free(mountErr) }
-                        throw IdeviceGatewayError.serviceError("Failed to mount personalized DDI: \(msg)")
+                        throw IdeviceGatewayError.serviceError("Failed to mount personalized DDI")
                     }
-                    debugLog("[IdeviceGateway] mountPersonalizedDdiIdevice() mount succeeded")
+                    verboseLog("[IdeviceGateway] mountPersonalizedDdiIdevice() mount succeeded")
                 }
             }
         }
+    }
+
+    private func isDeveloperDiskImageMounted(mounterClient: OpaquePointer) throws -> Bool {
+        var devicesPtr: UnsafeMutablePointer<plist_t?>? = nil
+        var devicesLen: Int = 0
+        let err = image_mounter_copy_devices(mounterClient, &devicesPtr, &devicesLen)
+        if let err = err {
+            let ffiErr = err.pointee
+            let code = ffiErr.code
+            let subCode = ffiErr.sub_code
+            var msg = ""
+            if let msgPtr = ffiErr.message {
+                msg = String(cString: msgPtr)
+            }
+            debugLog("[IdeviceGateway] copy_devices failed: code=\(code), subCode=\(subCode), message=\(msg)")
+            defer { idevice_error_free(err) }
+            return false
+        }
+        guard let devicesPtr = devicesPtr, devicesLen > 0 else {
+            return false
+        }
+        defer {
+            for i in 0..<devicesLen {
+                if let p = devicesPtr[i] {
+                    plist_free(p)
+                }
+            }
+            free(devicesPtr)
+        }
+        
+        for i in 0..<devicesLen {
+            guard let p = devicesPtr[i],
+                  let xml = plistNodeToData(p),
+                  let dict = try? PropertyListSerialization.propertyList(from: xml, options: [], format: nil) as? [String: Any]
+            else { continue }
+            
+            let mountPath = dict["MountPath"] as? String
+            let imageType = dict["PersonalizedImageType"] as? String
+            let diskType = dict["DiskImageType"] as? String
+            
+            let mountPathMatches = mountPath == "/System/Developer"
+            let imageTypeMatches = imageType == "DeveloperDiskImage"
+            let diskTypeMatches = (diskType == nil || diskType == "Personalized")
+            
+            if mountPathMatches && imageTypeMatches && diskTypeMatches {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func plistNodeToData(_ node: plist_t) -> Data? {
+        var xmlPtr: UnsafeMutablePointer<Int8>? = nil
+        var xmlLen: UInt32 = 0
+        let err = plist_to_xml(node, &xmlPtr, &xmlLen)
+        guard err == PLIST_ERR_SUCCESS, let xmlPtr else {
+            return nil
+        }
+        defer { free(xmlPtr) }
+        return Data(bytes: xmlPtr, count: Int(xmlLen))
     }
 
     public func mountDeveloperImage(image: Data, signature: Data) throws {
@@ -1369,16 +1546,9 @@ public final class IdeviceGateway {
                     nil
                 )
                 if let mountErr = mountErr {
-                    let ffiErr = mountErr.pointee
-                    let code = ffiErr.code
-                    let subCode = ffiErr.sub_code
-                    var msg = "Unknown error"
-                    if let msgPtr = ffiErr.message {
-                        msg = String(cString: msgPtr)
-                    }
-                    debugLog("[IdeviceGateway] mountDeveloperImage() mount failed: code \(code), subCode \(subCode), message: \(msg)")
+                    debugLog("[IdeviceGateway] mountDeveloperImage() mount failed")
                     defer { idevice_error_free(mountErr) }
-                    throw IdeviceGatewayError.serviceError("Failed to mount developer image: \(msg)")
+                    throw IdeviceGatewayError.serviceError("Failed to mount developer image")
                 }
                 debugLog("[IdeviceGateway] mountDeveloperImage() mount succeeded")
             }

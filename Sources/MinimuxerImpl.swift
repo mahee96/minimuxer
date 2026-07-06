@@ -12,12 +12,6 @@ public struct PairingInfo {
     public let dictionary: [String: Any]
     public let xmlData: Data
 }
-// import RustBridge
-// #if canImport(Darwin)
-// import Darwin
-// #elseif canImport(Glibc)
-// import Glibc
-// #endif
 
 final internal class MinimuxerImpl: MinimuxerAPI {
     var isrppairing: Bool { isRpPairing }
@@ -113,9 +107,9 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         
         let deviceUDID = (try? IdeviceGateway.shared.fetchUDID())
         verboseLog(
-            "minimuxer not ready (usbmuxd): " +
-            "devUDID=\(deviceUDID) " +
-            "hb=\(HeartbeatService.lastBeatSuccessful) " +
+            "minimuxer status (usbmuxd): " +
+            "devUDID=\(deviceUDID ?? "nil") " +
+            // "hb=\(HeartbeatService.lastBeatSuccessful) " +
             "dmg=\(MounterService.isReady()) " +
             "started=\(MuxerService.started) " +
             "ready=\(MuxerService.usbmuxdReady)"

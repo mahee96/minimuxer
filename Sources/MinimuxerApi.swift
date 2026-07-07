@@ -47,7 +47,7 @@ public protocol MinimuxerAPI: AnyObject {
     
     func describeError(_ error: MinimuxerError) -> String
     func bindTunnelConfig(_ binding: TunnelConfigBinding) async
-    func ready() -> Result<Bool, MinimuxerError>
+    func ready() async throws -> Bool
     func setLogging(_ enabled: Bool)
     func reinitializePairingData(pairingFile: String) throws
     func start(pairingFile: String) throws

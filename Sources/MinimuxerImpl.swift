@@ -11,30 +11,6 @@ import Foundation
 final internal class MinimuxerImpl: MinimuxerAPI {
     var isrppairing: Bool { IdeviceGateway.shared.isRPPairing }
     
-    private actor MutableState {
-        var continuation: CheckedContinuation<Void, Error>?
-        var docsPath: String?
-        
-        func setDocsPath(_ path: String) {
-            self.docsPath = path
-        }
-        
-        func registerContinuation(_ co: CheckedContinuation<Void, Error>) throws {
-            if continuation != nil {
-                throw MinimuxerError.RestartAlreadyInProgressError
-            }
-            self.continuation = co
-        }
-        
-        func consumeContinuation() -> CheckedContinuation<Void, Error>? {
-            let co = continuation
-            continuation = nil
-            return co
-        }
-    }
-    
-    private let state = MutableState()
-    
     var isLoggingEnabled = true
     var onBackgroundError: ((Error) async -> Void)?
 
@@ -46,24 +22,13 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         await IfaceScanner.shared.bindTunnelConfig(binding)
     }
     
-    func ready() -> Result<Bool, MinimuxerError> {
-        let semaphore = DispatchSemaphore(value: 0)
-        var result: Result<Bool, MinimuxerError>!
-        Task {
-            result = await readyAsync()
-            semaphore.signal()
-        }
-        semaphore.wait()
-        return result
-    }
-
-    private func readyAsync() async -> Result<Bool, MinimuxerError> {
+    func ready() async throws -> Bool {
         if !(Minimuxer.network.isWifiSatisfied  ||
              Minimuxer.network.isWiredSatisfied ||
              Minimuxer.network.isBridgeSatisfied
         ){
             debugLog("[minimuxer] minimuxer not ready: no network connection")
-            return .failure(MinimuxerError.NoConnection)
+            throw MinimuxerError.NoConnection
         }
 
         let deviceIP: String
@@ -71,13 +36,13 @@ final internal class MinimuxerImpl: MinimuxerAPI {
             deviceIP = try await DeviceEndpoint.shared.ip()
         } catch {
             debugLog("[minimuxer] minimuxer not ready: device endpoint not initialized")
-            return .failure(MinimuxerError.NoVPN)
+            throw MinimuxerError.NoVPN
         }
         
         let deviceConnection = testDeviceConnection(ifaddr: deviceIP)
         if !deviceConnection {
             debugLog("[minimuxer] minimuxer not ready: failed to connect to device IP")
-            return .failure(MinimuxerError.InvalidVPN)
+            throw MinimuxerError.InvalidVPN
         }
 
         if isrppairing {
@@ -87,9 +52,9 @@ final internal class MinimuxerImpl: MinimuxerAPI {
                     "dmg=\(MounterService.isReady) " +
                     "started=\(MuxerService.isReady) "
                 )
-                return .failure(MinimuxerError.InvalidPairing)
+                throw MinimuxerError.InvalidPairing
             }
-            return .success(true)
+            return true
         }
         
         let deviceUDID: String? = try? IdeviceGateway.shared.fetchUDID()
@@ -103,7 +68,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
             MounterService.isReady, 
             MuxerService.isReady
         else {
-            return .failure(MinimuxerError.InvalidPairing)
+            throw MinimuxerError.InvalidPairing
         }
         
         if #available(iOS 26.4, *) {
@@ -111,10 +76,10 @@ final internal class MinimuxerImpl: MinimuxerAPI {
                 debugLog("[minimuxer] WARN: VPN subnet not patched")
             }
         }
-        return .success(true)
+        return true
     }
 
-    private func restartMuxerServer(pairingFile: String) throws {
+    private func restartMuxerServer() throws {
         guard !isrppairing else { return }
         
         guard let pairingDict = IdeviceGateway.shared.pairingDataDict else {
@@ -139,7 +104,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         // retarget usbmuxd to our fake usbmuxd server (over network)
         retargetUsbmuxdAddr()
         // start our fake usbmuxd server for lockdown protocol based clients if required
-        try restartMuxerServer(pairingFile: pairingFile)
+        try restartMuxerServer()
     }
     
     func setLogging(_ enabled: Bool) {
@@ -148,7 +113,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
     }
     
     func reinitializePairingData(pairingFile: String) throws {
-        try restartMuxerServer(pairingFile: pairingFile)
+        try restartMuxerServer()
     }
     
     func retargetUsbmuxdAddr() {
@@ -163,7 +128,6 @@ final internal class MinimuxerImpl: MinimuxerAPI {
     func fetchUDID() throws -> String? {
         return try IdeviceGateway.shared.fetchUDID()
     }
-    
     
     func testDeviceConnection(ifaddr: String?) -> Bool {
         guard let ip = ifaddr else { return false }
@@ -225,37 +189,20 @@ final internal class MinimuxerImpl: MinimuxerAPI {
     }
 
     func startAutoMounter(docsPath: String) async {
-        await state.setDocsPath(docsPath)
         await MounterService.startAutoMounter(docsPath: docsPath)
     }
     
     func restart() async throws {
         verboseLog("[minimuxer] Restarting services...")
-        
-        try await withCheckedThrowingContinuation { (co: CheckedContinuation<Void, Error>) in
-            Task {
-                do {
-                    try await state.registerContinuation(co)
-                    
-                    MounterService.dmgMounted = false
-                    await HeartbeatService.stop()
-                    
-                    if let docsPath = await state.docsPath {
-                        await MounterService.startAutoMounter(docsPath: docsPath)
-                    }
-                    
-                    Minimuxer.network.refreshEndpoint()
-                } catch {
-                    co.resume(throwing: error)
-                }
-            }
-        }
+        await HeartbeatService.stop()
+        await MounterService.restart()
+        Minimuxer.network.refreshEndpoint()
     }
     
-    func checkAndNotify(_ status: RestartStatus) async {
+    func checkAndNotify(_ status: RestartStatus) async throws {
         switch status {
             case .ready:
-                if case .success(let isReady) = ready(), isReady {
+                if try await ready() {
                     if let co = await state.consumeContinuation() {
                         co.resume(returning: ())
                     }

@@ -10,13 +10,21 @@ import Foundation
 import ZIPFoundation
 
 final internal class MounterService {
-
-
     private static let shared = MounterService()
-
-
-    static var isReady: Bool        { shared._isReady }
     static var dmgMounted: Bool     { shared._dmgMounted }
+
+    private var isRPPairing: Bool { IdeviceGateway.shared.isRPPairing }
+    private let state = MutableState()
+    private var _dmgMounted = false
+    private var lastErrorDescription: String? = nil {
+        didSet {
+            if lastErrorDescription != oldValue {
+                hasPrintedCurrentError = false
+            }
+        }
+    }
+    private var hasPrintedCurrentError = false
+
 
     static func startAutoMounter(docsPath: String) async {
         await shared._startAutoMounter(docsPath: docsPath)
@@ -26,10 +34,9 @@ final internal class MounterService {
         await shared._restart()
     }
 
-
     private actor MutableState {
         private var taskActive = false
-        private(set) var mountTask: Task<Void, any Error>? = nil
+        private(set) var mountTask: Task<Void, Never>? = nil
 
         func tryStart() -> Bool {
             guard !taskActive else { return false }
@@ -41,43 +48,14 @@ final internal class MounterService {
             taskActive = false
         }
 
-        func setCurrentMountTask(task: Task<Void, any Error>) {
+        func setCurrentMountTask(task: Task<Void, Never>) {
             mountTask = task
         }
     }
-
-    private var _dmgMounted = false
-    private var lastErrorDescription: String? = nil {
-        didSet {
-            if lastErrorDescription != oldValue {
-                hasPrintedCurrentError = false
-            }
-        }
-    }
-    private var hasPrintedCurrentError = false
-    private let state = MutableState()
-
-    private var isRPPairing: Bool { IdeviceGateway.shared.isRPPairing }
-
-
-    private var _isReady: Bool {
-        if _dmgMounted {
-            hasPrintedCurrentError = false
-            return true
-        }
-        if let error = lastErrorDescription, !hasPrintedCurrentError {
-            debugLog("[minimuxer] Last mounter error: \(error)")
-            hasPrintedCurrentError = true
-        }
-        return false
-    }
-
-
+    
     private func _restart() async {
         _dmgMounted = false
     }
-
-
     private func _startAutoMounter(docsPath: String) async {
         guard !_dmgMounted, await state.tryStart() else { return }
 
@@ -100,8 +78,7 @@ final internal class MounterService {
         }
         await state.setCurrentMountTask(task: task)
     }
-
-
+    
     private func logIfNeeded(_ message: String, prefix: String = "", isVerbose: Bool = false) {
         if message != lastErrorDescription {
             if isVerbose {
@@ -111,6 +88,12 @@ final internal class MounterService {
             }
             lastErrorDescription = message
         }
+    }
+    private func isPairingError(_ error: Error, _ errStr: String) -> Bool {
+        return (error as? MinimuxerError) == .PairingFile
+            || errStr.contains("PairVerifyFailed")
+            || errStr.contains("Connection reset by peer")
+            || errStr.contains("ConnectionReset")
     }
 
 
@@ -135,144 +118,131 @@ final internal class MounterService {
                 continue
             }
 
-            if isRPPairing {
-                // RP pairing: always post-17, connects via RSD — no lockdown version lookup needed
-                try await mountRPPath(dmgDocsPath: dmgDocsPath)
-            } else {
-                // Lockdown path: get device version, dispatch pre-17 vs post-17
-                try await mountLockdownPath(dmgDocsPath: dmgDocsPath)
+            // RP pairing is always iOS 17+, so skip lockdown version lookup.
+            // For lockdown, fetch the version and dispatch on major version.
+            var major = 17
+            var versionStr: String? = nil
+            guard let v = try? IdeviceGateway.shared.getLockdownValue(key: "ProductVersion") else {
+                logIfNeeded("Could not get device version for mounter", prefix: "mount-task: WARN: ", isVerbose: true)
+                try? await Task.sleep(nanoseconds: MinimuxerConstants.mounterSleepNs)
+                continue
             }
-        }
-    }
+            versionStr = v
+            major = Int(v.split(separator: ".").first ?? "0") ?? 0
 
-
-    private func mountRPPath(dmgDocsPath: String) async throws {
-        do {
-            try await handlePost17Mount(dmgDocsPath: dmgDocsPath)
-            lastErrorDescription = nil
-        } catch {
-            let errStr = "\(error)"
-            logIfNeeded(errStr, prefix: "mount-task: ERROR: Mount failed: ", isVerbose: true)
-
-            if isPairingError(error, errStr) {
-                debugLog("[minimuxer] mounter-task: ERROR: Invalid pairing file — the device rejected the remote pairing handshake. Please redo-pairing for your device.")
-                debugLog("[minimuxer] mounter-task: exiting due to invalid pairing")
-                await Minimuxer.shared.checkAndNotify(.failed(.mounter, MinimuxerError.PairingFile))
-                throw MinimuxerError.PairingFile
-            }
-            // Non-fatal: keep retrying on next loop iteration
-            try? await Task.sleep(nanoseconds: MinimuxerConstants.mounterSleepNs)
-        }
-    }
-
-
-    private func mountLockdownPath(dmgDocsPath: String) async throws {
-        guard let versionStr = try? IdeviceGateway.shared.getLockdownValue(key: "ProductVersion") else {
-            logIfNeeded("Could not get device version for mounter", prefix: "mount-task: WARN: ", isVerbose: true)
-            try? await Task.sleep(nanoseconds: MinimuxerConstants.mounterSleepNs)
-            return  // non-fatal, outer loop retries
-        }
-
-        let major = Int(versionStr.split(separator: ".").first ?? "0") ?? 0
-
-        do {
-            if major < 17 {
-                try await handlePre17Mount(iosVersion: versionStr, dmgDocsPath: dmgDocsPath)
-            } else {
-                try await handlePost17Mount(dmgDocsPath: dmgDocsPath)
-            }
-            lastErrorDescription = nil
-        } catch let error as MinimuxerError {
-            if error == .NoDevice {
-                return  // non-fatal, retry
-            }
-            logIfNeeded("\(error)", prefix: "mount-task: ERROR: Mount failed: ")
-            await Minimuxer.shared.checkAndNotify(.failed(.mounter, error))
-            throw error
-        } catch let error as IdeviceGatewayError {
-            switch error {
-            case .connectionFailed, .noConnection:
-                // Device not yet visible on usbmuxd — keep retrying
-                return
-            default:
-                logIfNeeded("\(error)", prefix: "mount-task: ERROR: Mount failed with gateway error: ")
-                await Minimuxer.shared.checkAndNotify(.failed(.mounter, error))
+            do {
+                try await performMount(major: major, iosVersion: versionStr, dmgDocsPath: dmgDocsPath)
+                lastErrorDescription = nil
+            } catch let error as MinimuxerError {
+                if error == .NoDevice {
+                    continue  // non-fatal, retry
+                }
+                logIfNeeded("\(error)", prefix: "mount-task: ERROR: Mount failed: ")
+                try await Minimuxer.shared.checkAndNotify(.failed(.mounter, error))
+                throw error
+            } catch let error as IdeviceGatewayError {
+                switch error {
+                case .connectionFailed, .noConnection:
+                    continue  // device not yet visible — keep retrying
+                default:
+                    logIfNeeded("\(error)", prefix: "mount-task: ERROR: Mount failed with gateway error: ")
+                    try await Minimuxer.shared.checkAndNotify(.failed(.mounter, error))
+                    throw error
+                }
+            } catch {
+                let errStr = "\(error)"
+                if isPairingError(error, errStr) {
+                    debugLog("[minimuxer] mounter-task: ERROR: Invalid pairing file — the device rejected the remote pairing handshake. Please redo-pairing for your device.")
+                    debugLog("[minimuxer] mounter-task: exiting due to invalid pairing")
+                    try await Minimuxer.shared.checkAndNotify(.failed(.mounter, MinimuxerError.PairingFile))
+                    throw MinimuxerError.PairingFile
+                }
+                logIfNeeded(errStr, prefix: "mount-task: ERROR: Mount failed with unknown error: ")
+                try await Minimuxer.shared.checkAndNotify(.failed(.mounter, error))
                 throw error
             }
-        } catch {
-            let errStr = "\(error)"
-            if isPairingError(error, errStr) {
-                debugLog("[minimuxer] mounter-task: ERROR: Invalid pairing file — the device rejected the remote pairing handshake. Please redo-pairing for your device.")
-                debugLog("[minimuxer] mounter-task: exiting due to invalid pairing")
-                await Minimuxer.shared.checkAndNotify(.failed(.mounter, MinimuxerError.PairingFile))
-                throw MinimuxerError.PairingFile
-            }
-            logIfNeeded(errStr, prefix: "mount-task: ERROR: Mount failed with unknown error: ")
-            await Minimuxer.shared.checkAndNotify(.failed(.mounter, error))
-            throw error
         }
     }
 
-
-    private func isPairingError(_ error: Error, _ errStr: String) -> Bool {
-        return (error as? MinimuxerError) == .PairingFile
-            || errStr.contains("PairVerifyFailed")
-            || errStr.contains("Connection reset by peer")
-            || errStr.contains("ConnectionReset")
+    private func performMount(major: Int, iosVersion: String?, dmgDocsPath: String) async throws {
+        if major < 17, let iosVersion {
+            // Pre-17: lockdown only — load DMG + signature, mount via imagemounter
+            let (dmgData, sigData) = try MounterService.loadPre17Image(iosVersion: iosVersion, dmgDocsPath: dmgDocsPath)
+            verboseLog("[minimuxer] Uploading and mounting image (dmg=\(dmgData.count) bytes, sig=\(sigData.count) bytes)...")
+            try IdeviceGateway.shared.mountDeveloperImage(image: dmgData, signature: sigData)
+            verboseLog("[minimuxer] Successfully mounted the image")
+            _dmgMounted = true
+            try await Minimuxer.shared.checkAndNotify(.ready(.mounter))
+        } else {
+            // Post-17: both RP and lockdown use mountPersonalizedDdi.
+            // IdeviceGateway handles the RP vs lockdown distinction internally.
+            let (imageData, trustcacheData, manifestData) = try MounterService.loadPost17Image(dmgDocsPath: dmgDocsPath)
+            debugLog(
+                "[minimuxer] Mounting DDI " +
+                "(image=\(imageData.count) bytes, " +
+                "trustcache=\(trustcacheData.count) bytes, " +
+                "manifest=\(manifestData.count) bytes)"
+            )
+            try IdeviceGateway.shared.mountPersonalizedDdi(image: imageData, trustcache: trustcacheData, manifest: manifestData)
+            verboseLog("[minimuxer] DDI mounted successfully")
+            _dmgMounted = true
+            try await Minimuxer.shared.checkAndNotify(.ready(.mounter))
+        }
     }
-
-
-    private func handlePre17Mount(iosVersion: String, dmgDocsPath: String) async throws {
-        verboseLog("[minimuxer] Starting image mounter (pre-17)")
-
+    private static func loadPre17Image(iosVersion: String, dmgDocsPath: String) throws -> (Data, Data) {
         let dmgPath = "\(dmgDocsPath)/\(iosVersion).dmg"
         let sigPath = "\(dmgPath).signature"
-
         verboseLog("[minimuxer] Pre17 DMG: \(dmgPath)")
         verboseLog("[minimuxer] Pre17 Signature: \(sigPath)")
 
         if !FileManager.default.fileExists(atPath: dmgPath) {
             verboseLog("[minimuxer] Downloading iOS \(iosVersion) DMG...")
-            try MounterService.downloadPre17Image(iosVersion: iosVersion, dmgDocsPath: dmgDocsPath)
+            guard let url = URL(string: MinimuxerConstants.pre17VersionsURL),
+                  let data = try? Data(contentsOf: url),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: String],
+                  let dmgUrlStr = json[iosVersion],
+                  let dmgUrl = URL(string: dmgUrlStr) else {
+                debugLog("[minimuxer] ERROR: Unable to download DMG dictionary or find version")
+                throw MinimuxerError.DownloadImage
+            }
+
+            let zipData = try Data(contentsOf: dmgUrl)
+            let zipPath = "\(dmgDocsPath)/dmg.zip"
+            try zipData.write(to: URL(fileURLWithPath: zipPath))
+
+            let tmpPath = "\(dmgDocsPath)/tmp"
+            try? FileManager.default.removeItem(atPath: tmpPath)
+            try FileManager.default.createDirectory(atPath: tmpPath, withIntermediateDirectories: true)
+
+            let tmpPathURL = URL(fileURLWithPath: tmpPath)
+            try FileManager.default.unzipItem(at: URL(fileURLWithPath: zipPath), to: tmpPathURL)
+            try? FileManager.default.removeItem(atPath: zipPath)
+
+            for item in try FileManager.default.contentsOfDirectory(atPath: tmpPath) {
+                let itemPath = "\(tmpPath)/\(item)"
+                var isDir: ObjCBool = false
+                guard FileManager.default.fileExists(atPath: itemPath, isDirectory: &isDir), isDir.boolValue,
+                      !item.contains("__MACOSX") else { continue }
+                let dmgFile = "\(itemPath)/DeveloperDiskImage.dmg"
+                let sigFile = "\(itemPath)/DeveloperDiskImage.dmg.signature"
+                if FileManager.default.fileExists(atPath: dmgFile) {
+                    try FileManager.default.moveItem(atPath: dmgFile, toPath: "\(dmgDocsPath)/\(iosVersion).dmg")
+                    try FileManager.default.moveItem(atPath: sigFile, toPath: "\(dmgDocsPath)/\(iosVersion).dmg.signature")
+                }
+            }
+            try? FileManager.default.removeItem(atPath: tmpPath)
         }
 
+        verboseLog("[minimuxer] Reading pre-17 image files into memory")
         guard let dmgData = try? Data(contentsOf: URL(fileURLWithPath: dmgPath)),
               let sigData = try? Data(contentsOf: URL(fileURLWithPath: sigPath)) else {
             debugLog("[minimuxer] ERROR: Unable to read developer disk image or signature files")
             throw MinimuxerError.Mount
         }
-
-        verboseLog("[minimuxer] Uploading and mounting image (dmg=\(dmgData.count) bytes, sig=\(sigData.count) bytes)...")
-        do {
-            try IdeviceGateway.shared.mountDeveloperImage(image: dmgData, signature: sigData)
-            verboseLog("[minimuxer] Successfully mounted the image")
-            _dmgMounted = true
-            await Minimuxer.shared.checkAndNotify(.ready(.mounter))
-        } catch {
-            debugLog("[minimuxer] ERROR: Unable to mount developer image: \(error)")
-            throw MinimuxerError.Mount
-        }
+        return (dmgData, sigData)
     }
+    private static func loadPost17Image(dmgDocsPath: String) throws -> (Data, Data, Data) {
 
-
-    private func handlePost17Mount(dmgDocsPath: String) async throws {
-        let (imageData, trustcacheData, manifestData) = try MounterService.loadPost17Image(dmgDocsPath: dmgDocsPath)
-
-        debugLog(
-            "[minimuxer] Mounting DDI " +
-            "(image=\(imageData.count) bytes, " +
-            "trustcache=\(trustcacheData.count) bytes, " +
-            "manifest=\(manifestData.count) bytes)"
-        )
-
-        try IdeviceGateway.shared.mountPersonalizedDdi(image: imageData, trustcache: trustcacheData, manifest: manifestData)
-        verboseLog("[minimuxer] DDI mounted successfully")
-        _dmgMounted = true
-        await Minimuxer.shared.checkAndNotify(.ready(.mounter))
-    }
-
-
-    static func loadPost17Image(dmgDocsPath: String) throws -> (Data, Data, Data) {
         let dir = URL(fileURLWithPath: dmgDocsPath)
         let tasks: [(String, URL)] = [
             (MinimuxerConstants.ddiImageURL,      dir.appendingPathComponent("Image.dmg")),
@@ -305,42 +275,5 @@ final internal class MounterService {
         let manifestData   = try Data(contentsOf: manifestURL)
 
         return (imageData, trustcacheData, manifestData)
-    }
-
-    private static func downloadPre17Image(iosVersion: String, dmgDocsPath: String) throws {
-        guard let url = URL(string: MinimuxerConstants.pre17VersionsURL),
-              let data = try? Data(contentsOf: url),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: String],
-              let dmgUrlStr = json[iosVersion],
-              let dmgUrl = URL(string: dmgUrlStr) else {
-            debugLog("[minimuxer] ERROR: Unable to download DMG dictionary or find version")
-            throw MinimuxerError.DownloadImage
-        }
-
-        let zipData = try Data(contentsOf: dmgUrl)
-        let zipPath = "\(dmgDocsPath)/dmg.zip"
-        try zipData.write(to: URL(fileURLWithPath: zipPath))
-
-        let tmpPath = "\(dmgDocsPath)/tmp"
-        try? FileManager.default.removeItem(atPath: tmpPath)
-        try FileManager.default.createDirectory(atPath: tmpPath, withIntermediateDirectories: true)
-
-        let tmpPathURL = URL(fileURLWithPath: tmpPath)
-        try FileManager.default.unzipItem(at: URL(fileURLWithPath: zipPath), to: tmpPathURL)
-        try? FileManager.default.removeItem(atPath: zipPath)
-
-        for item in try FileManager.default.contentsOfDirectory(atPath: tmpPath) {
-            let itemPath = "\(tmpPath)/\(item)"
-            var isDir: ObjCBool = false
-            guard FileManager.default.fileExists(atPath: itemPath, isDirectory: &isDir), isDir.boolValue,
-                  !item.contains("__MACOSX") else { continue }
-            let dmgFile = "\(itemPath)/DeveloperDiskImage.dmg"
-            let sigFile = "\(itemPath)/DeveloperDiskImage.dmg.signature"
-            if FileManager.default.fileExists(atPath: dmgFile) {
-                try FileManager.default.moveItem(atPath: dmgFile, toPath: "\(dmgDocsPath)/\(iosVersion).dmg")
-                try FileManager.default.moveItem(atPath: sigFile, toPath: "\(dmgDocsPath)/\(iosVersion).dmg.signature")
-            }
-        }
-        try? FileManager.default.removeItem(atPath: tmpPath)
     }
 }

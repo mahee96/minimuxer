@@ -60,7 +60,7 @@ public protocol MinimuxerAPI: AnyObject {
     func attachDebugger(pid: UInt32) throws
     func startAutoMounter(docsPath: String) async
     func restart() async throws
-    func checkAndNotify(_ status: RestartStatus) async
+    func checkAndNotify(_ status: RestartStatus) async throws
     func installProvisioningProfile(profile: Data) throws
     func removeProvisioningProfile(id: String) throws
     func dumpProfiles(docsPath: String) throws -> String

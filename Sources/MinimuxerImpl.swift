@@ -128,6 +128,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         }
     } 
 
+    @inline(__always)
     private func runIdeviceCheckingVPN<T>(_ context: String, fallback: T, action: () throws -> T) throws(MinimuxerError) -> T {
         do {
             return try action()
@@ -140,6 +141,19 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         } catch {
             return fallback
         }
+    }
+    
+    // This is required since we want to dissociate the caller priority from what rust internally uses so that
+    // thread checker doesn't complain inversion of priority (ex: if caller was Task instantiated from MainThread,
+    // then it is of .userInitiated priority by default, but our rust tokio threads are at .background priority
+    //
+    // NOTE: For now this wrapping is only required for IdeviceGateway apis that do device services like fetchUDID, install etc
+    //
+    @inline(__always)
+    private func matchingPriority<T: Sendable>(priority: TaskPriority = .medium, _ body: @escaping @Sendable () async throws -> T) async throws -> T {
+        try await Task.detached(priority: priority) {
+            try await body()
+        }.value
     }
 
     private func restartMuxerServer() async throws {
@@ -190,7 +204,9 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         // start our fake usbmuxd server for lockdown protocol based clients if required
         try await restartMuxerServer()
         
-        try await Mounter.shared.mount(docsPath: mountPath)
+        try await matchingPriority{
+            try await Mounter.shared.mount(docsPath: mountPath)
+        }
         // mark ready!
         try await state.with{
             $0.status = .started
@@ -236,7 +252,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
             $0.lastDocsPath = docsPath  // record the mountPath
             $0.mountTask?.cancel()      // cancel the task
         }
-        let task = Task.detached {
+        let task = Task.detached(priority: .medium) {
             try await Mounter.shared.mount(docsPath: docsPath)
         }
         await state.with{
@@ -256,7 +272,9 @@ final internal class MinimuxerImpl: MinimuxerAPI {
     }
 
     func fetchUDID() async throws -> String? {
-        return try IdeviceGateway.shared.fetchUDID()
+        try await matchingPriority{
+            try IdeviceGateway.shared.fetchUDID()
+        }
     }
     
     func testDeviceConnection(ifaddr: String?) -> Bool {
@@ -286,36 +304,52 @@ final internal class MinimuxerImpl: MinimuxerAPI {
     }
 
 
-    func yeetAppAfc(bundleId: String, ipaBytes: Data) throws {
-        try IdeviceGateway.shared.yeetAppAfc(bundleId: bundleId, ipaBytes: ipaBytes)
+    func yeetAppAfc(bundleId: String, ipaBytes: Data) async throws {
+        try await matchingPriority{
+            try IdeviceGateway.shared.yeetAppAfc(bundleId: bundleId, ipaBytes: ipaBytes)
+        }
     }
 
-    func installIpa(bundleId: String) throws {
-        try IdeviceGateway.shared.installIpa(bundleId: bundleId)
+    func installIpa(bundleId: String) async throws {
+        try await matchingPriority{
+            try IdeviceGateway.shared.installIpa(bundleId: bundleId)
+        }
     }
 
-    func removeApp(bundleId: String) throws {
-        try IdeviceGateway.shared.removeApp(bundleId: bundleId)
+    func removeApp(bundleId: String) async throws {
+        try await matchingPriority{
+            try IdeviceGateway.shared.removeApp(bundleId: bundleId)
+        }
     }
 
-    func debugApp(appId: String) throws {
-        try IdeviceGateway.shared.debugApp(appId: appId)
+    func debugApp(appId: String) async throws {
+        try await matchingPriority{
+            try IdeviceGateway.shared.debugApp(appId: appId)
+        }
     }
 
-    func attachDebugger(pid: UInt32) throws {
-        try IdeviceGateway.shared.debugProcess(pid: pid)
+    func attachDebugger(pid: UInt32) async throws {
+        try await matchingPriority{
+            try IdeviceGateway.shared.debugProcess(pid: pid)
+        }
     }
 
-    func installProvisioningProfile(profile: Data) throws {
-        try IdeviceGateway.shared.installProvisioningProfile(profile: profile)
+    func installProvisioningProfile(profile: Data) async throws {
+        try await matchingPriority{
+            try IdeviceGateway.shared.installProvisioningProfile(profile: profile)
+        }
     }
 
-    func removeProvisioningProfile(id: String) throws {
-        try IdeviceGateway.shared.removeProvisioningProfile(id: id)
+    func removeProvisioningProfile(id: String) async throws {
+        try await matchingPriority{
+            try IdeviceGateway.shared.removeProvisioningProfile(id: id)
+        }
     }
 
-    func dumpProfiles(docsPath: String) throws -> String {
-        try IdeviceGateway.shared.dumpProfiles(docsPath: docsPath)
+    func dumpProfiles(docsPath: String) async throws -> String {
+        try await matchingPriority{
+            try IdeviceGateway.shared.dumpProfiles(docsPath: docsPath)
+        }
     }
 }
 

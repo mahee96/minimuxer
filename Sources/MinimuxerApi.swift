@@ -43,21 +43,24 @@ public protocol MinimuxerAPI: AnyObject {
     func describeError(_ error: MinimuxerError) -> String
     func bindTunnelConfig(_ binding: TunnelConfigBinding) async
     func setLogging(_ enabled: Bool)
-    func reinitializePairingData(pairingFile: String) async throws
+
     func start(pairingFile: String, mountPath: String) async throws
     func stop() async throws
+    func restart() async throws
+    func reinitializePairingData(pairingFile: String) async throws
+    func mountDDI(docsPath: String) async throws -> Bool
+
     func fetchUDID() async throws -> String?
     func testDeviceConnection(ifaddr: String?) -> Bool
-    func yeetAppAfc(bundleId: String, ipaBytes: Data) throws
-    func installIpa(bundleId: String) throws
-    func removeApp(bundleId: String) throws
-    func debugApp(appId: String) throws
-    func attachDebugger(pid: UInt32) throws
-    func mountDDI(docsPath: String) async throws -> Bool
-    func restart() async throws
-    func installProvisioningProfile(profile: Data) throws
-    func removeProvisioningProfile(id: String) throws
-    func dumpProfiles(docsPath: String) throws -> String
+
+    func yeetAppAfc(bundleId: String, ipaBytes: Data) async throws
+    func installIpa(bundleId: String) async throws
+    func removeApp(bundleId: String) async throws
+    func debugApp(appId: String) async throws
+    func attachDebugger(pid: UInt32) async throws
+    func installProvisioningProfile(profile: Data) async throws
+    func removeProvisioningProfile(id: String) async throws
+    func dumpProfiles(docsPath: String) async throws -> String
 }
 
 public enum Minimuxer {

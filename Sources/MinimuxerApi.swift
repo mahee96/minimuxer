@@ -49,6 +49,7 @@ public protocol MinimuxerAPI: AnyObject {
     func restart() async throws
     func reinitializePairingData(pairingFile: String) async throws
     func mountDDI(docsPath: String) async throws -> Bool
+    func isDDIMounted() async throws -> Bool
 
     func fetchUDID() async throws -> String?
     func testDeviceConnection(ifaddr: String?) -> Bool

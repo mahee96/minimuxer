@@ -84,8 +84,8 @@ final internal class MinimuxerImpl: MinimuxerAPI {
 
             let ddiMounted: Bool
             do {
-                ddiMounted = try runIdeviceCheckingVPN("while checking DDI mount status", fallback: false) {
-                    try IdeviceGateway.shared.isDDIMounted()
+                ddiMounted = try await runIdeviceCheckingVPN("while checking DDI mount status", fallback: false) {
+                    try await isDDIMounted()
                 }
             } catch let err as MinimuxerError {
                 return .failure(err)
@@ -102,8 +102,8 @@ final internal class MinimuxerImpl: MinimuxerAPI {
 
             let deviceUDID: String?
             do {
-                deviceUDID = try runIdeviceCheckingVPN("while fetching device UDID", fallback: nil) {
-                    try IdeviceGateway.shared.fetchUDID()
+                deviceUDID = try await runIdeviceCheckingVPN("while fetching device UDID", fallback: nil) {
+                    try await fetchUDID()
                 }
             } catch let err as MinimuxerError {
                 return .failure(err)
@@ -129,9 +129,9 @@ final internal class MinimuxerImpl: MinimuxerAPI {
     } 
 
     @inline(__always)
-    private func runIdeviceCheckingVPN<T>(_ context: String, fallback: T, action: () throws -> T) throws(MinimuxerError) -> T {
+    private func runIdeviceCheckingVPN<T>(_ context: String, fallback: T, action: () async throws -> T) async throws(MinimuxerError) -> T {
         do {
-            return try action()
+            return try await action()
         } catch let err as IdeviceGatewayError {
             if case .connectionFailed(let reason) = err,
                reason.lowercased().contains("broken pipe") || reason.lowercased().contains("brokenpipe") {
@@ -259,6 +259,11 @@ final internal class MinimuxerImpl: MinimuxerAPI {
             $0.mountTask = task
         }
         return try await task.value
+    }
+    func isDDIMounted() async throws -> Bool {
+        try await matchingPriority{
+            try IdeviceGateway.shared.isDDIMounted()
+        }
     }
 
     func reinitializePairingData(pairingFile: String) async throws {

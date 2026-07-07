@@ -128,6 +128,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
     
     func setLogging(_ enabled: Bool) {
         self.isLoggingEnabled = enabled
+        IdeviceGateway.shared.setLogging(enabled)
     }
     
     func reinitializePairingData(pairingFile: String) throws {

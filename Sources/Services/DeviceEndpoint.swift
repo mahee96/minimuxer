@@ -23,6 +23,7 @@ actor DeviceEndpoint {
 
     func update(_ newIP: String) {
         ipAddr = newIP
+        IdeviceGateway.shared.setDeviceIP(newIP)
         verboseLog("[minimuxer] device endpoint updated -> \(newIP)")
     }
 

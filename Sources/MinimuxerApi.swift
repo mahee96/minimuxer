@@ -52,7 +52,6 @@ public protocol MinimuxerAPI: AnyObject {
     func setLogging(_ enabled: Bool)
     func reinitializePairingData(pairingFile: String) throws
     func start(pairingFile: String) throws
-    func retargetUsbmuxdAddr()
     func fetchUDID() throws -> String?
     func testDeviceConnection(ifaddr: String?) -> Bool
 //    func yeetAppAfc(bundleId: String, ipaBytes: Data) throws

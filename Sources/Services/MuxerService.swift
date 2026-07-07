@@ -9,9 +9,12 @@
 import Foundation
 
 final internal class MuxerService {
-    static var started = false
-    static var usbmuxdReady = false
-
+    static var isReady: Bool { started }
+    private static var started = false
+    private static var deviceUDID: String?
+    private static var serverThread: Thread?
+    private static var listenSocket: Int32 = -1
+    
     // Stable device state
     private static var currentDeviceIP: String?
     private static var currentEvent: String?
@@ -38,16 +41,42 @@ final internal class MuxerService {
         }
     }
 
-    static func start() throws {
-        if started {
-            verboseLog("[minimuxer] Already started minimuxer, skipping")
-            return
+    @discardableResult
+    static func start(udid: String) throws -> Bool {
+        guard !started else {
+            verboseLog("[minimuxer] Already started MuxerService, skipping")
+            return false
         }
-        Thread.detachNewThread { listenLoop() }
+        deviceUDID = udid
+        let thread = Thread {
+            listenLoop()
+        }
+        thread.name = "Muxer-Server"
+        thread.qualityOfService = .background
+        thread.start()
+        
+        serverThread = thread
         started = true
-        verboseLog("[minimuxer] minimuxer has started!")
-    }
 
+        verboseLog("[minimuxer] MuxerService has started!")
+        return true
+    }
+    
+    
+    static func stop() {
+        guard started else { return }
+        serverThread?.cancel()
+
+        started = false
+        
+        if listenSocket >= 0 {
+            shutdown(listenSocket, SHUT_RDWR)
+            close(listenSocket)
+            listenSocket = -1
+        }
+        serverThread = nil
+    }
+    
     // MARK: - Listener
 
     // Binds a TCP server on 127.0.0.1:27015 and accepts incoming connections
@@ -55,8 +84,8 @@ final internal class MuxerService {
     // just enough of the usbmuxd protocol for the library to discover the
     // device, read the pairing record, and open services (AFC, lockdown, etc.).
     private static func listenLoop() {
-        while true {
-            logIfNeeded("Starting listener", isVerbose: true)
+        while !Thread.current.isCancelled {
+            logIfNeeded("MuxerService - Starting listener", isVerbose: true)
 
             let fd = socket(AF_INET, SOCK_STREAM, 0)
             guard fd >= 0 else {
@@ -85,13 +114,13 @@ final internal class MuxerService {
             guard bindResult == 0, listen(fd, 16) == 0 else {
                 logIfNeeded("WARN: Failed to bind/listen")
                 close(fd)
-                usbmuxdReady = false
+                started = false
                 Thread.sleep(forTimeInterval: 1)
                 continue
             }
 
             verboseLog("[minimuxer] Bound successfully to \(MinimuxerConstants.usbmuxdHost):\(MinimuxerConstants.usbmuxdPort)")
-            usbmuxdReady = true
+            started = true
             lastLogMessage = nil
 
             // accept loop — runs until socket dies
@@ -120,7 +149,7 @@ final internal class MuxerService {
 
             // socket died — close and let outer loop restart
             close(fd)
-            usbmuxdReady = false
+            started = false
             logIfNeeded("[minimuxer] listener restarting...", isVerbose: true)
             Thread.sleep(forTimeInterval: 1)
         }
@@ -165,111 +194,62 @@ final internal class MuxerService {
     }
 
     
-    private static func buildPayload(deviceIP: String, event: String? = nil) throws -> [String: Any] {
-        guard let udid = Minimuxer.shared.getPairingInfo()?.dictionary["UDID"] as? String else {
-            throw MinimuxerError.PairingFile
-        }
-
-        let networkAddr = convertIp(deviceIP)
-
-        var payload: [String: Any] = [
-            "DeviceID": 420,
-            "Properties": [
-                "ConnectionType": "Network",
-                "DeviceID": 420,
-                "EscapedFullServiceName": "\(udid)._apple-mobdev2._tcp.local",
-                "InterfaceIndex": 69,
-                "NetworkAddress": Data(networkAddr),
-                "SerialNumber": udid
-            ]
-        ]
-
-        if let event = event {
-            payload["MessageType"] = event
-        }
-
-        return payload
-    }
-    
     // MARK: - Packet Handling
 
-    // Responds to the subset of usbmuxd protocol messages that
-    // libimobiledevice actually needs from us:
+    // Responds to the only usbmuxd protocol message("ListDevices") that
+    // idevice requires to establish lockdown session when using lockdown based pairing file
+    // (lockdown requires UDID to start session, so our server responds with data read from pair file)
     private static func handlePacket(_ packet: RawPacket, fd: Int32) throws -> [String: Any] {
         guard let messageType = packet.plist["MessageType"] as? String else {
             throw MinimuxerError.Connect
         }
-
+        
         verboseLog("[minimuxer] usbmux message: \(messageType)")
-
+        
         switch messageType {
-            case "ListDevices":
-                guard let deviceIP = currentDeviceIP,
-                      let payload = try? buildPayload(deviceIP: deviceIP) else {
-                    return ["DeviceList": []]
-                }
-                return ["DeviceList": [payload]]
-                
-            case "Listen":
-                if let deviceIP = currentDeviceIP {
-                     Task.detached {
-                         if let payload = try? buildPayload(deviceIP: deviceIP, event: currentEvent) {
-                             let pkt = RawPacket(plist: payload, version: 1, message: 8, tag: 0)
-                             let data = pkt.data
-                             data.withUnsafeBytes { _ = send(fd, $0.baseAddress!, data.count, 0) }
-                         }
-                     }
-                }
-                return ["MessageType": "Result", "Number": 0]
-                
-            case "ReadBUID":
-                let dummyBUID = "00000000-0000-0000-0000-000000000000"
-                let buid = Minimuxer.shared.getPairingInfo()?.dictionary["SystemBUID"] as? String ?? dummyBUID
-                return ["BUID": buid]
-
-            case "ReadPairRecord":
-                let pairingData = Minimuxer.shared.getPairingInfo()?.xmlData ?? Data()
-                return [
-                    "MessageType": "Result",
-                    "Number": 0,
-                    "PairRecordData": pairingData
+        case "ListDevices":
+            guard let deviceIP = currentDeviceIP  else {
+                return ["DeviceList": []]
+            }
+            guard let udid = deviceUDID else {
+                throw MinimuxerError.PairingFile
+            }
+            let networkAddr = convertIp(deviceIP)
+            var payload: [String: Any] = [
+                "DeviceID": 0,                                                      // don't care
+                "Properties": [
+                    "ConnectionType": "Network",                                    // using 'network' protocol of usbmuxd
+                    "DeviceID": 0,                                                  // fake device id
+                    "EscapedFullServiceName": "\(udid)._apple-mobdev2._tcp.local",  // advert for mds discovery
+                    "InterfaceIndex": 0,                                            // don't care
+                    "NetworkAddress": Data(networkAddr),                            // server host/interface address (ex: 10.7.0.1 ie remote)
+                    "SerialNumber": udid                                            // device UDID
                 ]
-
-            default:
-                debugLog("[minimuxer] WARN: unknown message type: \(messageType)")
-                throw MinimuxerError.Connect
-        }
-    }
-
-
-    private static func emitDeviceEvent(fd: Int32, type: String, payload: [String: Any]) {
-        let plist: [String: Any] = [
-            "MessageType": type,
-            "DeviceID": payload["DeviceID"]!
-        ]
-
-        let pkt = RawPacket(plist: plist, version: 1, message: 8, tag: 0)
-        let data = pkt.data
-        data.withUnsafeBytes {
-            _ = send(fd, $0.baseAddress!, data.count, 0)
+            ]
+            return ["DeviceList": [payload]]
+        default:
+            debugLog("[minimuxer] WARN: unknown message type: \(messageType)")
+            throw MinimuxerError.Connect
         }
     }
     
-
-    // MARK: - Helpers
-
+    private static let sockaddrInLength = UInt8(MemoryLayout<sockaddr_in>.size)
+    private static let ipv4AddressFamily = UInt8(AF_INET)
+    
     // Encodes an IPv4 address into the 152-byte sockaddr_storage layout that
     // libusbmuxd expects in the NetworkAddress field of the device properties.
     private static func convertIp(_ ip: String) -> [UInt8] {
-        // verboseLog("[minimuxer] DEBUG: convertIp called for ip: \(ip)")
         var data = [UInt8](repeating: 0, count: 152)
         var addr = in_addr()
+
         if inet_pton(AF_INET, ip, &addr) == 1 {
-//             data[0] = 10; data[1] = 0x02
-            data[0] = 16; data[1] = 0x02
+            data[0] = sockaddrInLength
+            data[1] = ipv4AddressFamily
+
             let ipBytes = withUnsafeBytes(of: &addr.s_addr) { Array($0) }
-            for (i, byte) in ipBytes.enumerated() { data[4 + i] = byte }
-            // verboseLog("[minimuxer] DEBUG: convertIp output bytes 0..7: \(data[0...7])")
+            for (i, byte) in ipBytes.enumerated() {
+                data[4 + i] = byte
+            }
         }
         return data
     }

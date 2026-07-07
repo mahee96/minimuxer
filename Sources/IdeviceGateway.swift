@@ -150,13 +150,20 @@ public final class IdeviceGateway {
 
     public func setLogging(_ enabled: Bool) {
         debugLog("[IdeviceGateway] setLogging(\(enabled)) called")
-        // idevice_init_logger(enabled ? IdeviceLogLevel(rawValue: 4) : IdeviceLogLevel(rawValue: 0), IdeviceLogLevel(rawValue: 0), nil)
-        idevice_init_logger(IdeviceLogLevel(rawValue: 1), IdeviceLogLevel(rawValue: 0), nil)
+        #if DEBUG
+        idevice_init_logger(IdeviceLogLevel(rawValue: 4), IdeviceLogLevel(rawValue: 0), nil)
+        #else
+        idevice_init_logger(enabled ? IdeviceLogLevel(rawValue: 1) : IdeviceLogLevel(rawValue: 0), IdeviceLogLevel(rawValue: 0), nil)
+        #endif
     }
 
     public func start(pairingFileContent: String) throws {
         debugLog("[IdeviceGateway] start() called, pairingFileContent length: \(pairingFileContent.count)")
         cleanup()
+        
+        #if DEBUG
+        setLogging(true)
+        #endif
 
         guard let data = pairingFileContent.data(using: .utf8) else {
             debugLog("[IdeviceGateway] start() failed to decode pairingFileContent data as UTF-8")
@@ -168,7 +175,7 @@ public final class IdeviceGateway {
         if let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any] {
             if plist["private_key"] != nil {
                 verboseLog("[IdeviceGateway] start() detected private_key, isRPPairing = true")
-               isRPPairing = true
+                isRPPairing = true
             } else {
                 verboseLog("[IdeviceGateway] start() plist did not contain private_key")
             }

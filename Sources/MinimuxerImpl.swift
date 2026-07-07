@@ -8,11 +8,6 @@
 
 import Foundation
 
-public struct PairingInfo {
-    public let dictionary: [String: Any]
-    public let xmlData: Data
-}
-
 final internal class MinimuxerImpl: MinimuxerAPI {
     var isrppairing: Bool { IdeviceGateway.shared.isRPPairing }
     
@@ -43,12 +38,6 @@ final internal class MinimuxerImpl: MinimuxerAPI {
     var isLoggingEnabled = true
     var onBackgroundError: ((Error) async -> Void)?
 
-    private var pairingInfo: PairingInfo? = nil
-    
-    func getPairingInfo() -> PairingInfo? {
-        return pairingInfo
-    }
-    
     func describeError(_ error: MinimuxerError) -> String {
         return error.description
     }
@@ -92,31 +81,27 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         }
 
         if isrppairing {
-            guard MounterService.isReady() else {
+            guard MounterService.isReady else {
                 verboseLog(
                     "minimuxer not ready (RSD): " +
-                    "dmg=\(MounterService.isReady()) " +
-                    "started=\(MuxerService.started) " +
+                    "dmg=\(MounterService.isReady) " +
+                    "started=\(MuxerService.isReady) "
                 )
                 return .failure(MinimuxerError.InvalidPairing)
             }
             return .success(true)
         }
         
-        let deviceUDID = (try? IdeviceGateway.shared.fetchUDID())
+        let deviceUDID: String? = try? IdeviceGateway.shared.fetchUDID()
         verboseLog(
             "minimuxer status (usbmuxd): " +
-            "devUDID=\(deviceUDID ?? "nil") " +
-            // "hb=\(HeartbeatService.lastBeatSuccessful) " +
-            "dmg=\(MounterService.isReady()) " +
-            "started=\(MuxerService.started) " +
-            "ready=\(MuxerService.usbmuxdReady)"
+            "deviceUDID=\(deviceUDID ?? "nil") " +
+            "dmg=\(MounterService.isReady) " +
+            "started=\(MuxerService.isReady) "
         )
-        guard deviceUDID != nil, 
-            // HeartbeatService.lastBeatSuccessful, 
-            MounterService.isReady(), 
-            MuxerService.started, 
-            MuxerService.usbmuxdReady 
+        guard deviceUDID != nil,
+            MounterService.isReady, 
+            MuxerService.isReady
         else {
             return .failure(MinimuxerError.InvalidPairing)
         }
@@ -128,6 +113,34 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         }
         return .success(true)
     }
+
+    private func restartMuxerServer(pairingFile: String) throws {
+        guard !isrppairing else { return }
+        
+        guard let pairingDict = IdeviceGateway.shared.pairingDataDict else {
+            debugLog("[minimuxer] ERROR: Pairing DICT missing...ignoring restart MuxerServer")
+            throw MinimuxerError.PairingFile
+        }
+        verboseLog("[minimuxer] DEBUG: loaded pairing file keys: \(pairingDict.keys)")
+
+        guard let deviceUDID = pairingDict["UDID"] as? String else {
+            debugLog("[minimuxer] ERROR: Pairing file missing UDID")
+            throw MinimuxerError.PairingFile
+        }
+
+        // restart muxer
+        try MuxerService.stop()
+        try MuxerService.start(udid: deviceUDID)
+    }
+    
+    func start(pairingFile: String) throws {
+        // let idevice initialize its state and set isRPPairing
+        try IdeviceGateway.shared.start(pairingFileContent: pairingFile)
+        // retarget usbmuxd to our fake usbmuxd server (over network)
+        retargetUsbmuxdAddr()
+        // start our fake usbmuxd server for lockdown protocol based clients if required
+        try restartMuxerServer(pairingFile: pairingFile)
+    }
     
     func setLogging(_ enabled: Bool) {
         self.isLoggingEnabled = enabled
@@ -135,41 +148,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
     }
     
     func reinitializePairingData(pairingFile: String) throws {
-        guard let pairingData = pairingFile.data(using: .utf8),
-              let pairingDict = try? PropertyListSerialization.propertyList(from: pairingData, options: [], format: nil) as? [String: Any]
-        else {
-            debugLog("[minimuxer] ERROR: Failed to parse pairing file")
-            throw MinimuxerError.PairingFile
-        }
-
-        verboseLog("[minimuxer] DEBUG: loaded pairing file keys: \(pairingDict.keys)")
-
-        guard pairingDict["UDID"] as? String != nil else {
-            debugLog("[minimuxer] ERROR: Pairing file missing UDID")
-            throw MinimuxerError.PairingFile
-        }
-
-        var cleanPairingDict = pairingDict
-        cleanPairingDict.removeValue(forKey: "UDID")
-
-        guard let pairingXml = try? PropertyListSerialization.data(fromPropertyList: cleanPairingDict, format: .xml, options: 0) else {
-            debugLog("[minimuxer] ERROR: Failed to serialize clean pairing file")
-            throw MinimuxerError.PairingFile
-        }
-
-        self.pairingInfo = PairingInfo(dictionary: pairingDict, xmlData: pairingXml)
-        try IdeviceGateway.shared.start(pairingFileContent: pairingFile)
-    }
-    
-    func start(pairingFile: String) throws {
-        // parse and update pairing file
-        try reinitializePairingData(pairingFile: pairingFile)
-        // retarget usbmuxd to our fake server
-        retargetUsbmuxdAddr()
-        // start our fake usbmuxd server for lockdown protocol based clients
-        if !isrppairing {
-            try MuxerService.start()
-        }
+        try restartMuxerServer(pairingFile: pairingFile)
     }
     
     func retargetUsbmuxdAddr() {
@@ -184,6 +163,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
     func fetchUDID() throws -> String? {
         return try IdeviceGateway.shared.fetchUDID()
     }
+    
     
     func testDeviceConnection(ifaddr: String?) -> Bool {
         guard let ip = ifaddr else { return false }
@@ -210,6 +190,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         let result = poll(&pfd, 1, 100)
         return result > 0 && (pfd.revents & Int16(POLLOUT)) != 0
     }
+
 
     func yeetAppAfc(bundleId: String, ipaBytes: Data) throws {
         try IdeviceGateway.shared.yeetAppAfc(bundleId: bundleId, ipaBytes: ipaBytes)

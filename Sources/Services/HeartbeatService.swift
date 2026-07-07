@@ -77,7 +77,7 @@ final internal class HeartbeatService {
     }
 
     private static func heartbeatLoop() async {
-        while !MuxerService.usbmuxdReady {
+        while !MuxerService.isReady {
             logIfNeeded("Waiting for usbmuxd to be ready...", isVerbose: true)
             try? await Task.sleep(nanoseconds: MinimuxerConstants.heartbeatSleepNs)
         }

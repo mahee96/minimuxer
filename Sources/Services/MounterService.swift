@@ -12,7 +12,7 @@ import ZIPFoundation
 
 internal protocol MounterServiceProvider: AnyObject {
     var dmgMounted:Bool { get set }
-    func isReady() -> Bool
+    var isReady: Bool { get }
     func startAutoMounter(docsPath: String) async;
 }
 
@@ -35,8 +35,8 @@ final internal class MounterService {
         await getProvider().startAutoMounter(docsPath: docsPath)
     }
 
-    static func isReady() -> Bool {
-        getProvider().isReady()
+    static var isReady: Bool {
+        getProvider().isReady
     }
 
     static var dmgMounted: Bool {
@@ -57,7 +57,7 @@ final internal class LockDownMounterService: MounterServiceProvider {
     private var hasPrintedCurrentError = false
     private let state = MutableState()
 
-    func isReady() -> Bool {
+    var isReady: Bool {
         if dmgMounted {
             hasPrintedCurrentError = false
             return true
@@ -101,7 +101,7 @@ final internal class LockDownMounterService: MounterServiceProvider {
     }
 
     private func mountLoop(dmgDocsPath: String) async {
-        while !MuxerService.usbmuxdReady {
+        while !MuxerService.isReady {
             logIfNeeded("Waiting for usbmuxd to be ready...", prefix: "mount-task: ", isVerbose: true)
             try? await Task.sleep(nanoseconds: MinimuxerConstants.mounterSleepNs)
         }
@@ -283,7 +283,7 @@ final internal class RPMounterService: MounterServiceProvider {
     private var hasPrintedCurrentError = false
     private let state = MutableState()
 
-    func isReady() -> Bool {
+    var isReady: Bool {
         if dmgMounted {
             hasPrintedCurrentError = false
             return true

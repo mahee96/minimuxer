@@ -9,14 +9,14 @@
 import Foundation
 import IDevice
 
-public enum IdeviceGatewayError: LocalizedError {
+internal enum IdeviceGatewayError: LocalizedError {
     case invalidPairingFile
     case connectionFailed(String)
     case serviceError(String)
     case noConnection
     case notInitialized
 
-    public var errorDescription: String? {
+    var errorDescription: String? {
         switch self {
         case .invalidPairingFile:
             return "The pairing file is invalid or missing required keys."
@@ -31,14 +31,14 @@ public enum IdeviceGatewayError: LocalizedError {
         }
     }
 
-    public var failureReason: String? {
+    var failureReason: String? {
         return errorDescription
     }
 }
 
-public final class IdeviceGateway {
-    public static let shared = IdeviceGateway()
-    public var lastError: Error? = nil
+internal final class IdeviceGateway {
+    static let shared = IdeviceGateway()
+    var lastError: Error? = nil
 
     private func getRustPlistString(_ node: plist_t) -> String? {
         var valPtr: UnsafeMutablePointer<Int8>? = nil
@@ -74,8 +74,8 @@ public final class IdeviceGateway {
     private var deviceIP: String = "10.7.0.1"
     private var isInitialized = false
 
-    public private(set) var isRPPairing: Bool = false
-    public private(set) var pairingFileData: Data? = nil{
+    private(set) var isRPPairing: Bool = false
+    private(set) var pairingFileData: Data? = nil{
         didSet {
             var pairingDict: [String: Any]? = nil
             if let pairingFileData {
@@ -87,7 +87,7 @@ public final class IdeviceGateway {
             self.pairingDataDict = pairingDict
         }
     }
-    public private(set) var pairingDataDict: [String: Any]? = nil
+    private(set) var pairingDataDict: [String: Any]? = nil
 
     private init() {}
 
@@ -131,7 +131,7 @@ public final class IdeviceGateway {
         }
     }
 
-    public func setDeviceIP(_ ip: String) {
+    func setDeviceIP(_ ip: String) {
         debugLog("[IdeviceGateway] setDeviceIP(\(ip)) called")
         self.deviceIP = ip
         
@@ -148,7 +148,7 @@ public final class IdeviceGateway {
         }
     }
 
-    public func setLogging(_ enabled: Bool) {
+    func setLogging(_ enabled: Bool) {
         debugLog("[IdeviceGateway] setLogging(\(enabled)) called")
         #if DEBUG
         idevice_init_logger(IdeviceLogLevel(rawValue: 4), IdeviceLogLevel(rawValue: 0), nil)
@@ -157,7 +157,7 @@ public final class IdeviceGateway {
         #endif
     }
 
-    public func start(pairingFileContent: String) throws {
+    func start(pairingFileContent: String) throws {
         debugLog("[IdeviceGateway] start() called, pairingFileContent length: \(pairingFileContent.count)")
         cleanup()
         
@@ -290,8 +290,7 @@ public final class IdeviceGateway {
         if let msgPtr = err.pointee.message {
             let msg = String(cString: msgPtr).lowercased()
             if msg.contains("invalidconf") || msg.contains("pairing") || msg.contains("handshake") ||
-                msg.contains("connection reset") || msg.contains("connectionreset") ||
-                msg.contains("broken pipe") || msg.contains("brokenpipe") {
+                msg.contains("connection reset") || msg.contains("connectionreset") {
                 return true
             }
         }
@@ -574,7 +573,7 @@ public final class IdeviceGateway {
         }
     }
 
-    public func fetchUDID() throws -> String? {
+    func fetchUDID() throws -> String? {
         debugLog("[IdeviceGateway] fetchUDID() started, isRPPairing: \(isRPPairing)")
         try verifyInitialized()
         if isRPPairing {
@@ -658,7 +657,7 @@ public final class IdeviceGateway {
         }
     }
 
-    public func getLockdownValue(key: String) throws -> String? {
+    func getLockdownValue(key: String) throws -> String? {
         debugLog("[IdeviceGateway] getLockdownValue(key: \(key)) started, isRPPairing: \(isRPPairing)")
         try verifyInitialized()
 //        if isRPPairing && key == "ProductVersion" {
@@ -693,7 +692,7 @@ public final class IdeviceGateway {
         }
     }
 
-    public func installProvisioningProfile(profile: Data) throws {
+    func installProvisioningProfile(profile: Data) throws {
         debugLog("[IdeviceGateway] installProvisioningProfile() called, profile length: \(profile.count)")
         try verifyInitialized()
         try performWithEitherService(
@@ -718,7 +717,7 @@ public final class IdeviceGateway {
         }
     }
 
-    public func removeProvisioningProfile(id: String) throws {
+    func removeProvisioningProfile(id: String) throws {
         debugLog("[IdeviceGateway] removeProvisioningProfile() called, id: \(id)")
         try verifyInitialized()
         try performWithEitherService(
@@ -741,7 +740,7 @@ public final class IdeviceGateway {
         }
     }
 
-    public func removeApp(bundleId: String) throws {
+    func removeApp(bundleId: String) throws {
         debugLog("[IdeviceGateway] removeApp() called, bundleId: \(bundleId)")
         try verifyInitialized()
         try performWithEitherService(
@@ -763,7 +762,7 @@ public final class IdeviceGateway {
         }
     }
 
-    public func yeetAppAfc(bundleId: String, ipaBytes: Data) throws {
+    func yeetAppAfc(bundleId: String, ipaBytes: Data) throws {
         debugLog("[IdeviceGateway] yeetAppAfc() called, bundleId: \(bundleId), ipaBytes size: \(ipaBytes.count)")
         try verifyInitialized()
         try performWithEitherService(
@@ -815,7 +814,7 @@ public final class IdeviceGateway {
         }
     }
 
-    public func installIpa(bundleId: String) throws {
+    func installIpa(bundleId: String) throws {
         debugLog("[IdeviceGateway] installIpa() called, bundleId: \(bundleId)")
         try verifyInitialized()
         try performWithEitherService(
@@ -1105,7 +1104,7 @@ public final class IdeviceGateway {
         return err
     }
 
-    public func debugApp(appId: String) throws {
+    func debugApp(appId: String) throws {
         debugLog("[IdeviceGateway] debugApp() called, appId: \(appId)")
         try verifyInitialized()
         guard let versionStr = try getLockdownValue(key: "ProductVersion"),
@@ -1133,7 +1132,7 @@ public final class IdeviceGateway {
         }
     }
 
-    public func debugProcess(pid: UInt32) throws {
+    func debugProcess(pid: UInt32) throws {
         debugLog("[IdeviceGateway] debugProcess() called, pid: \(pid)")
         try verifyInitialized()
         try performWithEitherService(
@@ -1152,7 +1151,7 @@ public final class IdeviceGateway {
         }
     }
 
-    public func dumpProfiles(docsPath: String) throws -> String {
+    func dumpProfiles(docsPath: String) throws -> String {
         debugLog("[IdeviceGateway] dumpProfiles() called, docsPath: \(docsPath)")
         try verifyInitialized()
         return try performWithEitherService(
@@ -1207,7 +1206,7 @@ public final class IdeviceGateway {
         }
     }
 
-    public func performHeartbeat(interval: UInt64, newInterval: UnsafeMutablePointer<UInt64>) throws {
+    func performHeartbeat(interval: UInt64, newInterval: UnsafeMutablePointer<UInt64>) throws {
        debugLog("[IdeviceGateway] performHeartbeat() called, interval: \(interval)")
        try verifyInitialized()
        try performWithEitherService(
@@ -1234,7 +1233,7 @@ public final class IdeviceGateway {
        }
     }
 
-    public func mountPersonalizedDdi(image: Data, trustcache: Data, manifest: Data) throws {
+    func mountPersonalizedDdi(image: Data, trustcache: Data, manifest: Data) throws {
         debugLog("[IdeviceGateway] mountPersonalizedDdi() called, image size: \(image.count), trustcache size: \(trustcache.count), manifest size: \(manifest.count)")
         try verifyInitialized()
 
@@ -1462,7 +1461,7 @@ public final class IdeviceGateway {
         }
     }
 
-    public func isDDIMounted() throws -> Bool {
+    func isDDIMounted() throws -> Bool {
         debugLog("[IdeviceGateway] isDDIMounted() called")
         try verifyInitialized()
         return try performWithEitherService(
@@ -1535,7 +1534,7 @@ public final class IdeviceGateway {
         return Data(bytes: xmlPtr, count: Int(xmlLen))
     }
 
-    public func mountDeveloperImage(image: Data, signature: Data) throws {
+    func mountDeveloperImage(image: Data, signature: Data) throws {
         debugLog("[IdeviceGateway] mountDeveloperImage() called, image size: \(image.count), signature size: \(signature.count)")
         try verifyInitialized()
         try performWithEitherService(
@@ -1587,15 +1586,15 @@ public final class IdeviceGateway {
         }
     }
 
-    public struct PairedDevice {
-        public let name: String
-        public let model: String
-        public let udid: String
-        public let pairingFilePath: String
-        public let hostAltIrkHex: String
+    struct PairedDevice {
+        let name: String
+        let model: String
+        let udid: String
+        let pairingFilePath: String
+        let hostAltIrkHex: String
     }
 
-    public func startWirelessPair(
+    func startWirelessPair(
         hostName: String,
         hostModel: String,
         outPath: String,

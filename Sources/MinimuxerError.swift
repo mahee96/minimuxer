@@ -9,6 +9,15 @@
 import Foundation
 // import RustBridge
 
+public enum MinimuxerProtocol: String, Codable, CustomStringConvertible, Sendable {
+    case rppairing = "rppairing"
+    case lockdown = "lockdown"
+    
+    public var description: String {
+        return self.rawValue
+    }
+}
+
 public struct MinimuxerServiceError: Error, CustomStringConvertible {
     public let component: MinimuxerComponent
     public let error: Error
@@ -19,100 +28,99 @@ public struct MinimuxerServiceError: Error, CustomStringConvertible {
 }
 
 public enum MinimuxerError: Error, Equatable, CustomStringConvertible, LocalizedError {
-    case NoDevice
-    case NoConnection
-    case NoVPN
-    case PairingFile
-    case RestartAlreadyInProgressError
-    case InvalidVPN
-    case InvalidPairing(type: String)
-    case MuxerNotListening
+    case noDevice(String)
+    case noConnection(String)
+    case noVPN(String)
+    case pairingFile(protocol: MinimuxerProtocol, reason: String)
+    case restartAlreadyInProgressError(String)
+    case invalidVPN(String)
+    case invalidPairing(protocol: MinimuxerProtocol, reason: String)
+    case muxerNotListening(String)
 
-    case CreateDebug
-    case CreateInstproxy
-    case CreateLockdown
-    case CreateCoreDevice
-    case CreateSoftwareTunnel
-    case CreateRemoteServer
-    case CreateProcessControl
+    case createDebug(String)
+    case createInstproxy(String)
+    case createLockdown(String)
+    case createCoreDevice(String)
+    case createSoftwareTunnel(String)
+    case createRemoteServer(String)
+    case createProcessControl(String)
 
-    case GetLockdownValue
-    case Connect
-    case Close
-    case XpcHandshake
-    case NoService
-    case InvalidProductVersion
-    case LookupApps
-    case FindApp
-    case BundlePath
-    case MaxPacket
-    case WorkingDirectory
-    case Argv
-    case LaunchSuccess
-    case Detach
-    case Attach
+    case getLockdownValue(String)
+    case connect(String)
+    case close(String)
+    case xpcHandshake(String)
+    case noService(String)
+    case invalidProductVersion(String)
+    case lookupApps(String)
+    case findApp(String)
+    case bundlePath(String)
+    case maxPacket(String)
+    case workingDirectory(String)
+    case argv(String)
+    case launchSuccess(String)
+    case detach(String)
+    case attach(String)
 
-    case CreateAfc
-    case RwAfc
-    case InstallApp(String)
-    case UninstallApp
+    case createAfc(String)
+    case rwAfc(String)
+    case installApp(String)
+    case uninstallApp(String)
 
-    case CreateMisagent
-    case ProfileInstall
-    case ProfileRemove
+    case createMisagent(String)
+    case profileInstall(String)
+    case profileRemove(String)
 
-    case CreateFolder
-    case DownloadImage
-    case ImageLookup
-    case ImageRead
-    case Mount
+    case createFolder(String)
+    case downloadImage(String)
+    case imageLookup(String)
+    case imageRead(String)
+    case mount(protocol: MinimuxerProtocol, reason: String)
 //    case bridgeError(RustBridgeError)
 
     public var description: String {
         switch self {
-        case .NoDevice: return "NoDevice"
-        case .NoConnection: return "NoConnection"
-        case .NoVPN: return "NoVPN"
-        case .PairingFile: return "PairingFile"
-        case .RestartAlreadyInProgressError: return "RestartAlreadyInProgressError"
-        case .InvalidVPN: return "InvalidVPN"
-        case .InvalidPairing(let type): return "InvalidPairing(type: \(type))"
-        case .MuxerNotListening: return "MuxerNotListening"
-        case .CreateDebug: return "CreateDebug"
-        case .CreateInstproxy: return "CreateInstproxy"
-        case .CreateLockdown: return "CreateLockdown"
-        case .CreateCoreDevice: return "CreateCoreDevice"
-        case .CreateSoftwareTunnel: return "CreateSoftwareTunnel"
-        case .CreateRemoteServer: return "CreateRemoteServer"
-        case .CreateProcessControl: return "CreateProcessControl"
-        case .GetLockdownValue: return "GetLockdownValue"
-        case .Connect: return "Connect"
-        case .Close: return "Close"
-        case .XpcHandshake: return "XpcHandshake"
-        case .NoService: return "NoService"
-        case .InvalidProductVersion: return "InvalidProductVersion"
-        case .LookupApps: return "LookupApps"
-        case .FindApp: return "FindApp"
-        case .BundlePath: return "BundlePath"
-        case .MaxPacket: return "MaxPacket"
-        case .WorkingDirectory: return "WorkingDirectory"
-        case .Argv: return "Argv"
-        case .LaunchSuccess: return "LaunchSuccess"
-        case .Detach: return "Detach"
-        case .Attach: return "Attach"
-        case .CreateAfc: return "CreateAfc"
-        case .RwAfc: return "RwAfc"
-        case .InstallApp(let msg): return "InstallApp(\(msg))"
-        case .UninstallApp: return "UninstallApp"
-        case .CreateMisagent: return "CreateMisagent"
-        case .ProfileInstall: return "ProfileInstall"
-        case .ProfileRemove: return "ProfileRemove"
-        case .CreateFolder: return "CreateFolder"
-        case .DownloadImage: return "DownloadImage"
-        case .ImageLookup: return "ImageLookup"
-        case .ImageRead: return "ImageRead"
-        case .Mount: return "Mount"
-//        case .bridgeError(let err): return "bridgeError(\(err))"
+        case .noDevice(let r): return "NoDevice: \(r)"
+        case .noConnection(let r): return "NoConnection: \(r)"
+        case .noVPN(let r): return "NoVPN: \(r)"
+        case .pairingFile(let proto, let reason): return "PairingFile(protocol: \(proto), reason: \(reason))"
+        case .restartAlreadyInProgressError(let r): return "RestartAlreadyInProgressError: \(r)"
+        case .invalidVPN(let r): return "InvalidVPN: \(r)"
+        case .invalidPairing(let proto, let reason): return "InvalidPairing(protocol: \(proto), reason: \(reason))"
+        case .muxerNotListening(let r): return "MuxerNotListening: \(r)"
+        case .createDebug(let r): return "CreateDebug: \(r)"
+        case .createInstproxy(let r): return "CreateInstproxy: \(r)"
+        case .createLockdown(let r): return "CreateLockdown: \(r)"
+        case .createCoreDevice(let r): return "CreateCoreDevice: \(r)"
+        case .createSoftwareTunnel(let r): return "CreateSoftwareTunnel: \(r)"
+        case .createRemoteServer(let r): return "CreateRemoteServer: \(r)"
+        case .createProcessControl(let r): return "CreateProcessControl: \(r)"
+        case .getLockdownValue(let r): return "GetLockdownValue: \(r)"
+        case .connect(let r): return "Connect: \(r)"
+        case .close(let r): return "Close: \(r)"
+        case .xpcHandshake(let r): return "XpcHandshake: \(r)"
+        case .noService(let r): return "NoService: \(r)"
+        case .invalidProductVersion(let r): return "InvalidProductVersion: \(r)"
+        case .lookupApps(let r): return "LookupApps: \(r)"
+        case .findApp(let r): return "FindApp: \(r)"
+        case .bundlePath(let r): return "BundlePath: \(r)"
+        case .maxPacket(let r): return "MaxPacket: \(r)"
+        case .workingDirectory(let r): return "WorkingDirectory: \(r)"
+        case .argv(let r): return "Argv: \(r)"
+        case .launchSuccess(let r): return "LaunchSuccess: \(r)"
+        case .detach(let r): return "Detach: \(r)"
+        case .attach(let r): return "Attach: \(r)"
+        case .createAfc(let r): return "CreateAfc: \(r)"
+        case .rwAfc(let r): return "RwAfc: \(r)"
+        case .installApp(let msg): return "InstallApp(\(msg))"
+        case .uninstallApp(let r): return "UninstallApp: \(r)"
+        case .createMisagent(let r): return "CreateMisagent: \(r)"
+        case .profileInstall(let r): return "ProfileInstall: \(r)"
+        case .profileRemove(let r): return "ProfileRemove: \(r)"
+        case .createFolder(let r): return "CreateFolder: \(r)"
+        case .downloadImage(let r): return "DownloadImage: \(r)"
+        case .imageLookup(let r): return "ImageLookup: \(r)"
+        case .imageRead(let r): return "ImageRead: \(r)"
+        case .mount(let proto, let reason): return "Mount(protocol: \(proto), reason: \(reason))"
         }
     }
 

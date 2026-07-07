@@ -17,7 +17,7 @@ final internal class Mounter {
     // NOTE: mounter doesn't cache the mount status nor the minimuxer.
     //       reason is that the actual device state responded by idevice should be truthiness
     @discardableResult
-    func mount(docsPath: String, maxRetries: Int = 3) async throws -> Bool {
+    @concurrent func mount(docsPath: String, maxRetries: Int = 3) async throws -> Bool {
 
         let path = docsPath.hasPrefix("file://") ? String(docsPath.dropFirst(7)) : docsPath
         let dmgDocsPath = (path.hasSuffix("/") ? String(path.dropLast()) : path) + "/DMG"
@@ -27,14 +27,14 @@ final internal class Mounter {
         if !isRPPairing {
             guard MuxerService.isListening else {
                 debugLog("[minimuxer] mounter: usbmuxd not ready!")
-                throw MinimuxerError.NoConnection
+                throw MinimuxerError.noConnection("Usbmuxd fake server is not listening")
             }
         }
 
         // Prerequisite: device must be reachable
         guard (try? await DeviceEndpoint.shared.ip()) != nil else {
             debugLog("[minimuxer] mounter: device IP not available")
-            throw MinimuxerError.NoDevice
+            throw MinimuxerError.noDevice("Reachable device IP not found")
         }
 
         let isDDIMounted = try runIdevice("isDDIMounted") {
@@ -53,22 +53,31 @@ final internal class Mounter {
                 try IdeviceGateway.shared.getLockdownValue(key: "ProductVersion")
             }) else {
                 debugLog("[minimuxer] mounter: could not get device version")
-                throw MinimuxerError.NoDevice
+                throw MinimuxerError.noDevice("ProductVersion not found in lockdown")
             }
             versionStr = v
             major = Int(v.split(separator: ".").first ?? "0") ?? 0
         }
 
-        var lastError: Error = MinimuxerError.Mount
+        let activeProtocol: MinimuxerProtocol = isRPPairing ? .rppairing : .lockdown
+        var lastError: Error = MinimuxerError.mount(protocol: activeProtocol, reason: "Initial mount state")
         for attempt in 1...max(1, maxRetries) {
             do {
                 try await performMount(major: major, iosVersion: versionStr, dmgDocsPath: dmgDocsPath)
                 return true
-            } catch let error as MinimuxerError where error == .NoDevice {
-                lastError = error
-                verboseLog("[minimuxer] mounter: attempt \(attempt)/\(maxRetries) — no device, retrying...")
+            } catch let error as MinimuxerError {
+                if case .noDevice = error {
+                    lastError = error
+                    verboseLog("[minimuxer] mounter: attempt \(attempt)/\(maxRetries) — no device, retrying...")
+                } else {
+                    throw error
+                }
             } catch let error as IdeviceGatewayError {
                 switch error {
+                case .connectionFailed(let reason)
+                    where reason.lowercased().contains("broken pipe") || reason.lowercased().contains("brokenpipe"):
+                    // VPN tunnel was severed — translate immediately, no retry useful
+                    throw MinimuxerError.noVPN("VPN tunnel severed during mount. Cause: \(reason)")
                 case .connectionFailed, .noConnection:
                     lastError = error
                     verboseLog("[minimuxer] mounter: attempt \(attempt)/\(maxRetries) — connection failed, retrying...")
@@ -79,7 +88,7 @@ final internal class Mounter {
                 let errStr = "\(error)"
                 if isPairingError(error, errStr) {
                     debugLog("[minimuxer] mounter: ERROR: Invalid pairing file — device rejected handshake. Please redo pairing.")
-                    throw MinimuxerError.PairingFile
+                    throw MinimuxerError.pairingFile(protocol: activeProtocol, reason: "Device rejected pairing verify handshake: \(errStr)")
                 }
                 throw error
             }
@@ -103,8 +112,12 @@ final internal class Mounter {
     }
 
     private func isPairingError(_ error: Error, _ errStr: String) -> Bool {
-        return (error as? MinimuxerError) == .PairingFile
-            || errStr.contains("PairVerifyFailed")
+        if let minErr = error as? MinimuxerError {
+            if case .pairingFile = minErr {
+                return true
+            }
+        }
+        return errStr.contains("PairVerifyFailed")
             || errStr.contains("Connection reset by peer")
             || errStr.contains("ConnectionReset")
     }
@@ -145,7 +158,7 @@ final internal class Mounter {
                   let dmgUrlStr = json[iosVersion],
                   let dmgUrl = URL(string: dmgUrlStr) else {
                 debugLog("[minimuxer] ERROR: Unable to download DMG dictionary or find version")
-                throw MinimuxerError.DownloadImage
+                throw MinimuxerError.downloadImage("Failed to retrieve pre-17 versions plist or find iOS \(iosVersion) DMG URL")
             }
 
             let zipData = try Data(contentsOf: dmgUrl)
@@ -179,7 +192,7 @@ final internal class Mounter {
         guard let dmgData = try? Data(contentsOf: URL(fileURLWithPath: dmgPath)),
               let sigData = try? Data(contentsOf: URL(fileURLWithPath: sigPath)) else {
             debugLog("[minimuxer] ERROR: Unable to read developer disk image or signature files")
-            throw MinimuxerError.Mount
+            throw MinimuxerError.mount(protocol: .lockdown, reason: "Unable to read pre-17 image files at: \(dmgPath)")
         }
         return (dmgData, sigData)
     }
@@ -197,7 +210,7 @@ final internal class Mounter {
                 verboseLog("[minimuxer] Downloading \(path.lastPathComponent)...")
                 guard let url = URL(string: urlStr), let data = try? Data(contentsOf: url) else {
                     debugLog("[minimuxer] ERROR: Failed to download \(path.lastPathComponent)")
-                    throw MinimuxerError.DownloadImage
+                    throw MinimuxerError.downloadImage("Failed to download post-17 file from \(urlStr)")
                 }
                 try data.write(to: path)
             }

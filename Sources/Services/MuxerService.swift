@@ -61,16 +61,22 @@ final internal class MuxerService {
         serverThread = thread
         started = true
 
-        for _ in 0..<20 { // max 2 seconds wait
+        let maxPolls = 20
+        let pollIntervalNs: UInt64 = 100_000_000 // 100ms
+        let totalTimeoutMs = maxPolls * Int(pollIntervalNs / 1_000_000)
+
+        for _ in 0..<maxPolls {
             if isListening {
                 verboseLog("[minimuxer] MuxerService is listening on socket!")
                 return true
             }
-            try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
+            try? await Task.sleep(nanoseconds: pollIntervalNs)
         }
         
         debugLog("[minimuxer] MuxerService failed to bind/listen in time")
-        throw MinimuxerError.Connect
+        let addr = "\(MinimuxerConstants.usbmuxdHost):\(MinimuxerConstants.usbmuxdPort)"
+        let pollMs = pollIntervalNs / 1_000_000
+        throw MinimuxerError.connect("MuxerService failed to listen on \(addr) within \(totalTimeoutMs)ms (\(maxPolls) × \(pollMs)ms polls)")
     }
     
     
@@ -219,7 +225,7 @@ final internal class MuxerService {
     // (lockdown requires UDID to start session, so our server responds with data read from pair file)
     private static func handlePacket(_ packet: RawPacket, fd: Int32) throws -> [String: Any] {
         guard let messageType = packet.plist["MessageType"] as? String else {
-            throw MinimuxerError.Connect
+            throw MinimuxerError.connect("Malformed usbmuxd packet: missing MessageType field")
         }
         
         verboseLog("[minimuxer] usbmux message: \(messageType)")
@@ -230,7 +236,7 @@ final internal class MuxerService {
                     return ["DeviceList": []]
                 }
                 guard let udid = deviceUDID else {
-                    throw MinimuxerError.PairingFile
+                    throw MinimuxerError.pairingFile(protocol: .lockdown, reason: "No device UDID available for ListDevices response")
                 }
                 let networkAddr = convertIp(deviceIP)
                 var payload: [String: Any] = [
@@ -247,7 +253,7 @@ final internal class MuxerService {
                 return ["DeviceList": [payload]]
             default:
                 debugLog("[minimuxer] WARN: unknown message type: \(messageType)")
-                throw MinimuxerError.Connect
+                throw MinimuxerError.connect("Unsupported usbmuxd message type: \(messageType)")
         }
     }
     

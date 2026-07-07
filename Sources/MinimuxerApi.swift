@@ -39,12 +39,13 @@ public protocol MinimuxerAPI: AnyObject {
     var isrppairing: Bool { get }
     var isLoggingEnabled: Bool { get }
     
+    var isReady: Result<Bool, MinimuxerError> { get async }
     func describeError(_ error: MinimuxerError) -> String
     func bindTunnelConfig(_ binding: TunnelConfigBinding) async
-    func ready() async throws -> Bool
     func setLogging(_ enabled: Bool)
     func reinitializePairingData(pairingFile: String) async throws
     func start(pairingFile: String, mountPath: String) async throws
+    func stop() async throws
     func fetchUDID() async throws -> String?
     func testDeviceConnection(ifaddr: String?) -> Bool
     func yeetAppAfc(bundleId: String, ipaBytes: Data) throws
@@ -52,7 +53,7 @@ public protocol MinimuxerAPI: AnyObject {
     func removeApp(bundleId: String) throws
     func debugApp(appId: String) throws
     func attachDebugger(pid: UInt32) throws
-    func startAutoMounter(docsPath: String) async
+    func mountDDI(docsPath: String) async throws -> Bool
     func restart() async throws
     func installProvisioningProfile(profile: Data) throws
     func removeProvisioningProfile(id: String) throws
@@ -71,6 +72,8 @@ public protocol NetworkObserverAPI: AnyObject {
     var isWifiSatisfied: Bool { get }
     var isWiredSatisfied: Bool { get }
     var isBridgeSatisfied: Bool { get }
+    var isUTunAvailable: Bool { get }
+    var isIKEv2IPSecAvailable: Bool { get }
 
     @discardableResult
     func start() -> Bool

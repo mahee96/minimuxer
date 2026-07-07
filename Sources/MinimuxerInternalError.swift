@@ -22,26 +22,3 @@ internal enum MinimuxerInternalError: Error, LocalizedError {
         }
     }
 }
-
-// MARK: - Internal Helpers
-
-
-/*
-@inline(__always)
-internal func adaptingBridgeError<T>(_ action: () throws -> T) throws -> T {
-    do {
-        return try action()
-    } catch let error as RustBridgeError {
-        switch error {
-        case .pairingFileRejected:
-            throw MinimuxerError.PairingFile
-        case .connectionReset:
-            throw MinimuxerError.NoConnection
-        case .unknown:
-            throw MinimuxerError.bridgeError(error)
-        }
-    } catch {
-        throw error
-    }
-}
-*/

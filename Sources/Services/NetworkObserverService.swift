@@ -139,4 +139,28 @@ final internal class NetworkObserverService: NetworkObserverAPI, @unchecked Send
             info.name.lowercased().contains("ap")
         }
     }
+
+    /// True when at least one `utun*` interface is active (userspace VPN — LocalDevVPN).
+    var isUTunAvailable: Bool {
+        let semaphore = DispatchSemaphore(value: 0)
+        var interfaces: Set<NetInfo> = []
+        Task {
+            interfaces = await IfaceScanner.shared.interfaces
+            semaphore.signal()
+        }
+        semaphore.wait()
+        return interfaces.contains { $0.name.hasPrefix("utun") }
+    }
+
+    /// True when at least one `ipsec*` interface is active (IKEv2/IPSec kernel VPN).
+    var isIKEv2IPSecAvailable: Bool {
+        let semaphore = DispatchSemaphore(value: 0)
+        var interfaces: Set<NetInfo> = []
+        Task {
+            interfaces = await IfaceScanner.shared.interfaces
+            semaphore.signal()
+        }
+        semaphore.wait()
+        return interfaces.contains { $0.name.hasPrefix("ipsec") }
+    }
 }

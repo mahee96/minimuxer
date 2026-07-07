@@ -25,7 +25,8 @@ public enum MinimuxerError: Error, Equatable, CustomStringConvertible, Localized
     case PairingFile
     case RestartAlreadyInProgressError
     case InvalidVPN
-    case InvalidPairing
+    case InvalidPairing(type: String)
+    case MuxerNotListening
 
     case CreateDebug
     case CreateInstproxy
@@ -75,7 +76,8 @@ public enum MinimuxerError: Error, Equatable, CustomStringConvertible, Localized
         case .PairingFile: return "PairingFile"
         case .RestartAlreadyInProgressError: return "RestartAlreadyInProgressError"
         case .InvalidVPN: return "InvalidVPN"
-        case .InvalidPairing: return "InvalidPairing"
+        case .InvalidPairing(let type): return "InvalidPairing(type: \(type))"
+        case .MuxerNotListening: return "MuxerNotListening"
         case .CreateDebug: return "CreateDebug"
         case .CreateInstproxy: return "CreateInstproxy"
         case .CreateLockdown: return "CreateLockdown"

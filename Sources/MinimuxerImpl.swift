@@ -12,7 +12,9 @@ final internal class MinimuxerImpl: MinimuxerAPI {
     var isrppairing: Bool { IdeviceGateway.shared.isRPPairing }
 
     var isLoggingEnabled = true
-    var onBackgroundError: ((Error) async -> Void)?
+
+    private var mountTask: Task<Bool, Error>? = nil
+    private var lastDocsPath: String? = nil
 
     func describeError(_ error: MinimuxerError) -> String {
         return error.description
@@ -45,14 +47,15 @@ final internal class MinimuxerImpl: MinimuxerAPI {
             throw MinimuxerError.InvalidVPN
         }
 
+        let ddiMounted = (try? IdeviceGateway.shared.isDDIMounted()) ?? false
         if isrppairing {
-            guard MounterService.shared.dmgMounted else {
+            guard ddiMounted else {
                 verboseLog(
                     "minimuxer not ready (RSD): " +
-                    "dmg=\(MounterService.shared.dmgMounted) " +
-                    "started=\(MuxerService.isReady) "
+                    "dmg=\(ddiMounted) " +
+                    "started=\(MuxerService.isListening) "
                 )
-                throw MinimuxerError.InvalidPairing
+                throw MinimuxerError.Mount
             }
             return true
         }
@@ -61,25 +64,22 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         verboseLog(
             "minimuxer status (usbmuxd): " +
             "deviceUDID=\(deviceUDID ?? "nil") " +
-            "dmg=\(MounterService.shared.dmgMounted) " +
-            "started=\(MuxerService.isReady) "
+            "dmg=\(ddiMounted) " +
+            "started=\(MuxerService.isListening) "
         )
-        guard deviceUDID != nil,
-            MounterService.shared.dmgMounted,
-            MuxerService.isReady
-        else {
-            throw MinimuxerError.InvalidPairing
+        guard deviceUDID != nil else {
+            throw MinimuxerError.InvalidPairing(type: "lockdown")
         }
-        
-        if #available(iOS 26.4, *) {
-            if await !IfaceScanner.shared.vpnPatched() {
-                debugLog("[minimuxer] WARN: VPN subnet not patched")
-            }
+        guard ddiMounted else {
+            throw MinimuxerError.Mount
+        }
+        guard MuxerService.isListening else {
+            throw MinimuxerError.MuxerNotListening
         }
         return true
     }
 
-    private func restartMuxerServer() throws {
+    private func restartMuxerServer() async throws {
         guard !isrppairing else { return }
         
         guard let pairingDict = IdeviceGateway.shared.pairingDataDict else {
@@ -94,26 +94,41 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         }
 
         // restart muxer
-        try MuxerService.stop()
-        try MuxerService.start(udid: deviceUDID)
+        MuxerService.stop()
+        try await MuxerService.start(udid: deviceUDID)
     }
     
-    func start(pairingFile: String) throws {
+    func start(pairingFile: String, mountPath: String) async throws {
+        lastDocsPath = mountPath
         // let idevice initialize its state and set isRPPairing
         try IdeviceGateway.shared.start(pairingFileContent: pairingFile)
         // retarget usbmuxd to our fake usbmuxd server (over network)
         retargetUsbmuxdAddr()
         // start our fake usbmuxd server for lockdown protocol based clients if required
-        try restartMuxerServer()
+        try await restartMuxerServer()
+        
+        try await Mounter.shared.mount(docsPath: mountPath)
     }
-    
+
+    private func stopAll() async {
+        // Cancel the mount task first, then tear down muxer
+        mountTask?.cancel()
+        mountTask = nil
+        MuxerService.stop()
+    }
+
+    func reinitializePairingData(pairingFile: String) async throws {
+        verboseLog("[minimuxer] Reinitializing with new pairing file...")
+        await stopAll()
+        guard let mountPath = lastDocsPath else {
+            throw MinimuxerError.Mount
+        }
+        try await start(pairingFile: pairingFile, mountPath: mountPath)
+    }
+
     func setLogging(_ enabled: Bool) {
         self.isLoggingEnabled = enabled
         IdeviceGateway.shared.setLogging(enabled)
-    }
-    
-    func reinitializePairingData(pairingFile: String) throws {
-        try restartMuxerServer()
     }
     
     func retargetUsbmuxdAddr() {
@@ -125,7 +140,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         verboseLog("[minimuxer] getenv(USBMUXD_SOCKET_ADDRESS) = \(value)")
     }
     
-    func fetchUDID() throws -> String? {
+    func fetchUDID() async throws -> String? {
         return try IdeviceGateway.shared.fetchUDID()
     }
     
@@ -189,32 +204,28 @@ final internal class MinimuxerImpl: MinimuxerAPI {
     }
 
     func startAutoMounter(docsPath: String) async {
-        await MounterService.startAutoMounter(docsPath: docsPath)
+        lastDocsPath = docsPath
+        mountTask?.cancel()
+        let task = Task {
+            try await Mounter.shared.mount(docsPath: docsPath)
+        }
+        mountTask = task
+        _ = await task.result
     }
-    
+
     func restart() async throws {
         verboseLog("[minimuxer] Restarting services...")
-        await HeartbeatService.stop()
-        await MounterService.restart()
-        Minimuxer.network.refreshEndpoint()
-    }
-    
-    func checkAndNotify(_ status: RestartStatus) async throws {
-        switch status {
-            case .ready:
-                if try await ready() {
-                    if let co = await state.consumeContinuation() {
-                        co.resume(returning: ())
-                    }
-                }
-            case .failed(let component, let error):
-                if let co = await state.consumeContinuation() {
-                    co.resume(throwing: error)
-                } else {
-                    let wrappedError = MinimuxerServiceError(component: component, error: error)
-                    await onBackgroundError?(wrappedError)
-                }
+        guard let pairingData = IdeviceGateway.shared.pairingFileData,
+              let pairingFile = String(data: pairingData, encoding: .utf8) else {
+            debugLog("[minimuxer] restart: no existing pairing file — cannot restart")
+            throw MinimuxerError.PairingFile
         }
+        guard let mountPath = lastDocsPath else {
+            throw MinimuxerError.Mount
+        }
+        await stopAll()
+        try await start(pairingFile: pairingFile, mountPath: mountPath)
+        Minimuxer.network.refreshEndpoint()
     }
 }
 

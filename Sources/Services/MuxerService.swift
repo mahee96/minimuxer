@@ -9,8 +9,9 @@
 import Foundation
 
 final internal class MuxerService {
-    static var isReady: Bool { started }
-    private static var started = false
+    static private(set) var started = false
+    static private(set) var isListening = false
+
     private static var deviceUDID: String?
     private static var serverThread: Thread?
     private static var listenSocket: Int32 = -1
@@ -42,12 +43,14 @@ final internal class MuxerService {
     }
 
     @discardableResult
-    static func start(udid: String) throws -> Bool {
+    static func start(udid: String) async throws -> Bool {
         guard !started else {
             verboseLog("[minimuxer] Already started MuxerService, skipping")
             return false
         }
         deviceUDID = udid
+        isListening = false
+        
         let thread = Thread {
             listenLoop()
         }
@@ -58,8 +61,16 @@ final internal class MuxerService {
         serverThread = thread
         started = true
 
-        verboseLog("[minimuxer] MuxerService has started!")
-        return true
+        for _ in 0..<20 { // max 2 seconds wait
+            if isListening {
+                verboseLog("[minimuxer] MuxerService is listening on socket!")
+                return true
+            }
+            try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
+        }
+        
+        debugLog("[minimuxer] MuxerService failed to bind/listen in time")
+        throw MinimuxerError.Connect
     }
     
     
@@ -68,6 +79,8 @@ final internal class MuxerService {
         serverThread?.cancel()
 
         started = false
+        isListening = false
+        deviceUDID = nil
         
         if listenSocket >= 0 {
             shutdown(listenSocket, SHUT_RDWR)
@@ -114,12 +127,15 @@ final internal class MuxerService {
             guard bindResult == 0, listen(fd, 16) == 0 else {
                 logIfNeeded("WARN: Failed to bind/listen")
                 close(fd)
+                isListening = false
                 started = false
                 Thread.sleep(forTimeInterval: 1)
                 continue
             }
 
             verboseLog("[minimuxer] Bound successfully to \(MinimuxerConstants.usbmuxdHost):\(MinimuxerConstants.usbmuxdPort)")
+            listenSocket = fd
+            isListening = true
             started = true
             lastLogMessage = nil
 
@@ -149,6 +165,8 @@ final internal class MuxerService {
 
             // socket died — close and let outer loop restart
             close(fd)
+            listenSocket = -1
+            isListening = false
             started = false
             logIfNeeded("[minimuxer] listener restarting...", isVerbose: true)
             Thread.sleep(forTimeInterval: 1)
@@ -207,29 +225,29 @@ final internal class MuxerService {
         verboseLog("[minimuxer] usbmux message: \(messageType)")
         
         switch messageType {
-        case "ListDevices":
-            guard let deviceIP = currentDeviceIP  else {
-                return ["DeviceList": []]
-            }
-            guard let udid = deviceUDID else {
-                throw MinimuxerError.PairingFile
-            }
-            let networkAddr = convertIp(deviceIP)
-            var payload: [String: Any] = [
-                "DeviceID": 0,                                                      // don't care
-                "Properties": [
-                    "ConnectionType": "Network",                                    // using 'network' protocol of usbmuxd
-                    "DeviceID": 0,                                                  // fake device id
-                    "EscapedFullServiceName": "\(udid)._apple-mobdev2._tcp.local",  // advert for mds discovery
-                    "InterfaceIndex": 0,                                            // don't care
-                    "NetworkAddress": Data(networkAddr),                            // server host/interface address (ex: 10.7.0.1 ie remote)
-                    "SerialNumber": udid                                            // device UDID
+            case "ListDevices":
+                guard let deviceIP = currentDeviceIP  else {
+                    return ["DeviceList": []]
+                }
+                guard let udid = deviceUDID else {
+                    throw MinimuxerError.PairingFile
+                }
+                let networkAddr = convertIp(deviceIP)
+                var payload: [String: Any] = [
+                    "DeviceID": 0,                                                      // don't care
+                    "Properties": [
+                        "ConnectionType": "Network",                                    // using 'network' protocol of usbmuxd
+                        "DeviceID": 0,                                                  // fake device id
+                        "EscapedFullServiceName": "\(udid)._apple-mobdev2._tcp.local",  // advert for mds discovery
+                        "InterfaceIndex": 0,                                            // don't care
+                        "NetworkAddress": Data(networkAddr),                            // server host/interface address (ex: 10.7.0.1 ie remote)
+                        "SerialNumber": udid                                            // device UDID
+                    ]
                 ]
-            ]
-            return ["DeviceList": [payload]]
-        default:
-            debugLog("[minimuxer] WARN: unknown message type: \(messageType)")
-            throw MinimuxerError.Connect
+                return ["DeviceList": [payload]]
+            default:
+                debugLog("[minimuxer] WARN: unknown message type: \(messageType)")
+                throw MinimuxerError.Connect
         }
     }
     

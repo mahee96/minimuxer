@@ -83,13 +83,9 @@ actor IfaceScanner {
     private var refreshed = false
     private var tunnelConfigCache: TunnelConfigBinding?
 
-    func bindTunnelConfig(_ binding: TunnelConfigBinding) {
+    func bindTunnelConfig(_ binding: TunnelConfigBinding) async {
         tunnelConfigCache = binding
-        
-        // ask all observers to be refreshed
-        Task {
-            await Minimuxer.network.refreshEndpoint()
-        }
+        await Minimuxer.network.refreshEndpoint()
     }
 
     var cachedOverrideFakeIP: String? {
@@ -104,7 +100,7 @@ actor IfaceScanner {
         interfacesCache = scannedInterfaces
         refreshed = true
 
-        let vpnIface = try? probableVPNInternal()
+        let vpnIface = try? probableVPN()
         tunnelConfigCache?.setDeviceIP(vpnIface?.hostIP)
         tunnelConfigCache?.setSubnetMask(vpnIface?.maskIP)
         let peerIP = await vpnIface?.peerIP
@@ -128,35 +124,21 @@ actor IfaceScanner {
         interfacesCache
     }
 
-    private func ensureReadyInternal() throws {
-        guard refreshed else { throw MinimuxerInternalError.ifaceNotRefreshed }
-    }
-
-    private func probableVPNInternal() throws -> NetInfo? {
-        try ensureReadyInternal()
-        return interfacesCache.first { $0.name.hasPrefix("utun") }
-    }
-
-    private func probableLANInternal() throws -> NetInfo? {
-        try ensureReadyInternal()
-        return interfacesCache.first { $0.name.hasPrefix("en") }
+    private func ensureReady() throws {
+        guard refreshed else { 
+            throw MinimuxerInternalError.ifaceNotRefreshed 
+        }
     }
 
     func probableVPN() throws -> NetInfo? {
-        try probableVPNInternal()
+        try ensureReady()
+        return interfacesCache.first { $0.name.hasPrefix("utun") }
     }
 
     func probableLAN() throws -> NetInfo? {
-        try probableLANInternal()
-    }
-
-    func vpnPatched() -> Bool {
-        guard let lan = try? probableLANInternal(),
-              let vpn = try? probableVPNInternal()
-        else { return false }
-
-        return lan.maskIP == vpn.maskIP
-    }
+         try ensureReady()
+        return interfacesCache.first { $0.name.hasPrefix("en") }
+   }
 
     // MARK: scan
     private static func scan() -> Set<NetInfo> {

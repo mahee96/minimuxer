@@ -643,15 +643,16 @@ public final class IdeviceGateway {
                     return nil
                 }
                 
-                verboseLog("[IdeviceGateway] fetchUDID get_devices count: \(count)")
+                var udidResult: String? = nil
                 if count > 0, let devicesPtr = devices, let firstDev = devicesPtr.pointee {
                     defer { idevice_usbmuxd_device_list_free(devices, count) }
                     if let udidPtr = idevice_usbmuxd_device_get_udid(firstDev) {
-                        let udid = String(cString: udidPtr)
+                        udidResult = String(cString: udidPtr)
                         idevice_string_free(udidPtr)
-                        return udid
                     }
                 }
+                verboseLog("[IdeviceGateway] fetchUDID get_devices count: \(count), udid: \(udidResult ?? "nil")")
+                return udidResult
             }
             return nil
         }

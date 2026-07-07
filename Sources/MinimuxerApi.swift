@@ -42,7 +42,6 @@ public struct TunnelConfigBinding: Sendable {
 
 public protocol MinimuxerAPI: AnyObject {
     var isrppairing: Bool { get }
-    func getPairingInfo() -> PairingInfo?
     var isLoggingEnabled: Bool { get }
     var onBackgroundError: ((Error) async -> Void)? { get set }
     
@@ -54,17 +53,17 @@ public protocol MinimuxerAPI: AnyObject {
     func start(pairingFile: String) throws
     func fetchUDID() throws -> String?
     func testDeviceConnection(ifaddr: String?) -> Bool
-//    func yeetAppAfc(bundleId: String, ipaBytes: Data) throws
-//    func installIpa(bundleId: String) throws
-//    func removeApp(bundleId: String) throws
-//    func debugApp(appId: String) throws
-//    func attachDebugger(pid: UInt32) throws
+    func yeetAppAfc(bundleId: String, ipaBytes: Data) throws
+    func installIpa(bundleId: String) throws
+    func removeApp(bundleId: String) throws
+    func debugApp(appId: String) throws
+    func attachDebugger(pid: UInt32) throws
     func startAutoMounter(docsPath: String) async
     func restart() async throws
     func checkAndNotify(_ status: RestartStatus) async
-//    func installProvisioningProfile(profile: Data) throws
-//    func removeProvisioningProfile(id: String) throws
-//    func dumpProfiles(docsPath: String) throws -> String
+    func installProvisioningProfile(profile: Data) throws
+    func removeProvisioningProfile(id: String) throws
+    func dumpProfiles(docsPath: String) throws -> String
 }
 
 public enum Minimuxer {

@@ -14,7 +14,7 @@ public struct PairingInfo {
 }
 
 final internal class MinimuxerImpl: MinimuxerAPI {
-    var isrppairing: Bool { isRpPairing }
+    var isrppairing: Bool { IdeviceGateway.shared.isRPPairing }
     
     private actor MutableState {
         var continuation: CheckedContinuation<Void, Error>?
@@ -42,8 +42,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
     
     var isLoggingEnabled = true
     var onBackgroundError: ((Error) async -> Void)?
-    
-    var isRpPairing: Bool = false
+
     private var pairingInfo: PairingInfo? = nil
     
     func getPairingInfo() -> PairingInfo? {
@@ -98,7 +97,6 @@ final internal class MinimuxerImpl: MinimuxerAPI {
                     "minimuxer not ready (RSD): " +
                     "dmg=\(MounterService.isReady()) " +
                     "started=\(MuxerService.started) " +
-                    "ready=\(MuxerService.usbmuxdReady)"
                 )
                 return .failure(MinimuxerError.InvalidPairing)
             }
@@ -114,9 +112,14 @@ final internal class MinimuxerImpl: MinimuxerAPI {
             "started=\(MuxerService.started) " +
             "ready=\(MuxerService.usbmuxdReady)"
         )
-//        guard deviceUDID != nil, HeartbeatService.lastBeatSuccessful, MounterService.isReady(), MuxerService.started, MuxerService.usbmuxdReady else {
-//            return .failure(MinimuxerError.InvalidPairing)
-//        }
+        guard deviceUDID != nil, 
+            // HeartbeatService.lastBeatSuccessful, 
+            MounterService.isReady(), 
+            MuxerService.started, 
+            MuxerService.usbmuxdReady 
+        else {
+            return .failure(MinimuxerError.InvalidPairing)
+        }
         
         if #available(iOS 26.4, *) {
             if await !IfaceScanner.shared.vpnPatched() {
@@ -141,13 +144,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
 
         verboseLog("[minimuxer] DEBUG: loaded pairing file keys: \(pairingDict.keys)")
 
-        if let _ = pairingDict["private_key"] as? Data {
-            verboseLog("[minimuxer] INFO: RPPairing file detected")
-            isRpPairing = true
-        } else if let _ = pairingDict["UDID"] as? String {
-            verboseLog("[minimuxer] INFO: Lockdown pairing file detected")
-            isRpPairing = false
-        } else {
+        guard pairingDict["UDID"] as? String != nil else {
             debugLog("[minimuxer] ERROR: Pairing file missing UDID")
             throw MinimuxerError.PairingFile
         }
@@ -161,10 +158,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         }
 
         self.pairingInfo = PairingInfo(dictionary: pairingDict, xmlData: pairingXml)
-
-        if isrppairing {
-            try IdeviceGateway.shared.start(pairingFileContent: pairingFile)
-        }
+        try IdeviceGateway.shared.start(pairingFileContent: pairingFile)
     }
     
     func start(pairingFile: String) throws {
@@ -176,7 +170,6 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         if !isrppairing {
             try MuxerService.start()
         }
-        try IdeviceGateway.shared.start(pairingFileContent: pairingFile)
     }
     
     func retargetUsbmuxdAddr() {
@@ -189,10 +182,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
     }
     
     func fetchUDID() throws -> String? {
-        verboseLog("[minimuxer] Getting UDID for first device")
-        let udid = try IdeviceGateway.shared.fetchUDID()
-        verboseLog("[minimuxer] Device UDID = \(udid ?? "nil")")
-        return udid
+        return try IdeviceGateway.shared.fetchUDID()
     }
     
     func testDeviceConnection(ifaddr: String?) -> Bool {
@@ -220,7 +210,39 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         let result = poll(&pfd, 1, 100)
         return result > 0 && (pfd.revents & Int16(POLLOUT)) != 0
     }
-    
+
+    func yeetAppAfc(bundleId: String, ipaBytes: Data) throws {
+        try IdeviceGateway.shared.yeetAppAfc(bundleId: bundleId, ipaBytes: ipaBytes)
+    }
+
+    func installIpa(bundleId: String) throws {
+        try IdeviceGateway.shared.installIpa(bundleId: bundleId)
+    }
+
+    func removeApp(bundleId: String) throws {
+        try IdeviceGateway.shared.removeApp(bundleId: bundleId)
+    }
+
+    func debugApp(appId: String) throws {
+        try IdeviceGateway.shared.debugApp(appId: appId)
+    }
+
+    func attachDebugger(pid: UInt32) throws {
+        try IdeviceGateway.shared.debugProcess(pid: pid)
+    }
+
+    func installProvisioningProfile(profile: Data) throws {
+        try IdeviceGateway.shared.installProvisioningProfile(profile: profile)
+    }
+
+    func removeProvisioningProfile(id: String) throws {
+        try IdeviceGateway.shared.removeProvisioningProfile(id: id)
+    }
+
+    func dumpProfiles(docsPath: String) throws -> String {
+        try IdeviceGateway.shared.dumpProfiles(docsPath: docsPath)
+    }
+
     func startAutoMounter(docsPath: String) async {
         await state.setDocsPath(docsPath)
         await MounterService.startAutoMounter(docsPath: docsPath)

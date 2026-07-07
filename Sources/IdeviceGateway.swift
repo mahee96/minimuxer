@@ -69,12 +69,25 @@ public final class IdeviceGateway {
 
 
     private var pairingFile: OpaquePointer? = nil
-    private var pairingFileData: Data? = nil
     private var adapter: OpaquePointer? = nil
     private var handshake: OpaquePointer? = nil
     private var deviceIP: String = "10.7.0.1"
-    private var isRPPairing: Bool = false
     private var isInitialized = false
+
+    public private(set) var isRPPairing: Bool = false
+    public private(set) var pairingFileData: Data? = nil{
+        didSet {
+            var pairingDict: [String: Any]? = nil
+            if let pairingFileData {
+                pairingDict = try? PropertyListSerialization.propertyList(
+                    from: pairingFileData,
+                    options: [], format: nil
+                ) as? [String: Any]
+            }
+            self.pairingDataDict = pairingDict
+        }
+    }
+    public private(set) var pairingDataDict: [String: Any]? = nil
 
     private init() {}
 
@@ -144,8 +157,6 @@ public final class IdeviceGateway {
     public func start(pairingFileContent: String) throws {
         debugLog("[IdeviceGateway] start() called, pairingFileContent length: \(pairingFileContent.count)")
         cleanup()
-        
-        idevice_init_logger(IdeviceLogLevel(rawValue: 5), IdeviceLogLevel(rawValue: 0), nil)
 
         guard let data = pairingFileContent.data(using: .utf8) else {
             debugLog("[IdeviceGateway] start() failed to decode pairingFileContent data as UTF-8")
@@ -1358,7 +1369,7 @@ public final class IdeviceGateway {
             verboseLog("[IdeviceGateway] querying UniqueChipID from lockdown...")
             let valErr = lockdownd_get_value(lockdownClient, "UniqueChipID", nil, &plistVal)
             if let valErr = valErr {
-                verboseLog("[IdeviceGateway] lockdownd_get_value failed without session, starting session...")
+                verboseLog("[IdeviceGateway] No existing lockdown session exists, starting new session...")
                 idevice_error_free(valErr)
                 var pf: OpaquePointer? = nil
                 let getPfErr = idevice_provider_get_pairing_file(provider, &pf)

@@ -10,7 +10,7 @@ import Foundation
 
 final internal class MinimuxerImpl: MinimuxerAPI {
     var isrppairing: Bool { IdeviceGateway.shared.isRPPairing }
-    
+
     var isLoggingEnabled = true
     var onBackgroundError: ((Error) async -> Void)?
 
@@ -46,10 +46,10 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         }
 
         if isrppairing {
-            guard MounterService.isReady else {
+            guard MounterService.shared.dmgMounted else {
                 verboseLog(
                     "minimuxer not ready (RSD): " +
-                    "dmg=\(MounterService.isReady) " +
+                    "dmg=\(MounterService.shared.dmgMounted) " +
                     "started=\(MuxerService.isReady) "
                 )
                 throw MinimuxerError.InvalidPairing
@@ -61,11 +61,11 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         verboseLog(
             "minimuxer status (usbmuxd): " +
             "deviceUDID=\(deviceUDID ?? "nil") " +
-            "dmg=\(MounterService.isReady) " +
+            "dmg=\(MounterService.shared.dmgMounted) " +
             "started=\(MuxerService.isReady) "
         )
         guard deviceUDID != nil,
-            MounterService.isReady, 
+            MounterService.shared.dmgMounted,
             MuxerService.isReady
         else {
             throw MinimuxerError.InvalidPairing

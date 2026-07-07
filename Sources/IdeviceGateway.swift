@@ -561,7 +561,7 @@ public final class IdeviceGateway {
 
     private func performWithEitherService<T>(
         connectRP: @escaping (OpaquePointer?, OpaquePointer?, UnsafeMutablePointer<OpaquePointer?>?) -> UnsafeMutablePointer<IdeviceFfiError>?,
-        connectUsbmuxd: @escaping (OpaquePointer?, UnsafeMutablePointer<OpaquePointer?>?) -> UnsafeMutablePointer<IdeviceFfiError>?,
+        connectLockdown: @escaping (OpaquePointer?, UnsafeMutablePointer<OpaquePointer?>?) -> UnsafeMutablePointer<IdeviceFfiError>?,
         cleanup: @escaping (OpaquePointer?) -> Void,
         serviceName: String,
         action: (OpaquePointer) throws -> T
@@ -570,7 +570,7 @@ public final class IdeviceGateway {
         if isRPPairing {
             return try performWithService(connect: connectRP, cleanup: cleanup, serviceName: serviceName, action: action)
         } else {
-            return try performWithTcpService(connect: connectUsbmuxd, cleanup: cleanup, serviceName: serviceName, action: action)
+            return try performWithTcpService(connect: connectLockdown, cleanup: cleanup, serviceName: serviceName, action: action)
         }
     }
 
@@ -667,7 +667,7 @@ public final class IdeviceGateway {
 
         return try performWithEitherService(
             connectRP: lockdownd_connect_rsd,
-            connectUsbmuxd: lockdownd_connect,
+            connectLockdown: lockdownd_connect,
             cleanup: lockdownd_client_free,
             serviceName: "lockdownd"
         ) { client in
@@ -697,7 +697,7 @@ public final class IdeviceGateway {
         try verifyInitialized()
         try performWithEitherService(
             connectRP: misagent_connect_rsd,
-            connectUsbmuxd: misagent_connect,
+            connectLockdown: misagent_connect,
             cleanup: misagent_client_free,
             serviceName: "misagent"
         ) { client in
@@ -722,7 +722,7 @@ public final class IdeviceGateway {
         try verifyInitialized()
         try performWithEitherService(
             connectRP: misagent_connect_rsd,
-            connectUsbmuxd: misagent_connect,
+            connectLockdown: misagent_connect,
             cleanup: misagent_client_free,
             serviceName: "misagent"
         ) { client in
@@ -745,7 +745,7 @@ public final class IdeviceGateway {
         try verifyInitialized()
         try performWithEitherService(
             connectRP: installation_proxy_connect_rsd,
-            connectUsbmuxd: installation_proxy_connect,
+            connectLockdown: installation_proxy_connect,
             cleanup: installation_proxy_client_free,
             serviceName: "instproxy"
         ) { client in
@@ -767,7 +767,7 @@ public final class IdeviceGateway {
         try verifyInitialized()
         try performWithEitherService(
             connectRP: afc_client_connect_rsd,
-            connectUsbmuxd: afc_client_connect,
+            connectLockdown: afc_client_connect,
             cleanup: afc_client_free,
             serviceName: "AFC client"
         ) { client in
@@ -819,7 +819,7 @@ public final class IdeviceGateway {
         try verifyInitialized()
         try performWithEitherService(
             connectRP: installation_proxy_connect_rsd,
-            connectUsbmuxd: installation_proxy_connect,
+            connectLockdown: installation_proxy_connect,
             cleanup: installation_proxy_client_free,
             serviceName: "instproxy"
         ) { client in
@@ -841,7 +841,7 @@ public final class IdeviceGateway {
         debugLog("[IdeviceGateway] getAppPaths() called, appId: \(appId)")
         return try performWithEitherService(
             connectRP: installation_proxy_connect_rsd,
-            connectUsbmuxd: installation_proxy_connect,
+            connectLockdown: installation_proxy_connect,
             cleanup: installation_proxy_client_free,
             serviceName: "instproxy"
         ) { client in
@@ -941,7 +941,7 @@ public final class IdeviceGateway {
         
         try performWithEitherService(
             connectRP: lockdownd_connect_rsd,
-            connectUsbmuxd: lockdownd_connect,
+            connectLockdown: lockdownd_connect,
             cleanup: lockdownd_client_free,
             serviceName: "lockdownd"
         ) { lockdownClient in
@@ -1120,8 +1120,8 @@ public final class IdeviceGateway {
         } else {
             try performWithEitherService(
                 connectRP: debug_proxy_connect_rsd,
-                connectUsbmuxd: { [weak self] _, _ in
-                    debugLog("[IdeviceGateway] debugApp() usbmuxd placeholder called")
+                connectLockdown: { [weak self] _, _ in
+                    debugLog("[IdeviceGateway] debugApp() lockdown placeholder called")
                     return self?.getDummyffiError()
                 },
                 cleanup: debug_proxy_free,
@@ -1137,8 +1137,8 @@ public final class IdeviceGateway {
         try verifyInitialized()
         try performWithEitherService(
             connectRP: debug_proxy_connect_rsd,
-            connectUsbmuxd: { [weak self] _, _ in
-                debugLog("[IdeviceGateway] debugProcess() usbmuxd placeholder called")
+            connectLockdown: { [weak self] _, _ in
+                debugLog("[IdeviceGateway] debugProcess() lockdown placeholder called")
                 return self?.getDummyffiError()
             },
             cleanup: debug_proxy_free,
@@ -1156,7 +1156,7 @@ public final class IdeviceGateway {
         try verifyInitialized()
         return try performWithEitherService(
             connectRP: misagent_connect_rsd,
-            connectUsbmuxd: misagent_connect,
+            connectLockdown: misagent_connect,
             cleanup: misagent_client_free,
             serviceName: "misagent"
         ) { client in
@@ -1211,7 +1211,7 @@ public final class IdeviceGateway {
        try verifyInitialized()
        try performWithEitherService(
            connectRP: heartbeat_connect_rsd,
-           connectUsbmuxd: heartbeat_connect,
+           connectLockdown: heartbeat_connect,
            cleanup: heartbeat_client_free,
            serviceName: "heartbeat"
        ) { client in
@@ -1268,10 +1268,10 @@ public final class IdeviceGateway {
         }
 
         try performWithService(connect: image_mounter_connect_rsd, cleanup: image_mounter_free, serviceName: "image mounter") { mounterClient in
-            if try isDeveloperDiskImageMounted(mounterClient: mounterClient) {
-                verboseLog("[IdeviceGateway] DeveloperDiskImage already mounted. Bypassing personalization.")
-                return
-            }
+//            if try isDeveloperDiskImageMounted(mounterClient: mounterClient) {
+//                verboseLog("[IdeviceGateway] DeveloperDiskImage already mounted. Bypassing personalization.")
+//                return
+//            }
             try image.withUnsafeBytes { imgBuf in
                 try trustcache.withUnsafeBytes { tcBuf in
                     try manifest.withUnsafeBytes { manBuf in
@@ -1430,10 +1430,10 @@ public final class IdeviceGateway {
         }
         defer { image_mounter_free(mounterClient) }
 
-        if try isDeveloperDiskImageMounted(mounterClient: mounterClient) {
-            verboseLog("[IdeviceGateway] DeveloperDiskImage already mounted. Bypassing personalization.")
-            return
-        }
+//        if try isDeveloperDiskImageMounted(mounterClient: mounterClient) {
+//            verboseLog("[IdeviceGateway] DeveloperDiskImage already mounted. Bypassing personalization.")
+//            return
+//        }
 
         try image.withUnsafeBytes { imgBuf in
             try trustcache.withUnsafeBytes { tcBuf in
@@ -1458,6 +1458,19 @@ public final class IdeviceGateway {
                     verboseLog("[IdeviceGateway] mountPersonalizedDdiIdevice() mount succeeded")
                 }
             }
+        }
+    }
+
+    public func isDDIMounted() throws -> Bool {
+        debugLog("[IdeviceGateway] isDDIMounted() called")
+        try verifyInitialized()
+        return try performWithEitherService(
+            connectRP: image_mounter_connect_rsd,
+            connectLockdown: image_mounter_connect,
+            cleanup: image_mounter_free,
+            serviceName: "image mounter"
+        ) { client in
+            try isDeveloperDiskImageMounted(mounterClient: client)
         }
     }
 
@@ -1526,7 +1539,7 @@ public final class IdeviceGateway {
         try verifyInitialized()
         try performWithEitherService(
             connectRP: image_mounter_connect_rsd,
-            connectUsbmuxd: image_mounter_connect,
+            connectLockdown: image_mounter_connect,
             cleanup: image_mounter_free,
             serviceName: "image mounter"
         ) { client in

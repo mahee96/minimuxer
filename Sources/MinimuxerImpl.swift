@@ -359,14 +359,14 @@ final internal class MinimuxerImpl: MinimuxerAPI {
 }
 
 @inline(__always)
-func debugLog(_ text: String) {
-    print(text)
+func debugLog(_ text: @autoclosure () -> String) {
+    print(text())
 }
 
 
 @inline(__always)
-func verboseLog(_ text: String) {
+func verboseLog(_ text: @autoclosure () -> String) {
     if Minimuxer.shared.isLoggingEnabled {
-        print(text)
+        print(text())
     }
 }

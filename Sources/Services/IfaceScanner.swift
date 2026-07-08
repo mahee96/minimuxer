@@ -132,6 +132,7 @@ actor IfaceScanner {
 
     func probableVPN() throws -> NetInfo? {
         try ensureReady()
+        // TODO: @mahee96: we shouldn't return just the first coz user can have multiple uTUN lets revisit later to have a proper option
         return interfacesCache.first { $0.name.hasPrefix("utun") }
     }
 

@@ -59,7 +59,7 @@ final internal class Mounter {
             major = Int(v.split(separator: ".").first ?? "0") ?? 0
         }
 
-        let activeProtocol: MinimuxerProtocol = isRPPairing ? .rppairing : .lockdown
+        let activeProtocol: PairingProtocol = isRPPairing ? .rppairing : .lockdown
         var lastError: Error = MinimuxerError.mount(protocol: activeProtocol, reason: "Initial mount state")
         for attempt in 1...max(1, maxRetries) {
             do {

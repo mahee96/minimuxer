@@ -80,7 +80,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
             }
 
 
-            let activeProtocol: MinimuxerProtocol = isrppairing ? .rppairing : .lockdown
+            let activeProtocol: PairingProtocol = isrppairing ? .rppairing : .lockdown
 
             let ddiMounted: Bool
             do {
@@ -232,7 +232,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
     
     func restart() async throws {
         verboseLog("[minimuxer] Restarting services...")
-        let activeProtocol: MinimuxerProtocol = isrppairing ? .rppairing : .lockdown
+        let activeProtocol: PairingProtocol = isrppairing ? .rppairing : .lockdown
         guard let pairingData = IdeviceGateway.shared.pairingFileData,
               let pairingFile = String(data: pairingData, encoding: .utf8) else {
             debugLog("[minimuxer] restart: no existing pairing file — cannot restart")
@@ -270,7 +270,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         verboseLog("[minimuxer] Reinitializing with new pairing file...")
         await stop()
         guard let mountPath = await state.lastDocsPath else {
-            let activeProtocol: MinimuxerProtocol = isrppairing ? .rppairing : .lockdown
+            let activeProtocol: PairingProtocol = isrppairing ? .rppairing : .lockdown
             throw MinimuxerError.mount(protocol: activeProtocol, reason: "start() should be invoked before requesting pairing data reinitialization. cause: lastDocsPath is nil")
         }
         try await start(pairingFile: pairingFile, mountPath: mountPath)

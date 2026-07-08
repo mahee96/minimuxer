@@ -7,16 +7,6 @@
 //
 
 import Foundation
-// import RustBridge
-
-public enum MinimuxerProtocol: String, Codable, CustomStringConvertible, Sendable {
-    case rppairing = "rppairing"
-    case lockdown = "lockdown"
-    
-    public var description: String {
-        return self.rawValue
-    }
-}
 
 public struct MinimuxerServiceError: Error, CustomStringConvertible {
     public let component: MinimuxerComponent
@@ -31,10 +21,10 @@ public enum MinimuxerError: Error, Equatable, CustomStringConvertible, Localized
     case noDevice(String)
     case noConnection(String)
     case noVPN(String)
-    case pairingFile(protocol: MinimuxerProtocol, reason: String)
+    case pairingFile(protocol: PairingProtocol, reason: String)
     case restartAlreadyInProgressError(String)
     case invalidVPN(String)
-    case invalidPairing(protocol: MinimuxerProtocol, reason: String)
+    case invalidPairing(protocol: PairingProtocol, reason: String)
     case muxerNotListening(String)
 
     case createDebug(String)
@@ -74,8 +64,7 @@ public enum MinimuxerError: Error, Equatable, CustomStringConvertible, Localized
     case downloadImage(String)
     case imageLookup(String)
     case imageRead(String)
-    case mount(protocol: MinimuxerProtocol, reason: String)
-//    case bridgeError(RustBridgeError)
+    case mount(protocol: PairingProtocol, reason: String)
 
     public var description: String {
         switch self {
@@ -128,20 +117,3 @@ public enum MinimuxerError: Error, Equatable, CustomStringConvertible, Localized
         return self.description
     }
 }
-
-// public enum RustBridgeError: Error, LocalizedError, Equatable {
-//     case pairingFileRejected(description: String)
-//     case connectionReset(description: String)
-//     case unknown(code: Int, description: String)
-//     
-//     public var errorDescription: String? {
-//         switch self {
-//         case .pairingFileRejected(let description):
-//             return description
-//         case .connectionReset(let description):
-//             return description
-//         case .unknown(_, let description):
-//             return description
-//         }
-//     }
-// }

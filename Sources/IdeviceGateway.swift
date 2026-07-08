@@ -75,6 +75,9 @@ internal final class IdeviceGateway {
     private var isInitialized = false
 
     private(set) var isRPPairing: Bool = false
+    private var activeProtocol: PairingProtocol {
+        isRPPairing ? .rppairing : .lockdown
+    }
     private(set) var pairingFileData: Data? = nil{
         didSet {
             var pairingDict: [String: Any]? = nil
@@ -565,7 +568,7 @@ internal final class IdeviceGateway {
         serviceName: String,
         action: (OpaquePointer) throws -> T
     ) throws -> T {
-        debugLog("[IdeviceGateway] performWithEitherService(\(serviceName)) started, isRPPairing: \(isRPPairing)")
+        debugLog("[IdeviceGateway] performWithEitherService(\(serviceName)) started, isRPPairing: \(isRPPairing) (mode = .\(activeProtocol))")
         if isRPPairing {
             return try performWithService(connect: connectRP, cleanup: cleanup, serviceName: serviceName, action: action)
         } else {
@@ -574,7 +577,7 @@ internal final class IdeviceGateway {
     }
 
     func fetchUDID() throws -> String? {
-        debugLog("[IdeviceGateway] fetchUDID() started, isRPPairing: \(isRPPairing)")
+        debugLog("[IdeviceGateway] fetchUDID() started, isRPPairing: \(isRPPairing) (mode = .\(activeProtocol))")
         try verifyInitialized()
         if isRPPairing {
             do {
@@ -658,12 +661,8 @@ internal final class IdeviceGateway {
     }
 
     func getLockdownValue(key: String) throws -> String? {
-        debugLog("[IdeviceGateway] getLockdownValue(key: \(key)) started, isRPPairing: \(isRPPairing)")
+        debugLog("[IdeviceGateway] getLockdownValue(key: \(key)) started, isRPPairing: \(isRPPairing) (mode = .\(activeProtocol))")
         try verifyInitialized()
-//        if isRPPairing && key == "ProductVersion" {
-//            verboseLog("[IdeviceGateway] getLockdownValue returning mock 17.0 for ProductVersion")
-//            return "17.0"
-//        }
 
         return try performWithEitherService(
             connectRP: lockdownd_connect_rsd,

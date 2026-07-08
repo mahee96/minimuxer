@@ -358,15 +358,24 @@ final internal class MinimuxerImpl: MinimuxerAPI {
     }
 }
 
+private func getTag(level: String) -> String {
+    let formatter = DateFormatter()
+    formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSSSS'Z'"
+    formatter.timeZone = TimeZone(secondsFromGMT: 0)
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    let timestamp = formatter.string(from: Date())
+    return "\(timestamp) \(level): "
+}
+
 @inline(__always)
 func debugLog(_ text: @autoclosure () -> String) {
-    print(text())
+    print("\(getTag(level: "DEBUG"))\(text())")
 }
 
 
 @inline(__always)
 func verboseLog(_ text: @autoclosure () -> String) {
     if Minimuxer.shared.isLoggingEnabled {
-        print(text())
+        print("\(getTag(level: "TRACE"))\(text())")
     }
 }

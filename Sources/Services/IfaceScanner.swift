@@ -158,12 +158,13 @@ actor IfaceScanner {
             let active = (flags & (IFF_UP | IFF_RUNNING | IFF_LOOPBACK)) == (IFF_UP | IFF_RUNNING)
 
             if ipv4, active, let info = NetInfo(ifa: e) {
-                verboseLog("[minimuxer] [iface] \(info)")
                 result.insert(info)
             }
-
             cur = e.ifa_next
         }
+        
+        // log it in one shot
+        verboseLog(formatNetInfoList(result))
 
         verboseLog("[minimuxer] [iface] total: \(result.count)")
         return result
@@ -183,4 +184,16 @@ actor IfaceScanner {
         verboseLog("[minimuxer] [iface] no override peer configured")
         return nil
     }
+}
+
+// MARK: - Logging Helpers
+
+fileprivate func formatNetInfoList(_ list: Set<NetInfo>) -> String {
+    let maxNameLength = list.map { $0.name.count }.max() ?? 0
+    let maxIPLength = list.map { $0.hostIP.count }.max() ?? 0
+    return list.map { info -> String in
+        let paddedName = info.name.padding(toLength: maxNameLength, withPad: " ", startingAt: 0)
+        let paddedIP = info.hostIP.padding(toLength: maxIPLength, withPad: " ", startingAt: 0)
+        return "[minimuxer] [iface] \(paddedName) | ip=\(paddedIP) mask=\(info.maskIP)"
+    }.sorted().joined(separator: "\n")
 }

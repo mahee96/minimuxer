@@ -174,7 +174,7 @@ internal final class IdeviceGateway {
         // Check if pairing file is RPPairing
         if let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any] {
             if plist["private_key"] != nil {
-                verboseLog("[IdeviceGateway] start() detected private_key, isRPPairing = true")
+                verboseLog("[IdeviceGateway] start() detected private_key, isRPPairing = true (mode = .rppairing)")
                 isRPPairing = true
             } else {
                 verboseLog("[IdeviceGateway] start() plist did not contain private_key")
@@ -199,19 +199,19 @@ internal final class IdeviceGateway {
         } else {
             // Traditional usbmuxd / lockdown connection path
             // For pre-iOS 17 devices, a default connection can be established without RPPairing tunnel
-            verboseLog("[IdeviceGateway] start() setting isRPPairing = false (traditional pathway)")
+            verboseLog("[IdeviceGateway] start() setting isRPPairing = false (mode = .lockdown)")
             isRPPairing = false
 
             // Parse pairing file content XML plist to self.pairingFile IdevicePairingFile*
             try data.withUnsafeBytes { (buf: UnsafeRawBufferPointer) in
                 if let baseAddress = buf.baseAddress?.assumingMemoryBound(to: UInt8.self) {
-                    verboseLog("[IdeviceGateway] start() loading traditional pairing file bytes")
+                    verboseLog("[IdeviceGateway] start() loading lockdown pairing file bytes")
                     let err = idevice_pairing_file_from_bytes(baseAddress, UInt(data.count), &pairingFile)
                     if err != nil {
                         debugLog("[IdeviceGateway] start() idevice_pairing_file_from_bytes failed")
                         throw IdeviceGatewayError.invalidPairingFile
                     }
-                    verboseLog("[IdeviceGateway] start() loaded traditional pairingFile successfully")
+                    verboseLog("[IdeviceGateway] start() loaded lockdown pairingFile successfully")
                 }
             }
         }
@@ -1290,9 +1290,10 @@ internal final class IdeviceGateway {
                             chipID
                         )
                         if let mountErr = mountErr {
-                            debugLog("[IdeviceGateway] mountPersonalizedDdiRsd() mount failed")
+                            let msg = mountErr.pointee.message != nil ? String(cString: mountErr.pointee.message!) : "No message"
+                            debugLog("[IdeviceGateway] mountPersonalizedDdiRsd() mount failed: code=\(mountErr.pointee.code), message=\(msg)")
                             defer { idevice_error_free(mountErr) }
-                            throw IdeviceGatewayError.serviceError("Failed to mount personalized DDI")
+                            throw IdeviceGatewayError.serviceError("Failed to mount personalized DDI: \(msg)")
                         }
                         debugLog("[IdeviceGateway] mountPersonalizedDdiRsd() mount succeeded")
                     }
@@ -1452,8 +1453,10 @@ internal final class IdeviceGateway {
                         chipID
                     )
                     if let mountErr = mountErr {
+                        let msg = mountErr.pointee.message != nil ? String(cString: mountErr.pointee.message!) : "No message"
+                        debugLog("[IdeviceGateway] mountPersonalizedDdiIdevice() mount failed: code=\(mountErr.pointee.code), message=\(msg)")
                         defer { idevice_error_free(mountErr) }
-                        throw IdeviceGatewayError.serviceError("Failed to mount personalized DDI")
+                        throw IdeviceGatewayError.serviceError("Failed to mount personalized DDI: \(msg)")
                     }
                     verboseLog("[IdeviceGateway] mountPersonalizedDdiIdevice() mount succeeded")
                 }
@@ -1577,9 +1580,10 @@ internal final class IdeviceGateway {
                     nil
                 )
                 if let mountErr = mountErr {
-                    debugLog("[IdeviceGateway] mountDeveloperImage() mount failed")
+                    let msg = mountErr.pointee.message != nil ? String(cString: mountErr.pointee.message!) : "No message"
+                    debugLog("[IdeviceGateway] mountDeveloperImage() mount failed: code=\(mountErr.pointee.code), message=\(msg)")
                     defer { idevice_error_free(mountErr) }
-                    throw IdeviceGatewayError.serviceError("Failed to mount developer image")
+                    throw IdeviceGatewayError.serviceError("Failed to mount developer image: \(msg)")
                 }
                 debugLog("[IdeviceGateway] mountDeveloperImage() mount succeeded")
             }

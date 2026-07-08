@@ -104,7 +104,7 @@ final internal class MuxerService {
     // device, read the pairing record, and open services (AFC, lockdown, etc.).
     private static func listenLoop() {
         while !Thread.current.isCancelled {
-            logIfNeeded("MuxerService - Starting listener", isVerbose: true)
+            logIfNeeded("MuxerService - Starting usbmuxd proxy server (listener loop)", isVerbose: true)
 
             let fd = socket(AF_INET, SOCK_STREAM, 0)
             guard fd >= 0 else {

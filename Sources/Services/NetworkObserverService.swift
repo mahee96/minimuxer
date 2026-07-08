@@ -73,7 +73,7 @@ final internal class NetworkObserverService: NetworkObserverAPI, @unchecked Send
         verboseLog("[minimuxer] [net] refreshing interfaces list and peers")
         await IfaceScanner.shared.refresh()
 
-        verboseLog("[minimuxer] [net] retrive the first vpn interface info")
+        verboseLog("[minimuxer] [net] retrive the first uTun vpn interface info")
         if let info = try? await IfaceScanner.shared.probableVPN() {
             let peerIP = await info.peerIP
             verboseLog("[minimuxer] [net] vpn: \(info) peer: \(peerIP ?? "nil")")

@@ -97,6 +97,11 @@ actor IfaceScanner {
     func refresh() async {
         let scannedInterfaces = Self.scan()
         
+        if refreshed && scannedInterfaces == interfacesCache {
+            verboseLog("[minimuxer] [iface] no interface changes detected, skipping scan refresh")
+            return
+        }
+        
         interfacesCache = scannedInterfaces
         refreshed = true
 

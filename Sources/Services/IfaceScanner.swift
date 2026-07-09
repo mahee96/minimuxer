@@ -95,14 +95,14 @@ actor IfaceScanner {
     private init() {}
 
     @discardableResult
-    func refresh() async -> Bool {
-        let scannedInterfaces = Self.scan()
+    func refresh(quietScan: Bool = false) async -> Bool {
+        let scannedInterfaces = Self.scan(quiet: quietScan)
         
         if refreshed && scannedInterfaces == interfacesCache {
-            verboseLog("[minimuxer] [iface] no interface changes detected, skipping scan refresh")
+            debugLog("[minimuxer] [iface] no interface changes detected, skipping scan refresh")
             return false
         }
-        verboseLog(formatNetInfoList(scannedInterfaces))
+        debugLog(formatNetInfoList(scannedInterfaces))
         
         interfacesCache = scannedInterfaces
         refreshed = true
@@ -115,7 +115,7 @@ actor IfaceScanner {
         tunnelConfigCache?.setFakeIP(peerIP)
         tunnelConfigCache?.setOverrideEffective(isOverrideActive)
         
-        verboseLog("""
+        debugLog("""
         [minimuxer] [iface] rescan routes
           • interfaces: \(interfacesCache.count)
           • vpn host: \(vpnIface?.hostIP ?? "nil")
@@ -150,9 +150,11 @@ actor IfaceScanner {
    }
 
     // MARK: scan
-    private static func scan() -> Set<NetInfo> {
-        verboseLog("[minimuxer] [iface] scan requested...")
-
+    private static func scan(quiet: Bool = false) -> Set<NetInfo> {
+        if !quiet{
+            debugLog("[minimuxer] [iface] scan requested...")
+        }
+        
         var result = Set<NetInfo>()
         var head: UnsafeMutablePointer<ifaddrs>? = nil
         guard getifaddrs(&head) == 0, let first = head else { return result }
@@ -172,7 +174,9 @@ actor IfaceScanner {
             cur = e.ifa_next
         }
         
-        verboseLog("[minimuxer] [iface] total: \(result.count)")
+        if !quiet{
+            debugLog("[minimuxer] [iface] total: \(result.count)")
+        }
         return result
     }
     
@@ -180,14 +184,14 @@ actor IfaceScanner {
         if let cachedDeviceIP = cachedOverrideFakeIP {
             let reachable = Minimuxer.shared.testDeviceConnection(ifaddr: cachedDeviceIP)
             if reachable {
-                verboseLog("[minimuxer] [iface] override peer reachable at: \(cachedDeviceIP)")
+                debugLog("[minimuxer] [iface] override peer reachable at: \(cachedDeviceIP)")
                 return cachedDeviceIP
             } else {
-                verboseLog("[minimuxer] [iface] override peer NOT reachable at: \(cachedDeviceIP)")
+                debugLog("[minimuxer] [iface] override peer NOT reachable at: \(cachedDeviceIP)")
                 return nil
             }
         }
-        verboseLog("[minimuxer] [iface] no override peer configured")
+        debugLog("[minimuxer] [iface] no override peer configured")
         return nil
     }
 }

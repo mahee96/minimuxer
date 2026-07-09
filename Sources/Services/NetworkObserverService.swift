@@ -50,7 +50,12 @@ final internal class NetworkObserverService: NetworkObserverAPI, @unchecked Send
         let task = Task.detached { [weak self] in
             for await path in paths {
                 verboseLog("[minimuxer] [net] path changed, status: \(path.status)")
+                // path updates can be anything including dns changes, nodes updates etc
+                // so we ignore noise if not real interface/ip changes
+                let ifacesUpdated = await IfaceScanner.shared.refresh(quietScan: true)
+                if !ifacesUpdated { return }
                 guard path.status == .satisfied else { continue }
+                // ask for refresh and endpoint update
                 await self?.refreshEndpoint()
             }
         }

@@ -35,6 +35,8 @@ final internal class NetworkObserverService: NetworkObserverAPI, @unchecked Send
         await state.with { $0.started = true }
         verboseLog("[minimuxer] [net] monitor started")
 
+        await self.refreshEndpoint()
+
         let paths = AsyncStream<NWPath> { [weak self] continuation in
             guard let self = self else {
                 continuation.finish()

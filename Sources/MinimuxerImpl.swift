@@ -245,7 +245,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         }
         await stop()
         try await start(pairingFile: pairingFile, mountPath: mountPath)
-        Minimuxer.network.refreshEndpoint()
+        await Minimuxer.network.refreshEndpoint()
     }
     
     func mountDDI(docsPath: String) async throws -> Bool {

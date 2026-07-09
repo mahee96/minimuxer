@@ -102,6 +102,7 @@ actor IfaceScanner {
             verboseLog("[minimuxer] [iface] no interface changes detected, skipping scan refresh")
             return false
         }
+        verboseLog(formatNetInfoList(scannedInterfaces))
         
         interfacesCache = scannedInterfaces
         refreshed = true
@@ -171,9 +172,6 @@ actor IfaceScanner {
             cur = e.ifa_next
         }
         
-        // log it in one shot
-        verboseLog(formatNetInfoList(result))
-
         verboseLog("[minimuxer] [iface] total: \(result.count)")
         return result
     }

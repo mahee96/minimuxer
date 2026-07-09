@@ -78,7 +78,6 @@ actor IfaceScanner {
 
     static let shared = IfaceScanner()
 
-
     private var interfacesCache: Set<NetInfo> = []
     private var refreshed = false
     private var tunnelConfigCache: TunnelConfigBinding?
@@ -150,7 +149,7 @@ actor IfaceScanner {
    }
 
     // MARK: scan
-    private static func scan(quiet: Bool = false) -> Set<NetInfo> {
+    static func scan(quiet: Bool = false) -> Set<NetInfo> {
         if !quiet{
             debugLog("[minimuxer] [iface] scan requested...")
         }

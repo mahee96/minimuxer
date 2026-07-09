@@ -192,6 +192,8 @@ final internal class MinimuxerImpl: MinimuxerAPI {
     
     
     func start(pairingFile: String, mountPath: String) async throws {
+        await Minimuxer.network.start()
+        
         // actor serialization scope
         try await state.with{
             $0.status = .inprogress     // mark inprogress

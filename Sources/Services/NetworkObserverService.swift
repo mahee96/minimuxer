@@ -16,60 +16,50 @@ final internal class NetworkObserverService: NetworkObserverAPI, @unchecked Send
     private let state = State()
     
     private actor State {
-        private var started = false
-
-        func start(monitor: NWPathMonitor, queue: DispatchQueue, pathUpdateHandler: @escaping (NWPath) -> Void) -> Bool {
-            guard !started else {
-                verboseLog("[minimuxer] [net] monitor already started")
-                return false
-            }
-
-            monitor.pathUpdateHandler = pathUpdateHandler
-            monitor.start(queue: queue)
-            started = true
-            verboseLog("[minimuxer] [net] monitor started")
-            return true
-        }
-
-        func stop(monitor: NWPathMonitor) -> Bool {
-            guard started else {
-                verboseLog("[minimuxer] [net] monitor already stopped")
-                return false
-            }
-            monitor.cancel()
-            started = false
-            verboseLog("[minimuxer] [net] monitor stopped")
-            return true
+        var started = false
+        var observationTask: Task<Void, Never>? = nil
+        
+        func with<T>(_ body: (isolated State) throws -> T) rethrows -> T {
+            try body(self)
         }
     }
 
     @discardableResult
-    func start() -> Bool {
-        let semaphore = DispatchSemaphore(value: 0)
-        var result = false
-        Task { [weak self] in
+    func start() async -> Bool {
+        let alreadyStarted = await state.with { $0.started }
+        guard !alreadyStarted else {
+            verboseLog("[minimuxer] [net] monitor already started")
+            return false
+        }
+
+        await state.with { $0.started = true }
+        verboseLog("[minimuxer] [net] monitor started")
+
+        let paths = AsyncStream<NWPath> { [weak self] continuation in
             guard let self = self else {
-                semaphore.signal()
+                continuation.finish()
                 return
             }
-            result = await self.state.start(monitor: self.monitor, queue: self.queue) { [weak self] path in
-                verboseLog("[minimuxer] [net] path changed, status: \(path.status)")
-                guard path.status == .satisfied else { return }
-                self?.refreshEndpoint()
+            self.monitor.pathUpdateHandler = { path in
+                continuation.yield(path)
             }
-            semaphore.signal()
         }
-        semaphore.wait()
-        return result
+
+        self.monitor.start(queue: self.queue)
+
+        let task = Task.detached { [weak self] in
+            for await path in paths {
+                verboseLog("[minimuxer] [net] path changed, status: \(path.status)")
+                guard path.status == .satisfied else { continue }
+                await self?.refreshEndpoint()
+            }
+        }
+        await state.with { $0.observationTask = task }
+
+        return true
     }
     
-    func refreshEndpoint() {
-        Task {
-            await refreshEndpointAsync()
-        }
-    }
-
-    private func refreshEndpointAsync() async {
+    func refreshEndpoint() async {
         verboseLog("[minimuxer] [net] refreshing interfaces list and peers")
         await IfaceScanner.shared.refresh()
 
@@ -95,19 +85,22 @@ final internal class NetworkObserverService: NetworkObserverAPI, @unchecked Send
     }
     
     @discardableResult
-    func stop() -> Bool {
-        let semaphore = DispatchSemaphore(value: 0)
-        var result = false
-        Task { [weak self] in
-            guard let self = self else {
-                semaphore.signal()
-                return
-            }
-            result = await self.state.stop(monitor: self.monitor)
-            semaphore.signal()
+    func stop() async -> Bool {
+        let isStarted = await state.with { $0.started }
+        guard isStarted else {
+            verboseLog("[minimuxer] [net] monitor already stopped")
+            return false
         }
-        semaphore.wait()
-        return result
+
+        self.monitor.cancel()
+        await state.with {
+            $0.observationTask?.cancel()
+            $0.observationTask = nil
+            $0.started = false
+        }
+        
+        verboseLog("[minimuxer] [net] monitor stopped")
+        return true
     }
     
     var isWifiSatisfied: Bool {

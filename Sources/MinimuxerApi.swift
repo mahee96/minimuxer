@@ -80,12 +80,12 @@ public protocol NetworkObserverAPI: AnyObject {
     var isIKEv2IPSecAvailable: Bool { get }
 
     @discardableResult
-    func start() -> Bool
+    func start() async -> Bool
     
     @discardableResult
-    func stop() -> Bool
+    func stop() async -> Bool
 
-    func refreshEndpoint()
+    func refreshEndpoint() async
 }
 
 // MARK: - Wireless Pair API

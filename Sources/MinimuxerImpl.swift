@@ -369,7 +369,12 @@ private func getTag(level: String) -> String {
 
 @inline(__always)
 func debugLog(_ text: @autoclosure () -> String) {
-    print("\(getTag(level: "DEBUG"))\(text())")
+    let message = text()
+    if !message.isEmpty && message.allSatisfy({ $0 == "\n" || $0 == "\r" }) {
+        print(message)
+    } else {
+        print("\(getTag(level: "DEBUG"))\(message)")
+    }
 }
 
 

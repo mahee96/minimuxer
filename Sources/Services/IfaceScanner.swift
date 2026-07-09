@@ -94,12 +94,13 @@ actor IfaceScanner {
     
     private init() {}
 
-    func refresh() async {
+    @discardableResult
+    func refresh() async -> Bool {
         let scannedInterfaces = Self.scan()
         
         if refreshed && scannedInterfaces == interfacesCache {
             verboseLog("[minimuxer] [iface] no interface changes detected, skipping scan refresh")
-            return
+            return false
         }
         
         interfacesCache = scannedInterfaces
@@ -123,6 +124,7 @@ actor IfaceScanner {
           • overrideEffective: \(isOverrideActive)
           • refreshed: \(refreshed)
         """)
+        return true
     }
 
     var interfaces: Set<NetInfo> {

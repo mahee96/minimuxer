@@ -61,7 +61,8 @@ final internal class NetworkObserverService: NetworkObserverAPI, @unchecked Send
     
     func refreshEndpoint() async {
         verboseLog("[minimuxer] [net] refreshing interfaces list and peers")
-        await IfaceScanner.shared.refresh()
+        let changed = await IfaceScanner.shared.refresh()
+        guard changed else { return }
 
         verboseLog("[minimuxer] [net] retrive the first uTun vpn interface info")
         if let info = try? await IfaceScanner.shared.probableVPN() {

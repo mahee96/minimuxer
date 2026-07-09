@@ -55,15 +55,15 @@ final internal class MuxerService {
             listenLoop()
         }
         thread.name = "Muxer-Server"
-        thread.qualityOfService = .background
+        thread.qualityOfService = .userInitiated
         thread.start()
         
         serverThread = thread
         started = true
 
-        let maxPolls = 20
+        let maxPolls = 10
         let pollIntervalNs: UInt64 = 100_000_000 // 100ms
-        let totalTimeoutMs = maxPolls * Int(pollIntervalNs / 1_000_000)
+        let totalTimeoutMs = 1000
 
         for _ in 0..<maxPolls {
             if isListening {

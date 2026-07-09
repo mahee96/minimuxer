@@ -199,5 +199,5 @@ fileprivate func formatNetInfoList(_ list: Set<NetInfo>) -> String {
             let paddedIP = info.hostIP.padding(toLength: maxIPLength, withPad: " ", startingAt: 0)
             return "  • \(paddedName) ip:\(paddedIP) mask:\(info.maskIP)"
         }.sorted().joined(separator: "\n") + "\n" +
-        "---------------------------------------------------\n"
+        "---------------------------------------------------"
 }

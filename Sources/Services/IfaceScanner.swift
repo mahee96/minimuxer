@@ -192,9 +192,12 @@ actor IfaceScanner {
 fileprivate func formatNetInfoList(_ list: Set<NetInfo>) -> String {
     let maxNameLength = list.map { $0.name.count }.max() ?? 0
     let maxIPLength = list.map { $0.hostIP.count }.max() ?? 0
-    return list.map { info -> String in
-        let paddedName = info.name.padding(toLength: maxNameLength, withPad: " ", startingAt: 0)
-        let paddedIP = info.hostIP.padding(toLength: maxIPLength, withPad: " ", startingAt: 0)
-        return "[minimuxer] [iface] \(paddedName) | ip=\(paddedIP) mask=\(info.maskIP)"
-    }.sorted().joined(separator: "\n")
+    return "[minimuxer] [iface] local interfaces list:\n" +
+        "---------------------------------------------------\n" +
+        list.map { info -> String in
+            let paddedName = info.name.padding(toLength: maxNameLength, withPad: " ", startingAt: 0)
+            let paddedIP = info.hostIP.padding(toLength: maxIPLength, withPad: " ", startingAt: 0)
+            return "  • \(paddedName) ip:\(paddedIP) mask:\(info.maskIP)"
+        }.sorted().joined(separator: "\n") + "\n"
+        "---------------------------------------------------\n"
 }

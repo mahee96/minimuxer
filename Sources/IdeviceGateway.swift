@@ -15,6 +15,7 @@ internal enum IdeviceGatewayError: LocalizedError {
     case serviceError(String)
     case noConnection
     case notInitialized
+    case deviceIpNotAvailable
 
     var errorDescription: String? {
         switch self {
@@ -28,6 +29,8 @@ internal enum IdeviceGatewayError: LocalizedError {
             return "No connection to the device."
         case .notInitialized:
             return "IdeviceGateway not initialized. start() should be called first."
+        case .deviceIpNotAvailable:
+            return "Device IP address is not available."
         }
     }
 
@@ -71,7 +74,7 @@ internal final class IdeviceGateway {
     private var pairingFile: OpaquePointer? = nil
     private var adapter: OpaquePointer? = nil
     private var handshake: OpaquePointer? = nil
-    private var deviceIP: String = "10.7.0.1"
+    private var deviceIP: String? = "10.7.0.1"
     private var isInitialized = false
 
     private(set) var isRPPairing: Bool = false
@@ -134,8 +137,12 @@ internal final class IdeviceGateway {
         }
     }
 
-    func setDeviceIP(_ ip: String) {
-        debugLog("[IdeviceGateway] setDeviceIP(\(ip)) called")
+    func setDeviceIP(_ ip: String?) {
+        debugLog("[IdeviceGateway] setDeviceIP(\(ip ?? "nil")) called")
+        guard self.deviceIP != ip else {
+            debugLog("[IdeviceGateway] setDeviceIP: IP is already \(ip ?? "nil"), skipping invalidation")
+            return
+        }
         self.deviceIP = ip
         
         // Invalidate current cached connections
@@ -231,6 +238,11 @@ internal final class IdeviceGateway {
         guard let pairingFile = pairingFile else {
             debugLog("[IdeviceGateway] ensureRPConnection() failed because pairingFile is nil")
             throw IdeviceGatewayError.invalidPairingFile
+        }
+
+        guard let deviceIP = deviceIP else {
+            debugLog("[IdeviceGateway] ensureRPConnection() failed because deviceIP is nil")
+            throw IdeviceGatewayError.deviceIpNotAvailable
         }
 
         // Standard RPPairing socket address
@@ -493,6 +505,11 @@ internal final class IdeviceGateway {
         action: (OpaquePointer) throws -> T
     ) throws -> T {
         verboseLog("[IdeviceGateway] performWithTcpService(\(serviceName)) started")
+        
+        guard let deviceIP = deviceIP else {
+            debugLog("[IdeviceGateway] performWithTcpService(\(serviceName)) failed because deviceIP is nil")
+            throw IdeviceGatewayError.deviceIpNotAvailable
+        }
         
         var sockAddr = sockaddr_in()
         sockAddr.sin_family = sa_family_t(AF_INET)
@@ -1303,6 +1320,11 @@ internal final class IdeviceGateway {
 
     private func mountPersonalizedDdiIdevice(image: Data, trustcache: Data, manifest: Data) throws {
         verboseLog("[IdeviceGateway] mountPersonalizedDdiIdevice() starting traditional/TCP provider mounting")
+
+        guard let deviceIP = deviceIP else {
+            debugLog("[IdeviceGateway] mountPersonalizedDdiIdevice() failed because deviceIP is nil")
+            throw IdeviceGatewayError.deviceIpNotAvailable
+        }
 
         var sockAddr = sockaddr_in()
         sockAddr.sin_family = sa_family_t(AF_INET)

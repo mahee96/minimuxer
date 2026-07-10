@@ -29,6 +29,7 @@ actor DeviceEndpoint {
 
     func clear() {
         ipAddr = nil
+        IdeviceGateway.shared.setDeviceIP(nil)
         verboseLog("[minimuxer] device endpoint cleared -> nil")
     }
 

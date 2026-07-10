@@ -74,7 +74,7 @@ internal final class IdeviceGateway {
     private var pairingFile: OpaquePointer? = nil
     private var adapter: OpaquePointer? = nil
     private var handshake: OpaquePointer? = nil
-    private var deviceIP: String? = "10.7.0.1"
+    private var deviceIP: String? = nil
     private var isInitialized = false
 
     private(set) var isRPPairing: Bool = false
@@ -248,10 +248,10 @@ internal final class IdeviceGateway {
         // Standard RPPairing socket address
         var addr = sockaddr_in()
         addr.sin_family = sa_family_t(AF_INET)
-        addr.sin_port = UInt16(49152).bigEndian
+        addr.sin_port = MinimuxerConstants.rsdPort.bigEndian
         addr.sin_addr.s_addr = inet_addr(deviceIP)
 
-        let hostname = "minimuxer"
+        let hostname = MinimuxerConstants.appName
         var err: UnsafeMutablePointer<IdeviceFfiError>? = nil
 
         verboseLog("[IdeviceGateway] ensureRPConnection() calling tunnel_create_rppairing with deviceIP: \(deviceIP)")
@@ -445,7 +445,7 @@ internal final class IdeviceGateway {
                 let udidPtr = idevice_usbmuxd_device_get_udid(firstDev)
                 let deviceID = idevice_usbmuxd_device_get_device_id(firstDev)
                 verboseLog("[IdeviceGateway] performWithUsbmuxdService(\(serviceName)) creating provider for deviceID: \(deviceID)")
-                provErr = usbmuxd_provider_new(addr, 0, udidPtr, deviceID, "minimuxer", &provider)
+                provErr = usbmuxd_provider_new(addr, 0, udidPtr, deviceID, MinimuxerConstants.appName, &provider)
                 if let udidPtr = udidPtr {
                     idevice_string_free(udidPtr)
                 }
@@ -513,7 +513,7 @@ internal final class IdeviceGateway {
         
         var sockAddr = sockaddr_in()
         sockAddr.sin_family = sa_family_t(AF_INET)
-        sockAddr.sin_port = UInt16(62078).bigEndian
+        sockAddr.sin_port = MinimuxerConstants.lockdowndPort.bigEndian
         sockAddr.sin_addr.s_addr = inet_addr(deviceIP)
         #if os(macOS) || os(iOS)
         sockAddr.sin_len = __uint8_t(MemoryLayout<sockaddr_in>.size)
@@ -541,7 +541,7 @@ internal final class IdeviceGateway {
         var provider: OpaquePointer? = nil
         let provErr = withUnsafePointer(to: &sockAddr) { ptr in
             ptr.withMemoryRebound(to: idevice_sockaddr.self, capacity: 1) { reboundPtr in
-                return idevice_tcp_provider_new(reboundPtr, tempPairingFile, "minimuxer", &provider)
+                return idevice_tcp_provider_new(reboundPtr, tempPairingFile, MinimuxerConstants.appName, &provider)
             }
         }
         if let provErr = provErr {
@@ -788,7 +788,7 @@ internal final class IdeviceGateway {
             serviceName: "AFC client"
         ) { client in
             // Ensure directory
-            let stagingDir = "PublicStaging"
+            let stagingDir = MinimuxerConstants.pkgPath
             verboseLog("[IdeviceGateway] yeetAppAfc() creating directory: \(stagingDir)")
             _ = stagingDir.withCString { dirPtr in
                 afc_make_directory(client, dirPtr)
@@ -1328,7 +1328,7 @@ internal final class IdeviceGateway {
 
         var sockAddr = sockaddr_in()
         sockAddr.sin_family = sa_family_t(AF_INET)
-        sockAddr.sin_port = UInt16(62078).bigEndian
+        sockAddr.sin_port = MinimuxerConstants.lockdowndPort.bigEndian
         sockAddr.sin_addr.s_addr = inet_addr(deviceIP)
 
         guard let pairingFileData = self.pairingFileData else {
@@ -1350,11 +1350,11 @@ internal final class IdeviceGateway {
             throw IdeviceGatewayError.connectionFailed("Temporary pairing file was nil")
         }
 
-        verboseLog("[IdeviceGateway] creating TCP provider to \(deviceIP):62078...")
+        verboseLog("[IdeviceGateway] creating TCP provider to \(deviceIP):\(MinimuxerConstants.lockdowndPort)...")
         var provider: OpaquePointer? = nil
         let provErr = withUnsafePointer(to: &sockAddr) { ptr in
             ptr.withMemoryRebound(to: idevice_sockaddr.self, capacity: 1) { reboundPtr in
-                return idevice_tcp_provider_new(reboundPtr, tempPairingFile, "minimuxer", &provider)
+                return idevice_tcp_provider_new(reboundPtr, tempPairingFile, MinimuxerConstants.appName, &provider)
             }
         }
         if let provErr = provErr {

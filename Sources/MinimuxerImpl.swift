@@ -163,7 +163,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
             debugLog("[minimuxer] ERROR: Pairing DICT missing...ignoring restart MuxerServer")
             throw MinimuxerError.pairingFile(protocol: .lockdown, reason: "Pairing dictionary is missing in gateway")
         }
-        verboseLog("[minimuxer] DEBUG: loaded pairing file keys: \(pairingDict.keys)")
+        verboseLog("[minimuxer] loaded pairing file keys: \(pairingDict.keys)")
 
         guard let deviceUDID = pairingDict["UDID"] as? String else {
             debugLog("[minimuxer] ERROR: Pairing file missing UDID")
@@ -374,7 +374,7 @@ func debugLog(_ text: @autoclosure () -> String) {
     if !message.isEmpty && message.allSatisfy({ $0 == "\n" || $0 == "\r" }) {
         print(message, terminator: "")
     } else {
-        print("\(getTag(level: "DEBUG"))\(message)")
+        print("\(getTag(level: "[D]"))\(message)")
     }
 }
 
@@ -386,7 +386,7 @@ func verboseLog(_ text: @autoclosure () -> String) {
         if !message.isEmpty && message.allSatisfy({ $0 == "\n" || $0 == "\r" }) {
             print(message, terminator: "")
         } else {
-            print("\(getTag(level: "TRACE"))\(message)")
+            print("\(getTag(level: "[V]"))\(message)")
         }
     }
 }

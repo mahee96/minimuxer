@@ -89,8 +89,8 @@ final internal class MinimuxerImpl: MinimuxerAPI {
                 return .failure(.invalidVPN("VPN tunnel iface is up but tunnel peer IP is not yet available — VPN may not be routing device traffic correctly. Cause: \(error.localizedDescription)"))
             }
             
-            let deviceConnection = testDeviceConnection(ifaddr: tunnelPeerIp)
-            if !deviceConnection {
+            let peerReachable = testDeviceConnection(ifaddr: tunnelPeerIp)
+            if !peerReachable {
                 debugLog("[minimuxer] minimuxer not ready: failed to connect to tunnel peer IP")
                 return .failure(.invalidVPN("VPN tunnel iface is up and tunnel peer IP \(tunnelPeerIp) is known, but TCP port poll failed — device may be unreachable on this interface"))
             }

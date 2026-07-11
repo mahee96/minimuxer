@@ -42,7 +42,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
     }
     
     func bindTunnelConfig(_ binding: TunnelConfigBinding) async {
-        await IfaceScanner.shared.bindTunnelConfig(binding)
+        await NetworkIfaceScanner.shared.bindTunnelConfig(binding)
     }
     
     var isReady: Result<Bool, MinimuxerError> {
@@ -81,18 +81,18 @@ final internal class MinimuxerImpl: MinimuxerAPI {
             }
 
             // then check if device is ready
-            let deviceIP: String
+            let tunnelPeerIp: String
             do {
-                deviceIP = try await DeviceEndpoint.shared.ip()
+                tunnelPeerIp = try await TunnelPeer.shared.ip()
             } catch {
-                debugLog("[minimuxer] minimuxer not ready: device IP not available despite utun being present")
-                return .failure(.invalidVPN("VPN tunnel (utun) is up but device IP is unreachable — VPN may not be routing device traffic correctly. Cause: \(error.localizedDescription)"))
+                debugLog("[minimuxer] minimuxer not ready: tunnel peer IP not available despite tunnel iface being present")
+                return .failure(.invalidVPN("VPN tunnel iface is up but tunnel peer IP is not yet available — VPN may not be routing device traffic correctly. Cause: \(error.localizedDescription)"))
             }
             
-            let deviceConnection = testDeviceConnection(ifaddr: deviceIP)
+            let deviceConnection = testDeviceConnection(ifaddr: tunnelPeerIp)
             if !deviceConnection {
-                debugLog("[minimuxer] minimuxer not ready: failed to connect to device IP")
-                return .failure(.invalidVPN("VPN tunnel is up and device IP \(deviceIP) is known, but TCP port poll failed — device may be unreachable on this interface"))
+                debugLog("[minimuxer] minimuxer not ready: failed to connect to tunnel peer IP")
+                return .failure(.invalidVPN("VPN tunnel iface is up and tunnel peer IP \(tunnelPeerIp) is known, but TCP port poll failed — device may be unreachable on this interface"))
             }
 
 

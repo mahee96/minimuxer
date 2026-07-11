@@ -12,7 +12,6 @@ public enum MinimuxerConstants {
     public static let lockdowndPort: UInt16 = 62078     // lockdown daemon port
     public static let rsdPort: UInt16 = 49152
     
-    public static let defaultDeviceIP = "10.7.0.1"
     public static let appName = "minimuxer"
 
     public static let usbmuxdHost = "127.0.0.1"

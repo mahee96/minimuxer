@@ -1,5 +1,5 @@
 //
-//  IfaceScanner.swift
+//  NetworkIfaceScanner.swift
 //  Minimuxer
 //
 //  Created by ny on 2/27/26.
@@ -61,7 +61,7 @@ internal struct NetInfo: Hashable, CustomStringConvertible, Sendable {
     
     var peerIP: String? {
         get async {
-            await IfaceScanner.shared.getPeer(for: self)
+            await NetworkIfaceScanner.shared.getPeer(for: self)
         }
     }
 
@@ -74,9 +74,9 @@ internal struct NetInfo: Hashable, CustomStringConvertible, Sendable {
     
 }
 
-actor IfaceScanner {
+actor NetworkIfaceScanner {
 
-    static let shared = IfaceScanner()
+    static let shared = NetworkIfaceScanner()
 
     private var interfacesCache: Set<NetInfo> = []
     private var refreshed = false
@@ -87,8 +87,8 @@ actor IfaceScanner {
         await Minimuxer.network.refreshEndpoint()
     }
 
-    var cachedOverrideFakeIP: String? {
-        tunnelConfigCache?.getOverrideFakeIP()
+    var cachedOverridePeerIp: String? {
+        tunnelConfigCache?.getOverridePeerIp()
     }
     
     private init() {}
@@ -97,8 +97,8 @@ actor IfaceScanner {
     func refresh(quietScan: Bool = false) async -> Bool {
         let scannedInterfaces = Self.scan(quiet: quietScan)
         
-        let isDeviceIPInitialized = await DeviceEndpoint.shared.isInitialized
-        if refreshed && scannedInterfaces == interfacesCache && isDeviceIPInitialized {
+        let isTunnelPeerInitialized = await TunnelPeer.shared.isInitialized
+        if refreshed && scannedInterfaces == interfacesCache && isTunnelPeerInitialized {
             debugLog("[minimuxer] [iface] no interface changes detected, skipping scan refresh")
             return false
         }
@@ -108,11 +108,11 @@ actor IfaceScanner {
         refreshed = true
 
         let vpnIface = try? probableVPN()
-        tunnelConfigCache?.setDeviceIP(vpnIface?.hostIP)
+        tunnelConfigCache?.setTunnelIfaceIp(vpnIface?.hostIP)
         tunnelConfigCache?.setSubnetMask(vpnIface?.maskIP)
         let peerIP = await vpnIface?.peerIP
-        let isOverrideActive = peerIP != nil && peerIP == tunnelConfigCache?.getOverrideFakeIP()
-        tunnelConfigCache?.setFakeIP(peerIP)
+        let isOverrideActive = peerIP != nil && peerIP == tunnelConfigCache?.getOverridePeerIp()
+        tunnelConfigCache?.setTunnelPeerIp(peerIP)
         tunnelConfigCache?.setOverrideEffective(isOverrideActive)
         
         debugLog("""
@@ -121,7 +121,7 @@ actor IfaceScanner {
           • vpn host: \(vpnIface?.hostIP ?? "nil")
           • vpn mask: \(vpnIface?.maskIP ?? "nil")
           • vpn peer: \(peerIP ?? "nil")
-          • cachedOverrideFakeIP: \(tunnelConfigCache?.getOverrideFakeIP() ?? "nil")
+          • cachedOverridePeerIp: \(tunnelConfigCache?.getOverridePeerIp() ?? "nil")
           • overrideEffective: \(isOverrideActive)
           • refreshed: \(refreshed)
         """)
@@ -134,7 +134,7 @@ actor IfaceScanner {
 
     private func ensureReady() throws {
         guard refreshed else { 
-            throw MinimuxerInternalError.ifaceNotRefreshed 
+            throw MinimuxerInternalError.networkIfaceNotRefreshed 
         }
     }
 
@@ -181,13 +181,13 @@ actor IfaceScanner {
     }
     
     func getPeer(for iface: NetInfo) -> String? {
-        if let cachedDeviceIP = cachedOverrideFakeIP {
-            let reachable = Minimuxer.shared.testDeviceConnection(ifaddr: cachedDeviceIP)
+        if let cachedPeerIp = cachedOverridePeerIp {
+            let reachable = Minimuxer.shared.testDeviceConnection(ifaddr: cachedPeerIp)
             if reachable {
-                debugLog("[minimuxer] [iface] override peer reachable at: \(cachedDeviceIP)")
-                return cachedDeviceIP
+                debugLog("[minimuxer] [iface] override peer reachable at: \(cachedPeerIp)")
+                return cachedPeerIp
             } else {
-                debugLog("[minimuxer] [iface] override peer NOT reachable at: \(cachedDeviceIP)")
+                debugLog("[minimuxer] [iface] override peer NOT reachable at: \(cachedPeerIp)")
                 return nil
             }
         }

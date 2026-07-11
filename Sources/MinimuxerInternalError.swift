@@ -7,17 +7,16 @@
 //
 
 import Foundation
-// import RustBridge
 
 internal enum MinimuxerInternalError: Error, LocalizedError {
-    case deviceEndpointNotInitialized
-    case ifaceNotRefreshed
+    case tunnelPeerNotInitialized
+    case networkIfaceNotRefreshed
     case pairingFailed(String)
 
     var errorDescription: String? {
         switch self {
-        case .deviceEndpointNotInitialized: return "DeviceEndpointNotInitialized"
-        case .ifaceNotRefreshed: return "IfaceNotRefreshed"
+        case .tunnelPeerNotInitialized: return "TunnelPeerNotInitialized"
+        case .networkIfaceNotRefreshed: return "NetworkIfaceNotRefreshed"
         case .pairingFailed(let msg): return "PairingFailed(\(msg))"
         }
     }

@@ -61,26 +61,26 @@ final internal class NetworkObserverService: NetworkObserverAPI, @unchecked Send
     
     func refreshEndpoint() async {
         verboseLog("[minimuxer] [net] refreshing interfaces list and peers")
-        let changed = await IfaceScanner.shared.refresh()
+        let changed = await NetworkIfaceScanner.shared.refresh()
         guard changed else { return }
 
         verboseLog("[minimuxer] [net] retrive the first uTun vpn interface info")
-        if let info = try? await IfaceScanner.shared.probableVPN() {
+        if let info = try? await NetworkIfaceScanner.shared.probableVPN() {
             let peerIP = await info.peerIP
             verboseLog("[minimuxer] [net] vpn: \(info) peer: \(peerIP ?? "nil")")
 
             if let peer = peerIP {
-                verboseLog("[minimuxer] [net] update the device endpoint with discovered peer on the vpn interface")
-                await DeviceEndpoint.shared.update(peer)
-                MuxerService.notifyDeviceAttached(deviceIP: peer)
+                verboseLog("[minimuxer] [net] update tunnel peer IP with discovered peer on the vpn iface")
+                await TunnelPeer.shared.update(peer)
+                MuxerService.notifyDeviceAttached(tunnelPeerIp: peer)
             } else {
                 verboseLog("[minimuxer] [net] peer not available for \(info.name)")
-                await DeviceEndpoint.shared.clear()
+                await TunnelPeer.shared.clear()
                 MuxerService.notifyDeviceDetached()
             }
         } else {
             verboseLog("[minimuxer] [net] no SideVPN endpoint detected")
-            await DeviceEndpoint.shared.clear()
+            await TunnelPeer.shared.clear()
             MuxerService.notifyDeviceDetached()
         }
     }
@@ -115,7 +115,7 @@ final internal class NetworkObserverService: NetworkObserverAPI, @unchecked Send
     }
     
     var isUsbSatisfied: Bool {
-        return IfaceScanner.scan(quiet: true).contains { info in
+        return NetworkIfaceScanner.scan(quiet: true).contains { info in
             let name = info.name.lowercased()
             return name.hasPrefix("en") && name != "en0" && info.hostIP.hasPrefix("169.254.")
         }
@@ -127,7 +127,7 @@ final internal class NetworkObserverService: NetworkObserverAPI, @unchecked Send
             return true
         }
         
-        return IfaceScanner.scan(quiet: true).contains { info in
+        return NetworkIfaceScanner.scan(quiet: true).contains { info in
             info.name.lowercased().contains("bridge") ||
             info.name.lowercased().contains("ap")
         }
@@ -135,11 +135,11 @@ final internal class NetworkObserverService: NetworkObserverAPI, @unchecked Send
 
     // True when at least one `utun*` interface is active (userspace VPN — ex: wireguard).
     var isUTunAvailable: Bool {
-        return IfaceScanner.scan(quiet: true).contains { $0.name.hasPrefix("utun") }
+        return NetworkIfaceScanner.scan(quiet: true).contains { $0.name.hasPrefix("utun") }
     }
 
     // True when at least one `ipsec*` interface is active (IKEv2/IPSec kernel VPN).
     var isIKEv2IPSecAvailable: Bool {
-        return IfaceScanner.scan(quiet: true).contains { $0.name.hasPrefix("ipsec") }
+        return NetworkIfaceScanner.scan(quiet: true).contains { $0.name.hasPrefix("ipsec") }
     }
 }

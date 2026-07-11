@@ -1,5 +1,5 @@
 //
-//  DeviceEndpoint.swift
+//  TunnelPeer.swift
 //  Minimuxer
 //
 //  Original Rust Implementation by @jkcoxson
@@ -8,29 +8,29 @@
 
 import Foundation
 
-actor DeviceEndpoint {
+actor TunnelPeer {
 
-    static let shared = DeviceEndpoint()
+    static let shared = TunnelPeer()
 
     private var ipAddr: String? = nil
 
     private init() {}
 
     func ip() throws -> String {
-        guard let ip = ipAddr else { throw MinimuxerInternalError.deviceEndpointNotInitialized }
+        guard let ip = ipAddr else { throw MinimuxerInternalError.tunnelPeerNotInitialized }
         return ip
     }
 
     func update(_ newIP: String) {
         ipAddr = newIP
-        IdeviceGateway.shared.setDeviceIP(newIP)
-        verboseLog("[minimuxer] device endpoint updated -> \(newIP)")
+        IdeviceGateway.shared.setTunnelPeerIp(newIP)
+        verboseLog("[minimuxer] tunnel peer updated -> \(newIP)")
     }
 
     func clear() {
         ipAddr = nil
-        IdeviceGateway.shared.setDeviceIP(nil)
-        verboseLog("[minimuxer] device endpoint cleared -> nil")
+        IdeviceGateway.shared.setTunnelPeerIp(nil)
+        verboseLog("[minimuxer] tunnel peer cleared -> nil")
     }
 
     var isInitialized: Bool {

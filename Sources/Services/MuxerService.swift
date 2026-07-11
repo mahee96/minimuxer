@@ -17,15 +17,15 @@ final internal class MuxerService {
     private static var listenSocket: Int32 = -1
     
     // Stable device state
-    private static var currentDeviceIP: String?
+    private static var currentTunnelPeerIp: String?
     private static var currentEvent: String?
 
-    static func notifyDeviceAttached(deviceIP: String){
-        currentDeviceIP = deviceIP
+    static func notifyDeviceAttached(tunnelPeerIp: String){
+        currentTunnelPeerIp = tunnelPeerIp
         currentEvent = MinimuxerConstants.deviceAttach
     }
     static func notifyDeviceDetached(){
-        currentDeviceIP = nil
+        currentTunnelPeerIp = nil
         currentEvent = MinimuxerConstants.deviceDetach
     }
 
@@ -232,13 +232,13 @@ final internal class MuxerService {
         
         switch messageType {
             case "ListDevices":
-                guard let deviceIP = currentDeviceIP  else {
+                guard let tunnelIfaceIp = currentTunnelPeerIp  else {
                     return ["DeviceList": []]
                 }
                 guard let udid = deviceUDID else {
                     throw MinimuxerError.pairingFile(protocol: .lockdown, reason: "No device UDID available for ListDevices response")
                 }
-                let networkAddr = convertIp(deviceIP)
+                let networkAddr = convertIp(tunnelIfaceIp)
                 var payload: [String: Any] = [
                     "DeviceID": 0,                                                      // don't care
                     "Properties": [
@@ -246,7 +246,7 @@ final internal class MuxerService {
                         "DeviceID": 0,                                                  // fake device id
                         "EscapedFullServiceName": "\(udid)._apple-mobdev2._tcp.local",  // advert for mds discovery
                         "InterfaceIndex": 0,                                            // don't care
-                        "NetworkAddress": Data(networkAddr),                            // server host/interface address (ex: 10.7.0.1 ie remote)
+                        "NetworkAddress": Data(networkAddr),                            // Tunnel Peer IP where device's lockdownd is accepting requests on
                         "SerialNumber": udid                                            // device UDID
                     ]
                 ]

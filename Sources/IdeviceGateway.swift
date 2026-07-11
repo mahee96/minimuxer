@@ -169,6 +169,18 @@ internal final class IdeviceGateway {
         }
     }
 
+    private func invalidateConnection() {
+        debugLog("[IdeviceGateway] invalidateConnection() called - clearing stale adapter and handshake")
+        if let handshake = handshake {
+            rsd_handshake_free(handshake)
+            self.handshake = nil
+        }
+        if let adapter = adapter {
+            adapter_free(adapter)
+            self.adapter = nil
+        }
+    }
+
     func setTunnelPeerIp(_ ip: String?) {
         debugLog("[IdeviceGateway] setTunnelPeerIp(\(ip ?? "nil")) called")
         guard self.tunnelPeerIp != ip else {
@@ -362,6 +374,8 @@ internal final class IdeviceGateway {
             }
             debugLog("[IdeviceGateway] performWithService(\(serviceName)) connect failed with code: \(code), subCode: \(subCode), message: \(msg)")
             defer { idevice_error_free(err) }
+            
+            invalidateConnection()
             
             if isPairingError(err) {
                 let reason = "Service connection failed: \(msg.isEmpty ? "Unknown FFI error" : msg)"
@@ -646,6 +660,7 @@ internal final class IdeviceGateway {
             if let connectErr = connectErr {
                 debugLog("[IdeviceGateway] fetchUDID() lockdownd_connect_rsd failed")
                 idevice_error_free(connectErr)
+                invalidateConnection()
                 return nil
             }
             guard let client = lockdownClient else {

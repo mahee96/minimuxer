@@ -50,10 +50,11 @@ final internal class MinimuxerImpl: MinimuxerAPI {
             // check connection status first
             if !(Minimuxer.network.isWifiSatisfied  ||
                  Minimuxer.network.isWiredSatisfied ||
+                 Minimuxer.network.isUsbSatisfied   ||
                  Minimuxer.network.isBridgeSatisfied
             ){
                 debugLog("[minimuxer] minimuxer not ready: no network connection")
-                return .failure(.noConnection("No wifi, wired or bridge interface satisfied"))
+                return .failure(.noConnection("No wifi, wired, usb, or bridge interface satisfied"))
             }
 
             // check VPN Availability for all modes

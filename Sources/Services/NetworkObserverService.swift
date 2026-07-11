@@ -114,6 +114,13 @@ final internal class NetworkObserverService: NetworkObserverAPI, @unchecked Send
         return path.status == .satisfied && path.usesInterfaceType(.wiredEthernet)
     }
     
+    var isUsbSatisfied: Bool {
+        return IfaceScanner.scan(quiet: true).contains { info in
+            let name = info.name.lowercased()
+            return name.hasPrefix("en") && name != "en0" && info.hostIP.hasPrefix("169.254.")
+        }
+    }
+    
     var isBridgeSatisfied: Bool {
         let path = monitor.currentPath
         if path.status == .satisfied && path.usesInterfaceType(.other) {

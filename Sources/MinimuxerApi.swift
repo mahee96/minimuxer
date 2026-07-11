@@ -77,6 +77,7 @@ public enum Minimuxer {
 public protocol NetworkObserverAPI: AnyObject {
     var isWifiSatisfied: Bool { get }
     var isWiredSatisfied: Bool { get }
+    var isUsbSatisfied: Bool { get }
     var isBridgeSatisfied: Bool { get }
     var isUTunAvailable: Bool { get }
     var isIKEv2IPSecAvailable: Bool { get }

@@ -64,6 +64,13 @@ final internal class MinimuxerImpl: MinimuxerAPI {
                 return .failure(.noVPN("No utun interface detected — LocalDevVPN is not connected"))
             }
 
+            // check if pairing file is loaded
+            let pairingType = getPairingFileType()
+            if pairingType == .unknown {
+                debugLog("[minimuxer] minimuxer not ready: no valid pairing file loaded")
+                return .failure(.pairingFile(protocol: .lockdown, reason: "No valid pairing file has been loaded in Minimuxer"))
+            }
+
             // check iKEv2 too if in lockdown mode and ios >= 26.4
             if !isrppairing && !net.isIKEv2IPSecAvailable {
                 if #available(iOS 26.4, *) {

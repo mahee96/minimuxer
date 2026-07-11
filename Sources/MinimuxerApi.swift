@@ -17,21 +17,15 @@ public struct TunnelConfigBinding: Sendable {
     public let setTunnelIfaceIp: @Sendable (String?) -> Void
     public let setTunnelPeerIp: @Sendable (String?) -> Void
     public let setSubnetMask: @Sendable (String?) -> Void
-    public let getOverridePeerIp: @Sendable () -> String
-    public let setOverrideEffective: @Sendable (Bool) -> Void
 
     public init(
         setTunnelIfaceIp: @escaping @Sendable (String?) -> Void,
         setTunnelPeerIp: @escaping @Sendable (String?) -> Void,
-        setSubnetMask: @escaping @Sendable (String?) -> Void,
-        getOverridePeerIp: @escaping @Sendable () -> String,
-        setOverrideEffective: @escaping @Sendable (Bool) -> Void
+        setSubnetMask: @escaping @Sendable (String?) -> Void
     ) {
         self.setTunnelIfaceIp = setTunnelIfaceIp
         self.setTunnelPeerIp = setTunnelPeerIp
         self.setSubnetMask = setSubnetMask
-        self.getOverridePeerIp = getOverridePeerIp
-        self.setOverrideEffective = setOverrideEffective
     }
 }
 

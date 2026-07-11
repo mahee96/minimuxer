@@ -58,6 +58,10 @@ public protocol MinimuxerAPI: AnyObject {
     func installProvisioningProfile(profile: Data) async throws
     func removeProvisioningProfile(id: String) async throws
     func dumpProfiles(docsPath: String) async throws -> String
+
+    func afcListDirectory(bundleId: String, path: String) async throws -> [String]
+    func afcReadFile(bundleId: String, path: String) async throws -> Data
+    func afcGetFileInfo(bundleId: String, path: String) async throws -> (isDirectory: Bool, fileSize: Int64)
 }
 
 public enum Minimuxer {

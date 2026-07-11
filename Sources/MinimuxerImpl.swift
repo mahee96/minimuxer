@@ -399,6 +399,24 @@ final internal class MinimuxerImpl: MinimuxerAPI {
             try IdeviceGateway.shared.dumpProfiles(docsPath: docsPath)
         }
     }
+
+    func afcListDirectory(bundleId: String, path: String) async throws -> [String] {
+        try await matchingPriority {
+            try IdeviceGateway.shared.afcListDirectory(bundleId: bundleId, path: path)
+        }
+    }
+
+    func afcReadFile(bundleId: String, path: String) async throws -> Data {
+        try await matchingPriority {
+            try IdeviceGateway.shared.afcReadFile(bundleId: bundleId, path: path)
+        }
+    }
+
+    func afcGetFileInfo(bundleId: String, path: String) async throws -> (isDirectory: Bool, fileSize: Int64) {
+        try await matchingPriority {
+            try IdeviceGateway.shared.afcGetFileInfo(bundleId: bundleId, path: path)
+        }
+    }
 }
 
 private func getTag(level: String) -> String {

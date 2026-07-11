@@ -1842,4 +1842,141 @@ internal final class IdeviceGateway {
             hostAltIrkHex: altIrkHex
         )
     }
+
+    private func startHouseArrestAfc(bundleId: String) throws -> OpaquePointer {
+        debugLog("[IdeviceGateway] startHouseArrestAfc() called, bundleId: \(bundleId)")
+        try verifyInitialized()
+        
+        var afcHandle: OpaquePointer? = nil
+        try performWithEitherService(
+            connectRP: house_arrest_client_connect_rsd,
+            connectLockdown: house_arrest_client_connect,
+            cleanup: house_arrest_client_free,
+            serviceName: "house_arrest"
+        ) { client in
+            verboseLog("[IdeviceGateway] startHouseArrestAfc() calling house_arrest_vend_container")
+            let err = bundleId.withCString { bundleIdPtr in
+                house_arrest_vend_container(client, bundleIdPtr, &afcHandle)
+            }
+            if let err = err {
+                debugLog("[IdeviceGateway] startHouseArrestAfc() house_arrest_vend_container failed")
+                defer { idevice_error_free(err) }
+                throw IdeviceGatewayError.serviceError("Failed to vend container for \(bundleId)")
+            }
+            debugLog("[IdeviceGateway] startHouseArrestAfc() house_arrest_vend_container succeeded")
+        }
+        
+        guard let resultHandle = afcHandle else {
+            debugLog("[IdeviceGateway] startHouseArrestAfc() resulting AFC handle is nil")
+            throw IdeviceGatewayError.serviceError("AFC handle is nil after vend_container")
+        }
+        return resultHandle
+    }
+
+    private func afcListDirectory(client: OpaquePointer, path: String) throws -> [String] {
+        verboseLog("[IdeviceGateway] afcListDirectory() called, path: \(path)")
+        var entriesRaw: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>? = nil
+        var count: Int = 0
+        let err = path.withCString { pathPtr in
+            afc_list_directory(client, pathPtr, &entriesRaw, &count)
+        }
+        if let err = err {
+            debugLog("[IdeviceGateway] afcListDirectory() afc_list_directory failed for: \(path)")
+            defer { idevice_error_free(err) }
+            throw IdeviceGatewayError.serviceError("Failed to list directory: \(path)")
+        }
+        var items: [String] = []
+        if let entries = entriesRaw {
+            for i in 0..<count {
+                if let cStr = entries[i] {
+                    items.append(String(cString: cStr))
+                    idevice_string_free(cStr)
+                }
+            }
+            free(entries)
+        }
+        verboseLog("[IdeviceGateway] afcListDirectory() succeeded, count: \(items.count)")
+        return items
+    }
+
+    private func afcReadFile(client: OpaquePointer, path: String) throws -> Data {
+        debugLog("[IdeviceGateway] afcReadFile() called, path: \(path)")
+        var fileHandle: OpaquePointer? = nil
+        let openErr = path.withCString { pathPtr in
+            afc_file_open(client, pathPtr, AfcFopenMode(rawValue: 1), &fileHandle) // RdOnly mode
+        }
+        if let openErr = openErr {
+            debugLog("[IdeviceGateway] afcReadFile() afc_file_open failed for: \(path)")
+            defer { idevice_error_free(openErr) }
+            throw IdeviceGatewayError.serviceError("Failed to open file: \(path)")
+        }
+        defer {
+            verboseLog("[IdeviceGateway] afcReadFile() closing file handle")
+            _ = afc_file_close(fileHandle)
+        }
+        
+        var dataPtr: UnsafeMutablePointer<UInt8>? = nil
+        var length: Int = 0
+        let readErr = afc_file_read_entire(fileHandle, &dataPtr, &length)
+        if let readErr = readErr {
+            debugLog("[IdeviceGateway] afcReadFile() afc_file_read_entire failed")
+            defer { idevice_error_free(readErr) }
+            throw IdeviceGatewayError.serviceError("Failed to read file: \(path)")
+        }
+        
+        if let ptr = dataPtr {
+            let data = Data(bytes: ptr, count: length)
+            afc_file_read_data_free(ptr, length)
+            debugLog("[IdeviceGateway] afcReadFile() succeeded, read size: \(data.count) bytes")
+            return data
+        } else {
+            debugLog("[IdeviceGateway] afcReadFile() read completed with empty data")
+            return Data()
+        }
+    }
+
+    private func afcGetFileInfo(client: OpaquePointer, path: String) throws -> (isDirectory: Bool, fileSize: Int64) {
+        verboseLog("[IdeviceGateway] afcGetFileInfo() called, path: \(path)")
+        var info = AfcFileInfo()
+        let err = path.withCString { pathPtr in
+            afc_get_file_info(client, pathPtr, &info)
+        }
+        if let err = err {
+            debugLog("[IdeviceGateway] afcGetFileInfo() afc_get_file_info failed for: \(path)")
+            defer { idevice_error_free(err) }
+            throw IdeviceGatewayError.serviceError("Failed to get info for path: \(path)")
+        }
+        defer {
+            var mutableInfo = info
+            afc_file_info_free(&mutableInfo)
+        }
+        
+        let isDirectory = info.st_ifmt != nil && String(cString: info.st_ifmt).contains("S_IFDIR")
+        let size = Int64(info.size)
+        verboseLog("[IdeviceGateway] afcGetFileInfo() succeeded, isDirectory: \(isDirectory), size: \(size)")
+        return (isDirectory, size)
+    }
+
+    func afcListDirectory(bundleId: String, path: String) throws -> [String] {
+        let client = try startHouseArrestAfc(bundleId: bundleId)
+        defer { afcClientFree(client: client) }
+        return try afcListDirectory(client: client, path: path)
+    }
+
+    func afcReadFile(bundleId: String, path: String) throws -> Data {
+        let client = try startHouseArrestAfc(bundleId: bundleId)
+        defer { afcClientFree(client: client) }
+        return try afcReadFile(client: client, path: path)
+    }
+
+    func afcGetFileInfo(bundleId: String, path: String) throws -> (isDirectory: Bool, fileSize: Int64) {
+        let client = try startHouseArrestAfc(bundleId: bundleId)
+        defer { afcClientFree(client: client) }
+        return try afcGetFileInfo(client: client, path: path)
+    }
+
+    private func afcClientFree(client: OpaquePointer) {
+        debugLog("[IdeviceGateway] afcClientFree() freeing AFC client handle")
+        afc_client_free(client)
+    }
 }

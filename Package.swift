@@ -27,8 +27,8 @@ let package = Package(
 //        ),
         .binaryTarget(
             name: "IDevice",
-            url: "https://github.com/SideStore/idevice/releases/download/v0.1.64-ss-b1dac43/idevice-xcframework-v0.1.64-ss-b1dac43.zip",
-            checksum: "ee7cfc58aa64b97239fa9fdb57b1632a2f45725f7fa4187517184b32de43fb89"
+            url: "https://github.com/SideStore/idevice/releases/download/v0.1.64-ss-399cd94/idevice-xcframework-v0.1.64-ss-399cd94.zip",
+            checksum: "ead0d85c7c806831fe50d8c4ee1ccdbaba40cf8dfb39cc8d28a76e6095253134"
         ),
 //         .binaryTarget(
 //             name: "IDevice",

@@ -37,6 +37,7 @@ internal struct NetInfo: Hashable, CustomStringConvertible, Sendable {
     let name: String
     let hostIP: String
     let maskIP: String
+    let destinationIP: String?
 
     fileprivate let host: UInt32
     fileprivate let mask: UInt32
@@ -57,6 +58,18 @@ internal struct NetInfo: Hashable, CustomStringConvertible, Sendable {
         self.mask = maskU
         self.hostIP = hostStr
         self.maskIP = maskStr
+
+        let flags = Int32(ifa.ifa_flags)
+        if (flags & IFF_POINTOPOINT) != 0, let dstAddr = ifa.ifa_dstaddr {
+            var dst = dstAddr.pointee
+            if let dstHost = sockaddrIPv4(&dst) {
+                self.destinationIP = ipv4String(dstHost)
+            } else {
+                self.destinationIP = nil
+            }
+        } else {
+            self.destinationIP = nil
+        }
     }
     
     var peerIP: String? {
@@ -65,11 +78,36 @@ internal struct NetInfo: Hashable, CustomStringConvertible, Sendable {
         }
     }
 
+    var linkType: String {
+        maskIP == "255.255.255.255" ? "p2pLink" : "subnetLink"
+    }
+
+    var derivedPeer: String? {
+        guard let peer = destinationIP else { return nil }
+        if peer == hostIP {
+            let netBase = host & mask
+            let firstHost = netBase + 1
+            if firstHost != host {
+                return ipv4String(firstHost)
+            } else {
+                return ipv4String(netBase + 2)
+            }
+        }
+        return peer
+    }
+
     var networkBase: UInt32 { host & mask }
     var broadcast: UInt32 { networkBase | ~mask }
 
     var description: String {
-        "\(name) | ip=\(hostIP) mask=\(maskIP)"
+        var desc = "\(name) | ip: \(hostIP) mask: \(maskIP) linkType: \(linkType)"
+        if let rep = destinationIP {
+            desc += " reportedPeer: \(rep)"
+        }
+        if let der = derivedPeer {
+            desc += " derivedPeer: \(der)"
+        }
+        return desc
     }
     
 }
@@ -181,6 +219,16 @@ actor NetworkIfaceScanner {
     }
     
     func getPeer(for iface: NetInfo) -> String? {
+        if let autoPeerIp = iface.derivedPeer {
+            let reachable = Minimuxer.shared.testDeviceConnection(ifaddr: autoPeerIp)
+            if reachable {
+                debugLog("[minimuxer] [iface] auto-discovered peer reachable at: \(autoPeerIp)")
+                return autoPeerIp
+            } else {
+                debugLog("[minimuxer] [iface] auto-discovered peer NOT reachable at: \(autoPeerIp)")
+            }
+        }
+
         if let cachedPeerIp = cachedOverridePeerIp {
             let reachable = Minimuxer.shared.testDeviceConnection(ifaddr: cachedPeerIp)
             if reachable {
@@ -191,7 +239,7 @@ actor NetworkIfaceScanner {
                 return nil
             }
         }
-        debugLog("[minimuxer] [iface] no override peer configured")
+        debugLog("[minimuxer] [iface] no override peer configured and no reachable auto-discovered peer found")
         return nil
     }
 }

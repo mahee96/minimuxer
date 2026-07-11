@@ -192,10 +192,10 @@ internal final class IdeviceGateway {
 
     func setLogging(_ enabled: Bool) {
         debugLog("[IdeviceGateway] setLogging(\(enabled)) called")
-        #if DEBUG
-        idevice_init_logger(IdeviceLogLevel(rawValue: 4), IdeviceLogLevel(rawValue: 0), nil)
-        #else
         idevice_init_logger(enabled ? IdeviceLogLevel(rawValue: 1) : IdeviceLogLevel(rawValue: 0), IdeviceLogLevel(rawValue: 0), nil)
+        #if DEBUG
+        // just comment/uncomment to override above set logging level during local debugging
+//        idevice_init_logger(IdeviceLogLevel(rawValue: 4), IdeviceLogLevel(rawValue: 0), nil)
         #endif
     }
 

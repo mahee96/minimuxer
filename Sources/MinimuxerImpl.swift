@@ -222,8 +222,12 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         // start our fake usbmuxd server for lockdown protocol based clients if required
         try await restartMuxerServer()
         
-        try await matchingPriority{
-            try await Mounter.shared.mount(docsPath: mountPath)
+        do {
+            try await matchingPriority{
+                try await Mounter.shared.mount(docsPath: mountPath)
+            }
+        } catch {
+            debugLog("[minimuxer] WARN: Initial DDI mount skipped during startup: \(error.localizedDescription)")
         }
         // mark ready!
         try await state.with{
@@ -300,12 +304,10 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         }
     }
     
-    func testDeviceConnection(ifaddr: String?) -> Bool {
-        guard let ip = ifaddr else { return false }
-        
+    private func testTCPPort(ip: String, port: UInt16) -> Bool {
         var addr = sockaddr_in()
         addr.sin_family = sa_family_t(AF_INET)
-        addr.sin_port = isrppairing ? MinimuxerConstants.rsdPort.bigEndian : MinimuxerConstants.lockdowndPort.bigEndian
+        addr.sin_port = port.bigEndian
         inet_pton(AF_INET, ip, &addr.sin_addr)
 
         let fd = socket(AF_INET, SOCK_STREAM, 0)
@@ -324,6 +326,14 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         var pfd = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
         let result = poll(&pfd, 1, 100)
         return result > 0 && (pfd.revents & Int16(POLLOUT)) != 0
+    }
+
+    func testDeviceConnection(ifaddr: String?) -> Bool {
+        guard let ip = ifaddr else { return false }
+        if testTCPPort(ip: ip, port: MinimuxerConstants.rsdPort) {
+            return true
+        }
+        return testTCPPort(ip: ip, port: MinimuxerConstants.lockdowndPort)
     }
 
 
@@ -345,13 +355,28 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         }
     }
 
+    private func ensureDDIMounted() async throws {
+        let isMounted = (try? await IdeviceGateway.shared.isDDIMounted()) ?? false
+        if isMounted {
+            return
+        }
+        guard let mountPath = await state.lastDocsPath else {
+            let activeProtocol: PairingProtocol = isrppairing ? .rppairing : .lockdown
+            throw MinimuxerError.mount(protocol: activeProtocol, reason: "DDI mount path not set")
+        }
+        verboseLog("[minimuxer] DDI not mounted, mounting now before launching debug session...")
+        _ = try await Mounter.shared.mount(docsPath: mountPath)
+    }
+
     func debugApp(appId: String) async throws {
+        try await ensureDDIMounted()
         try await matchingPriority{
             try IdeviceGateway.shared.debugApp(appId: appId)
         }
     }
 
     func attachDebugger(pid: UInt32) async throws {
+        try await ensureDDIMounted()
         try await matchingPriority{
             try IdeviceGateway.shared.debugProcess(pid: pid)
         }

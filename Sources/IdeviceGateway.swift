@@ -234,8 +234,6 @@ internal final class IdeviceGateway {
                     }
                 }
             }
-            verboseLog("[IdeviceGateway] start() calling ensureRPConnection()")
-            try ensureRPConnection()
         } else {
             // Traditional usbmuxd / lockdown connection path
             // For pre-iOS 17 devices, a default connection can be established without RPPairing tunnel

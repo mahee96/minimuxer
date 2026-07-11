@@ -97,7 +97,8 @@ actor IfaceScanner {
     func refresh(quietScan: Bool = false) async -> Bool {
         let scannedInterfaces = Self.scan(quiet: quietScan)
         
-        if refreshed && scannedInterfaces == interfacesCache {
+        let isDeviceIPInitialized = await DeviceEndpoint.shared.isInitialized
+        if refreshed && scannedInterfaces == interfacesCache && isDeviceIPInitialized {
             debugLog("[minimuxer] [iface] no interface changes detected, skipping scan refresh")
             return false
         }

@@ -1851,7 +1851,7 @@ internal final class IdeviceGateway {
         try performWithEitherService(
             connectRP: house_arrest_client_connect_rsd,
             connectLockdown: house_arrest_client_connect,
-            cleanup: house_arrest_client_free,
+            cleanup: { _ in }, // no need to free, house_arrest takes ownership of the pointer
             serviceName: "house_arrest"
         ) { client in
             verboseLog("[IdeviceGateway] startHouseArrestAfc() calling house_arrest_vend_container")
@@ -1860,7 +1860,7 @@ internal final class IdeviceGateway {
             }
             if let err = err {
                 debugLog("[IdeviceGateway] startHouseArrestAfc() house_arrest_vend_container failed")
-                defer { idevice_error_free(err) }
+                defer { safeFreeError(err) }
                 throw IdeviceGatewayError.serviceError("Failed to vend container for \(bundleId)")
             }
             debugLog("[IdeviceGateway] startHouseArrestAfc() house_arrest_vend_container succeeded")
@@ -1882,7 +1882,7 @@ internal final class IdeviceGateway {
         }
         if let err = err {
             debugLog("[IdeviceGateway] afcListDirectory() afc_list_directory failed for: \(path)")
-            defer { idevice_error_free(err) }
+            defer { safeFreeError(err) }
             throw IdeviceGatewayError.serviceError("Failed to list directory: \(path)")
         }
         var items: [String] = []
@@ -1907,7 +1907,7 @@ internal final class IdeviceGateway {
         }
         if let openErr = openErr {
             debugLog("[IdeviceGateway] afcReadFile() afc_file_open failed for: \(path)")
-            defer { idevice_error_free(openErr) }
+            defer { safeFreeError(openErr) }
             throw IdeviceGatewayError.serviceError("Failed to open file: \(path)")
         }
         defer {
@@ -1920,7 +1920,7 @@ internal final class IdeviceGateway {
         let readErr = afc_file_read_entire(fileHandle, &dataPtr, &length)
         if let readErr = readErr {
             debugLog("[IdeviceGateway] afcReadFile() afc_file_read_entire failed")
-            defer { idevice_error_free(readErr) }
+            defer { safeFreeError(readErr) }
             throw IdeviceGatewayError.serviceError("Failed to read file: \(path)")
         }
         
@@ -1943,7 +1943,7 @@ internal final class IdeviceGateway {
         }
         if let err = err {
             debugLog("[IdeviceGateway] afcGetFileInfo() afc_get_file_info failed for: \(path)")
-            defer { idevice_error_free(err) }
+            defer { safeFreeError(err) }
             throw IdeviceGatewayError.serviceError("Failed to get info for path: \(path)")
         }
         defer {

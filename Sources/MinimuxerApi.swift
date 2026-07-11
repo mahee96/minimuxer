@@ -38,6 +38,8 @@ public struct TunnelConfigBinding: Sendable {
 public protocol MinimuxerAPI: AnyObject {
     var isrppairing: Bool { get }
     var isLoggingEnabled: Bool { get }
+    var isPairingFileLoaded: Bool { get }
+    func getPairingFileType() -> PairingProtocol
     
     var isReady: Result<Bool, MinimuxerError> { get async }
     func describeError(_ error: MinimuxerError) -> String

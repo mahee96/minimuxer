@@ -27,6 +27,14 @@ final internal class MinimuxerImpl: MinimuxerAPI {
     var isrppairing: Bool { IdeviceGateway.shared.isRPPairing }
     
     var isLoggingEnabled = true
+    
+    var isPairingFileLoaded: Bool {
+        return getPairingFileType() != .unknown
+    }
+    
+    func getPairingFileType() -> PairingProtocol {
+        return IdeviceGateway.shared.getPairingFileType()
+    }
 
 
     func describeError(_ error: MinimuxerError) -> String {

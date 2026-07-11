@@ -10,7 +10,7 @@ import Foundation
 import IDevice
 
 internal enum IdeviceGatewayError: LocalizedError {
-    case invalidPairingFile
+    case invalidPairingFile(reason: String)
     case connectionFailed(String)
     case serviceError(String)
     case noConnection
@@ -19,8 +19,8 @@ internal enum IdeviceGatewayError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .invalidPairingFile:
-            return "The pairing file is invalid or missing required keys."
+        case .invalidPairingFile(let reason):
+            return "The pairing file is invalid: \(reason)"
         case .connectionFailed(let reason):
             return "Failed to connect to device: \(reason)"
         case .serviceError(let reason):
@@ -78,8 +78,39 @@ internal final class IdeviceGateway {
     private var isInitialized = false
 
     private(set) var isRPPairing: Bool = false
-    private var activeProtocol: PairingProtocol {
-        isRPPairing ? .rppairing : .lockdown
+    private(set) var pairingFileType: PairingProtocol = .unknown
+    
+    func getPairingFileType() -> PairingProtocol {
+        return pairingFileType
+    }
+
+    static func validatePairingFile(from plist: [String: Any]?) -> Result<PairingProtocol, String> {
+        guard let plist = plist else {
+            return .failure("The file could not be parsed as a property list (plist).")
+        }
+        let requiredLockdownKeys = [
+            "WiFiMACAddress", "SystemBUID", "RootPrivateKey", "HostPrivateKey",
+            "HostID", "RootCertificate", "UDID", "EscrowBag", "HostCertificate",
+            "DeviceCertificate"
+        ]
+        let missingLockdownKeys = requiredLockdownKeys.filter { plist[$0] == nil }
+        if !missingLockdownKeys.isEmpty {
+            if missingLockdownKeys.count == requiredLockdownKeys.count {
+                return .failure("The file is not a valid device pairing plist (missing all required attributes).")
+            } else {
+                return .failure("The pairing file is incomplete. Missing attributes: \(missingLockdownKeys.joined(separator: ", ")).")
+            }
+        }
+        let requiredRPKeys = ["private_key", "public_key", "identifier"]
+        let presentRPKeys = requiredRPKeys.filter { plist[$0] != nil }
+        if presentRPKeys.isEmpty {
+            return .success(.lockdown)
+        } else if presentRPKeys.count == requiredRPKeys.count {
+            return .success(.rppairing)
+        } else {
+            let missingRPKeys = requiredRPKeys.filter { plist[$0] == nil }
+            return .failure("The file is an incomplete Remote Pairing file. Missing attributes: \(missingRPKeys.joined(separator: ", ")).")
+        }
     }
     private(set) var pairingFileData: Data? = nil{
         didSet {
@@ -117,6 +148,7 @@ internal final class IdeviceGateway {
         }
 
         isRPPairing = false
+        pairingFileType = .unknown
         lastError = nil
         if let handshake = handshake {
             verboseLog("[IdeviceGateway] cleanup() freeing handshake")
@@ -177,20 +209,18 @@ internal final class IdeviceGateway {
 
         guard let data = pairingFileContent.data(using: .utf8) else {
             debugLog("[IdeviceGateway] start() failed to decode pairingFileContent data as UTF-8")
-            throw IdeviceGatewayError.invalidPairingFile
+            throw IdeviceGatewayError.invalidPairingFile(reason: "UTF-8 encoding failed")
         }
-        self.pairingFileData = data
 
-        // Check if pairing file is RPPairing
-        if let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any] {
-            if plist["private_key"] != nil {
-                verboseLog("[IdeviceGateway] start() detected private_key, isRPPairing = true (mode = .rppairing)")
-                isRPPairing = true
-            } else {
-                verboseLog("[IdeviceGateway] start() plist did not contain private_key")
-            }
-        } else {
-            debugLog("[IdeviceGateway] start() failed to parse plist from pairingFileContent")
+        let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any]
+        switch Self.validatePairingFile(from: plist) {
+        case .success(let pairingType):
+            self.pairingFileData = data
+            self.pairingFileType = pairingType
+            isRPPairing = (pairingType == .rppairing)
+        case .failure(let reason):
+            debugLog("[IdeviceGateway] start() failed: \(reason)")
+            throw IdeviceGatewayError.invalidPairingFile(reason: reason)
         }
 
         if isRPPairing {
@@ -200,7 +230,7 @@ internal final class IdeviceGateway {
                     let err = rp_pairing_file_from_bytes(baseAddress, UInt(data.count), &pairingFile)
                     if err != nil {
                         debugLog("[IdeviceGateway] start() rp_pairing_file_from_bytes failed")
-                        throw IdeviceGatewayError.invalidPairingFile
+                        throw IdeviceGatewayError.invalidPairingFile(reason: "rp_pairing_file_from_bytes failed")
                     }
                 }
             }
@@ -219,7 +249,7 @@ internal final class IdeviceGateway {
                     let err = idevice_pairing_file_from_bytes(baseAddress, UInt(data.count), &pairingFile)
                     if err != nil {
                         debugLog("[IdeviceGateway] start() idevice_pairing_file_from_bytes failed")
-                        throw IdeviceGatewayError.invalidPairingFile
+                        throw IdeviceGatewayError.invalidPairingFile(reason: "idevice_pairing_file_from_bytes failed")
                     }
                     verboseLog("[IdeviceGateway] start() loaded lockdown pairingFile successfully")
                 }
@@ -237,7 +267,7 @@ internal final class IdeviceGateway {
 
         guard let pairingFile = pairingFile else {
             debugLog("[IdeviceGateway] ensureRPConnection() failed because pairingFile is nil")
-            throw IdeviceGatewayError.invalidPairingFile
+            throw IdeviceGatewayError.invalidPairingFile(reason: "pairingFile is nil")
         }
 
         guard let deviceIP = deviceIP else {
@@ -284,8 +314,10 @@ internal final class IdeviceGateway {
             defer { idevice_error_free(err) }
             
             if isPairingError(err) {
-                lastError = IdeviceGatewayError.invalidPairingFile
-                throw IdeviceGatewayError.invalidPairingFile
+                let reason = "Handshake failed: \(msg.isEmpty ? "Unknown FFI error" : msg)"
+                let error = IdeviceGatewayError.invalidPairingFile(reason: reason)
+                lastError = error
+                throw error
             } else {
                 let error = IdeviceGatewayError.connectionFailed(msg.isEmpty ? "Tunnel creation failed" : msg)
                 lastError = error
@@ -334,8 +366,10 @@ internal final class IdeviceGateway {
             defer { idevice_error_free(err) }
             
             if isPairingError(err) {
-                lastError = IdeviceGatewayError.invalidPairingFile
-                throw IdeviceGatewayError.invalidPairingFile
+                let reason = "Service connection failed: \(msg.isEmpty ? "Unknown FFI error" : msg)"
+                let error = IdeviceGatewayError.invalidPairingFile(reason: reason)
+                lastError = error
+                throw error
             } else {
                 let error = IdeviceGatewayError.serviceError("Failed to connect to \(serviceName): \(msg.isEmpty ? "Unknown FFI error" : msg)")
                 lastError = error
@@ -585,7 +619,7 @@ internal final class IdeviceGateway {
         serviceName: String,
         action: (OpaquePointer) throws -> T
     ) throws -> T {
-        debugLog("[IdeviceGateway] performWithEitherService(\(serviceName)) started, isRPPairing: \(isRPPairing) (mode = .\(activeProtocol))")
+        debugLog("[IdeviceGateway] performWithEitherService(\(serviceName)) started, isRPPairing: \(isRPPairing) (mode = .\(pairingFileType))")
         if isRPPairing {
             return try performWithService(connect: connectRP, cleanup: cleanup, serviceName: serviceName, action: action)
         } else {
@@ -594,7 +628,7 @@ internal final class IdeviceGateway {
     }
 
     func fetchUDID() throws -> String? {
-        debugLog("[IdeviceGateway] fetchUDID() started, isRPPairing: \(isRPPairing) (mode = .\(activeProtocol))")
+        debugLog("[IdeviceGateway] fetchUDID() started, isRPPairing: \(isRPPairing) (mode = .\(pairingFileType))")
         try verifyInitialized()
         if isRPPairing {
             do {

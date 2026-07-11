@@ -9,6 +9,7 @@
 public enum PairingProtocol: String, Codable, CustomStringConvertible, Sendable {
     case rppairing = "rppairing"
     case lockdown = "lockdown"
+    case unknown = "unknown"
     
     public var description: String {
         return self.rawValue

@@ -84,9 +84,9 @@ internal final class IdeviceGateway {
         return pairingFileType
     }
 
-    static func validatePairingFile(from plist: [String: Any]?) -> Result<PairingProtocol, String> {
+    static func validatePairingFile(from plist: [String: Any]?) throws -> PairingProtocol {
         guard let plist = plist else {
-            return .failure("The file could not be parsed as a property list (plist).")
+            throw IdeviceGatewayError.invalidPairingFile(reason: "The file could not be parsed as a property list (plist).")
         }
         let requiredLockdownKeys = [
             "WiFiMACAddress", "SystemBUID", "RootPrivateKey", "HostPrivateKey",
@@ -96,20 +96,20 @@ internal final class IdeviceGateway {
         let missingLockdownKeys = requiredLockdownKeys.filter { plist[$0] == nil }
         if !missingLockdownKeys.isEmpty {
             if missingLockdownKeys.count == requiredLockdownKeys.count {
-                return .failure("The file is not a valid device pairing plist (missing all required attributes).")
+                throw IdeviceGatewayError.invalidPairingFile(reason: "The file is not a valid device pairing plist (missing all required attributes).")
             } else {
-                return .failure("The pairing file is incomplete. Missing attributes: \(missingLockdownKeys.joined(separator: ", ")).")
+                throw IdeviceGatewayError.invalidPairingFile(reason: "The pairing file is incomplete. Missing attributes: \(missingLockdownKeys.joined(separator: ", ")).")
             }
         }
         let requiredRPKeys = ["private_key", "public_key", "identifier"]
         let presentRPKeys = requiredRPKeys.filter { plist[$0] != nil }
         if presentRPKeys.isEmpty {
-            return .success(.lockdown)
+            return .lockdown
         } else if presentRPKeys.count == requiredRPKeys.count {
-            return .success(.rppairing)
+            return .rppairing
         } else {
             let missingRPKeys = requiredRPKeys.filter { plist[$0] == nil }
-            return .failure("The file is an incomplete Remote Pairing file. Missing attributes: \(missingRPKeys.joined(separator: ", ")).")
+            throw IdeviceGatewayError.invalidPairingFile(reason: "The file is an incomplete Remote Pairing file. Missing attributes: \(missingRPKeys.joined(separator: ", ")).")
         }
     }
     private(set) var pairingFileData: Data? = nil{
@@ -213,14 +213,14 @@ internal final class IdeviceGateway {
         }
 
         let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any]
-        switch Self.validatePairingFile(from: plist) {
-        case .success(let pairingType):
+        do {
+            let pairingType = try Self.validatePairingFile(from: plist)
             self.pairingFileData = data
             self.pairingFileType = pairingType
             isRPPairing = (pairingType == .rppairing)
-        case .failure(let reason):
-            debugLog("[IdeviceGateway] start() failed: \(reason)")
-            throw IdeviceGatewayError.invalidPairingFile(reason: reason)
+        } catch {
+            debugLog("[IdeviceGateway] start() failed: \(error.localizedDescription)")
+            throw error
         }
 
         if isRPPairing {
@@ -712,7 +712,7 @@ internal final class IdeviceGateway {
     }
 
     func getLockdownValue(key: String) throws -> String? {
-        debugLog("[IdeviceGateway] getLockdownValue(key: \(key)) started, isRPPairing: \(isRPPairing) (mode = .\(activeProtocol))")
+        debugLog("[IdeviceGateway] getLockdownValue(key: \(key)) started, isRPPairing: \(isRPPairing) (mode = .\(pairingFileType))")
         try verifyInitialized()
 
         return try performWithEitherService(

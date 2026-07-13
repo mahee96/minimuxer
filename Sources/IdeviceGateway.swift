@@ -88,29 +88,26 @@ internal final class IdeviceGateway {
         guard let plist = plist else {
             throw IdeviceGatewayError.invalidPairingFile(reason: "The file could not be parsed as a property list (plist).")
         }
+
+        let requiredRPKeys = ["private_key", "public_key", "identifier"]
+        let missingRPKeys = requiredRPKeys.filter { plist[$0] == nil }
+        if missingRPKeys.isEmpty {
+            return .rppairing
+        }
+
         let requiredLockdownKeys = [
             "WiFiMACAddress", "SystemBUID", "RootPrivateKey", "HostPrivateKey",
             "HostID", "RootCertificate", "UDID", "EscrowBag", "HostCertificate",
             "DeviceCertificate"
         ]
         let missingLockdownKeys = requiredLockdownKeys.filter { plist[$0] == nil }
-        if !missingLockdownKeys.isEmpty {
-            if missingLockdownKeys.count == requiredLockdownKeys.count {
-                throw IdeviceGatewayError.invalidPairingFile(reason: "The file is not a valid device pairing plist (missing all required attributes).")
-            } else {
-                throw IdeviceGatewayError.invalidPairingFile(reason: "The pairing file is incomplete. Missing attributes: \(missingLockdownKeys.joined(separator: ", ")).")
-            }
-        }
-        let requiredRPKeys = ["private_key", "public_key", "identifier"]
-        let presentRPKeys = requiredRPKeys.filter { plist[$0] != nil }
-        if presentRPKeys.isEmpty {
+        if missingLockdownKeys.isEmpty {
             return .lockdown
-        } else if presentRPKeys.count == requiredRPKeys.count {
-            return .rppairing
-        } else {
-            let missingRPKeys = requiredRPKeys.filter { plist[$0] == nil }
-            throw IdeviceGatewayError.invalidPairingFile(reason: "The file is an incomplete Remote Pairing file. Missing attributes: \(missingRPKeys.joined(separator: ", ")).")
         }
+
+        throw IdeviceGatewayError.invalidPairingFile(
+            reason: "The pairing file is incomplete. Missing Remote Pairing attributes: \(missingRPKeys.joined(separator: ", ")); missing Lockdown attributes: \(missingLockdownKeys.joined(separator: ", "))."
+        )
     }
     private(set) var pairingFileData: Data? = nil{
         didSet {

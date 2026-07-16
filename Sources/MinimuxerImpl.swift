@@ -48,13 +48,13 @@ final internal class MinimuxerImpl: MinimuxerAPI {
     var isReady: Result<Bool, MinimuxerError> {
         get async {
             // check connection status first
-            if !(Minimuxer.network.isWifiSatisfied  ||
+            if !(Minimuxer.network.isWifiSatisfied /* ||
                  Minimuxer.network.isWiredSatisfied ||
                  Minimuxer.network.isUsbSatisfied   ||
-                 Minimuxer.network.isBridgeSatisfied
+                 Minimuxer.network.isBridgeSatisfied */
             ){
                 debugLog("[minimuxer] minimuxer not ready: no network connection")
-                return .failure(.noConnection("No wifi, wired, usb, or bridge interface satisfied"))
+                return .failure(.noConnection("No wifi interface satisfied"))
             }
 
             // check VPN Availability for all modes

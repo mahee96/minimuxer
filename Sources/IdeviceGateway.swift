@@ -54,6 +54,13 @@ internal final class IdeviceGateway {
         return nil
     }
 
+    private func getErrorMessage(from err: UnsafeMutablePointer<IdeviceFfiError>) -> String {
+        if let msgPtr = err.pointee.message {
+            return String(cString: msgPtr)
+        }
+        return "Error code \(err.pointee.code)"
+    }
+
     private func safeFreeError(_ err: UnsafeMutablePointer<IdeviceFfiError>?) {
         guard let err = err else { return }
         let addr = Int(bitPattern: err)
@@ -447,7 +454,7 @@ internal final class IdeviceGateway {
         }
 
         if let err = err {
-            let msg = err.pointee.message != nil ? String(cString: err.pointee.message!) : "No message"
+            let msg = self.getErrorMessage(from: err)
             debugLog("[IdeviceGateway] performWithUsbmuxdService(\(serviceName)) addr creation failed: code=\(err.pointee.code), message=\(msg)")
             defer { idevice_error_free(err) }
             throw IdeviceGatewayError.connectionFailed("Failed to get usbmuxd addr: \(msg)")
@@ -463,7 +470,7 @@ internal final class IdeviceGateway {
         var conn: OpaquePointer? = nil
         let connErr = idevice_usbmuxd_new_default_connection(0, &conn)
         if let connErr = connErr {
-            let msg = connErr.pointee.message != nil ? String(cString: connErr.pointee.message!) : "No message"
+            let msg = self.getErrorMessage(from: connErr)
             debugLog("[IdeviceGateway] performWithUsbmuxdService(\(serviceName)) new_default_connection failed: code=\(connErr.pointee.code), message=\(msg)")
             defer { idevice_error_free(connErr) }
             idevice_usbmuxd_addr_free(addr)
@@ -476,7 +483,7 @@ internal final class IdeviceGateway {
             var count: Int32 = 0
             let devErr = idevice_usbmuxd_get_devices(conn, &devices, &count)
             if let devErr = devErr {
-                let msg = devErr.pointee.message != nil ? String(cString: devErr.pointee.message!) : "No message"
+                let msg = self.getErrorMessage(from: devErr)
                 debugLog("[IdeviceGateway] performWithUsbmuxdService(\(serviceName)) get_devices failed: code=\(devErr.pointee.code), message=\(msg)")
                 defer { idevice_error_free(devErr) }
                 idevice_usbmuxd_addr_free(addr)
@@ -504,7 +511,7 @@ internal final class IdeviceGateway {
         }
         
         if let provErr = provErr {
-            let msg = provErr.pointee.message != nil ? String(cString: provErr.pointee.message!) : "No message"
+            let msg = self.getErrorMessage(from: provErr)
             debugLog("[IdeviceGateway] performWithUsbmuxdService(\(serviceName)) provider creation failed: code=\(provErr.pointee.code), message=\(msg)")
             defer { idevice_error_free(provErr) }
             throw IdeviceGatewayError.connectionFailed("Failed to create usbmuxd provider: \(msg)")
@@ -524,7 +531,7 @@ internal final class IdeviceGateway {
         let connectErr = connect(provider, &client)
         if let connectErr = connectErr {
             providerToFree = nil
-            let msg = connectErr.pointee.message != nil ? String(cString: connectErr.pointee.message!) : "No message"
+            let msg = self.getErrorMessage(from: connectErr)
             debugLog("[IdeviceGateway] performWithUsbmuxdService(\(serviceName)) connect failed: code=\(connectErr.pointee.code), message=\(msg)")
             defer { idevice_error_free(connectErr) }
             throw IdeviceGatewayError.serviceError("Failed to connect to \(serviceName): \(msg)")
@@ -572,7 +579,7 @@ internal final class IdeviceGateway {
             return idevice_pairing_file_from_bytes(buf.baseAddress?.assumingMemoryBound(to: UInt8.self), UInt(pairingFileData.count), &tempPairingFile)
         }
         if let parseErr = parseErr {
-            let msg = parseErr.pointee.message != nil ? String(cString: parseErr.pointee.message!) : "No message"
+            let msg = self.getErrorMessage(from: parseErr)
             debugLog("[IdeviceGateway] error: Failed to parse temporary pairing file: \(msg)")
             defer { safeFreeError(parseErr) }
             throw IdeviceGatewayError.connectionFailed("Failed to parse temporary pairing file: \(msg)")
@@ -588,7 +595,7 @@ internal final class IdeviceGateway {
             }
         }
         if let provErr = provErr {
-            let msg = provErr.pointee.message != nil ? String(cString: provErr.pointee.message!) : "No message"
+            let msg = self.getErrorMessage(from: provErr)
             debugLog("[IdeviceGateway] error: Failed to create TCP provider: \(msg)")
             defer { safeFreeError(provErr) }
             throw IdeviceGatewayError.connectionFailed("Failed to create TCP provider: \(msg)")
@@ -608,7 +615,7 @@ internal final class IdeviceGateway {
         let connectErr = connect(provider, &client)
         if let connectErr = connectErr {
             providerToFree = nil
-            let msg = connectErr.pointee.message != nil ? String(cString: connectErr.pointee.message!) : "No message"
+            let msg = self.getErrorMessage(from: connectErr)
             debugLog("[IdeviceGateway] error: \(serviceName) connect failed: code=\(connectErr.pointee.code), message=\(msg)")
             defer { safeFreeError(connectErr) }
             throw IdeviceGatewayError.serviceError("Failed to connect to \(serviceName): \(msg)")
@@ -688,7 +695,7 @@ internal final class IdeviceGateway {
             var conn: OpaquePointer? = nil
             let err = idevice_usbmuxd_new_default_connection(0, &conn)
             if let err = err {
-                let msg = err.pointee.message != nil ? String(cString: err.pointee.message!) : "No message"
+                let msg = self.getErrorMessage(from: err)
                 debugLog("[IdeviceGateway] fetchUDID new_default_connection failed: code=\(err.pointee.code), message=\(msg)")
                 idevice_error_free(err)
                 return nil
@@ -700,7 +707,7 @@ internal final class IdeviceGateway {
                 var count: Int32 = 0
                 let devErr = idevice_usbmuxd_get_devices(conn, &devices, &count)
                 if let devErr = devErr {
-                    let msg = devErr.pointee.message != nil ? String(cString: devErr.pointee.message!) : "No message"
+                    let msg = self.getErrorMessage(from: devErr)
                     debugLog("[IdeviceGateway] fetchUDID get_devices failed: code=\(devErr.pointee.code), message=\(msg)")
                     idevice_error_free(devErr)
                     return nil
@@ -766,7 +773,7 @@ internal final class IdeviceGateway {
                     verboseLog("[IdeviceGateway] installProvisioningProfile() calling misagent_install")
                     let installErr = misagent_install(client, baseAddress, profile.count)
                     if let installErr = installErr {
-                        let msg = installErr.pointee.message != nil ? String(cString: installErr.pointee.message!) : "No message"
+                        let msg = self.getErrorMessage(from: installErr)
                         debugLog("[IdeviceGateway] installProvisioningProfile() misagent_install failed: \(msg)")
                         defer { safeFreeError(installErr) }
                         throw IdeviceGatewayError.serviceError("Failed to install profile: \(msg)")
@@ -790,7 +797,7 @@ internal final class IdeviceGateway {
                 verboseLog("[IdeviceGateway] removeProvisioningProfile() calling misagent_remove")
                 let removeErr = misagent_remove(client, idPtr)
                 if let removeErr = removeErr {
-                    let msg = removeErr.pointee.message != nil ? String(cString: removeErr.pointee.message!) : "No message"
+                    let msg = self.getErrorMessage(from: removeErr)
                     debugLog("[IdeviceGateway] removeProvisioningProfile() misagent_remove failed: \(msg)")
                     defer { safeFreeError(removeErr) }
                     throw IdeviceGatewayError.serviceError("Failed to remove profile: \(msg)")
@@ -1350,7 +1357,7 @@ internal final class IdeviceGateway {
                             chipID
                         )
                         if let mountErr = mountErr {
-                            let msg = mountErr.pointee.message != nil ? String(cString: mountErr.pointee.message!) : "No message"
+                            let msg = self.getErrorMessage(from: mountErr)
                             debugLog("[IdeviceGateway] mountPersonalizedDdiRsd() mount failed: code=\(mountErr.pointee.code), message=\(msg)")
                             defer { idevice_error_free(mountErr) }
                             throw IdeviceGatewayError.serviceError("Failed to mount personalized DDI: \(msg)")
@@ -1385,7 +1392,7 @@ internal final class IdeviceGateway {
             return idevice_pairing_file_from_bytes(buf.baseAddress?.assumingMemoryBound(to: UInt8.self), UInt(pairingFileData.count), &tempPairingFile)
         }
         if let parseErr = parseErr {
-            let msg = parseErr.pointee.message != nil ? String(cString: parseErr.pointee.message!) : "No message"
+            let msg = self.getErrorMessage(from: parseErr)
             debugLog("[IdeviceGateway] error: Failed to parse temporary pairing file: \(msg)")
             defer { safeFreeError(parseErr) }
             throw IdeviceGatewayError.connectionFailed("Failed to parse temporary pairing file: \(msg)")
@@ -1518,7 +1525,7 @@ internal final class IdeviceGateway {
                         chipID
                     )
                     if let mountErr = mountErr {
-                        let msg = mountErr.pointee.message != nil ? String(cString: mountErr.pointee.message!) : "No message"
+                        let msg = self.getErrorMessage(from: mountErr)
                         debugLog("[IdeviceGateway] mountPersonalizedDdiIdevice() mount failed: code=\(mountErr.pointee.code), message=\(msg)")
                         defer { idevice_error_free(mountErr) }
                         throw IdeviceGatewayError.serviceError("Failed to mount personalized DDI: \(msg)")
@@ -1645,7 +1652,7 @@ internal final class IdeviceGateway {
                     nil
                 )
                 if let mountErr = mountErr {
-                    let msg = mountErr.pointee.message != nil ? String(cString: mountErr.pointee.message!) : "No message"
+                    let msg = self.getErrorMessage(from: mountErr)
                     debugLog("[IdeviceGateway] mountDeveloperImage() mount failed: code=\(mountErr.pointee.code), message=\(msg)")
                     defer { idevice_error_free(mountErr) }
                     throw IdeviceGatewayError.serviceError("Failed to mount developer image: \(msg)")
@@ -1856,9 +1863,10 @@ internal final class IdeviceGateway {
                 house_arrest_vend_container(client, bundleIdPtr, &afcHandle)
             }
             if let err = err {
-                debugLog("[IdeviceGateway] startHouseArrestAfc() house_arrest_vend_container failed")
+                let msg = self.getErrorMessage(from: err)
+                debugLog("[IdeviceGateway] startHouseArrestAfc() house_arrest_vend_container failed: \(msg)")
                 defer { safeFreeError(err) }
-                throw IdeviceGatewayError.serviceError("Failed to vend container for \(bundleId)")
+                throw IdeviceGatewayError.serviceError("Failed to vend container for \(bundleId): \(msg)")
             }
             debugLog("[IdeviceGateway] startHouseArrestAfc() house_arrest_vend_container succeeded")
         }

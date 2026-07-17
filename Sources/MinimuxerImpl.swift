@@ -355,6 +355,12 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         }
     }
 
+    func wipeContainer(identifier: String) async throws {
+        try await matchingPriority{
+            try IdeviceGateway.shared.wipeContainer(identifier: identifier)
+        }
+    }
+
     private func ensureDDIMounted() async throws {
         let isMounted = (try? await IdeviceGateway.shared.isDDIMounted()) ?? false
         if isMounted {

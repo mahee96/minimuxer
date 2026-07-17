@@ -1972,6 +1972,39 @@ internal final class IdeviceGateway {
         return try afcGetFileInfo(client: client, path: path)
     }
 
+        private func afcRemovePathRecursive(client: OpaquePointer, path: String) throws {
+        let (isDirectory, _) = try afcGetFileInfo(client: client, path: path)
+        if isDirectory {
+            let contents = try afcListDirectory(client: client, path: path)
+            for item in contents {
+                if item == "." || item == ".." { continue }
+                let itemPath = path == "/" ? "/\(item)" : "\(path)/\(item)"
+                try afcRemovePathRecursive(client: client, path: itemPath)
+            }
+        }
+        
+        let err = path.withCString { pathPtr in
+            afc_remove_path(client, pathPtr)
+        }
+        if let err = err {
+            verboseLog("[IdeviceGateway] afcRemovePathRecursive() afc_remove_path failed for: \(path)")
+            defer { safeFreeError(err) }
+        }
+    }
+
+    func wipeContainer(identifier: String) throws {
+        debugLog("[IdeviceGateway] wipeContainer() called, identifier: \(identifier)")
+        let client = try startHouseArrestAfc(bundleId: identifier)
+        defer { afcClientFree(client: client) }
+        
+        let contents = try afcListDirectory(client: client, path: "/")
+        for item in contents {
+            if item == "." || item == ".." { continue }
+            try afcRemovePathRecursive(client: client, path: "/\(item)")
+        }
+        debugLog("[IdeviceGateway] wipeContainer() completed, identifier: \(identifier)")
+    }
+
     private func afcClientFree(client: OpaquePointer) {
         debugLog("[IdeviceGateway] afcClientFree() freeing AFC client handle")
         afc_client_free(client)

@@ -53,6 +53,7 @@ public protocol MinimuxerAPI: AnyObject {
     func yeetAppAfc(bundleId: String, ipaBytes: Data) async throws
     func installIpa(bundleId: String) async throws
     func removeApp(bundleId: String) async throws
+    func wipeContainer(identifier: String) async throws
     func debugApp(appId: String) async throws
     func attachDebugger(pid: UInt32) async throws
     func installProvisioningProfile(profile: Data) async throws

@@ -693,7 +693,7 @@ internal final class IdeviceGateway {
                 
                 do {
                     try ensureRPConnection()
-                    guard let freshAdapter = adapter, let freshHandshake = handshake else { return nil }
+                    guard let freshAdapter = self.adapter, let freshHandshake = self.handshake else { return nil }
                     connectErr = lockdownd_connect_rsd(freshAdapter, freshHandshake, &lockdownClient)
                     if let secondErr = connectErr {
                         debugLog("[IdeviceGateway] fetchUDID() lockdownd_connect_rsd retry failed")

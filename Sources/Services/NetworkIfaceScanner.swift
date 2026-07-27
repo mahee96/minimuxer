@@ -168,7 +168,8 @@ actor NetworkIfaceScanner {
                 interfacesCache = Self.scan(quiet: quietScan)
                 vpnIface = probableVPN()
                 derivedPeerIp = vpnIface?.derivedPeer
-                overridePeerIp = connectionConfigCache?.getOverrideTunnelPeerIp()
+                let rawOverrideIp = connectionConfigCache?.getOverrideTunnelPeerIp()
+                overridePeerIp = (rawOverrideIp?.isEmpty ?? true) ? nil : rawOverrideIp
                 isDerivedPeerIpReachable = Minimuxer.shared.testDeviceConnection(ifaddr: derivedPeerIp)
                 isOverridePeerIpReachable = Minimuxer.shared.testDeviceConnection(ifaddr: overridePeerIp)
             
@@ -209,7 +210,8 @@ actor NetworkIfaceScanner {
 
 
             case .remoteServer:
-                let serverIp = connectionConfigCache?.getRemoteServerIp()
+                let rawServerIp = connectionConfigCache?.getRemoteServerIp()
+                let serverIp = (rawServerIp?.isEmpty ?? true) ? nil : rawServerIp
                 let reachable = Minimuxer.shared.testDeviceConnection(ifaddr: serverIp)
                 if self.lastConnectionMode == connectionMode && serverIp == remoteServerIp && reachable == isRemoteServerIpReachable {
                     debugLog("[minimuxer] [iface] no remote server state changes detected, skipping refresh")

@@ -95,31 +95,31 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         }
 
         // then check if device is ready
-        let tunnelPeerIp: String
+        let deviceIp: String
         do {
-            tunnelPeerIp = try await DeviceEndpoint.shared.ip()
+            deviceIp = try await DeviceEndpoint.shared.ip()
         } catch {
             switch connectionMode {
             case .localVPN:
                 debugLog("[minimuxer] minimuxer not ready: tunnel peer IP not available despite tunnel iface being present")
-                return .failure(.invalidVPN("VPN tunnel iface is up but tunnel peer IP is not yet reachable — VPN may not be routing device traffic correctly. Cause: \(error.localizedDescription)"))
+                return .failure(.noDevice("VPN tunnel iface is up but tunnel peer IP is not yet reachable — VPN may not be routing device traffic correctly. Cause: \(error.localizedDescription)"))
             case .remoteServer:
                 debugLog("[minimuxer] minimuxer not ready: remote endpoint IP is not configured or reachable")
-                return .failure(.noConnection("Remote endpoint IP is not configured or available. Cause: \(error.localizedDescription)"))
+                return .failure(.noDevice("Remote endpoint IP is not configured or reachable. Cause: \(error.localizedDescription)"))
             case .notConfigured:
                 return .failure(connectionNotConfiguredError())
             }
         }
         
-        let peerReachable = testDeviceConnection(ifaddr: tunnelPeerIp)
+        let peerReachable = testDeviceConnection(ifaddr: deviceIp)
         if !peerReachable {
             switch connectionMode {
             case .localVPN:
                 debugLog("[minimuxer] minimuxer not ready: failed to connect to tunnel peer IP")
-                return .failure(.invalidVPN("VPN tunnel iface is up and tunnel peer IP \(tunnelPeerIp) is known, but TCP port poll failed — device may be unreachable on this interface"))
+                return .failure(.invalidVPN("VPN tunnel iface is up and tunnel peer IP \(deviceIp) is known, but TCP port poll failed — device may be unreachable on this interface"))
             case .remoteServer:
-                debugLog("[minimuxer] minimuxer not ready: failed to connect to remote endpoint IP \(tunnelPeerIp)")
-                return .failure(.noConnection("Remote endpoint \(tunnelPeerIp) is configured, but TCP port poll failed — target device is unreachable"))
+                debugLog("[minimuxer] minimuxer not ready: failed to connect to remote endpoint IP \(deviceIp)")
+                return .failure(.notReachable("Remote endpoint \(deviceIp) is configured, but TCP port poll failed — target device is unreachable"))
             case .notConfigured:
                 return .failure(connectionNotConfiguredError())
             }

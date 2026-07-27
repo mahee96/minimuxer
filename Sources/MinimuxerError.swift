@@ -20,6 +20,7 @@ public struct MinimuxerServiceError: Error, CustomStringConvertible {
 public enum MinimuxerError: Error, Equatable, CustomStringConvertible, LocalizedError {
     case noDevice(String)
     case noConnection(String)
+    case notReachable(String)
     case noVPN(String)
     case connectionModeNotConfigured(String)
     case pairingFile(protocol: PairingProtocol, reason: String)
@@ -71,6 +72,7 @@ public enum MinimuxerError: Error, Equatable, CustomStringConvertible, Localized
         switch self {
         case .noDevice(let r): return "NoDevice: \(r)"
         case .noConnection(let r): return "NoConnection: \(r)"
+        case .notReachable(let r): return "NotReachable: \(r)"
         case .noVPN(let r): return "NoVPN: \(r)"
         case .pairingFile(let proto, let reason): return "PairingFile(protocol: \(proto), reason: \(reason))"
         case .restartAlreadyInProgressError(let r): return "RestartAlreadyInProgressError: \(r)"

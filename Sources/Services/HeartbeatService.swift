@@ -88,7 +88,7 @@ final internal class HeartbeatService {
         while await state.running {
             let tunnelPeerIp: String
             do {
-                tunnelPeerIp = try await TunnelPeer.shared.ip()
+                tunnelPeerIp = try await DeviceEndpoint.shared.ip()
             } catch {
                 logIfNeeded("tunnel peer IP unavailable", isVerbose: true)
                 lastBeatSuccessful = false

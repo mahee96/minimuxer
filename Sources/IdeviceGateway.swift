@@ -15,7 +15,7 @@ internal enum IdeviceGatewayError: LocalizedError {
     case serviceError(String)
     case noConnection
     case notInitialized
-    case tunnelPeerIpNotAvailable
+    case deviceEndpointIpNotAvailable
 
     var errorDescription: String? {
         switch self {
@@ -29,8 +29,8 @@ internal enum IdeviceGatewayError: LocalizedError {
             return "No connection to the device."
         case .notInitialized:
             return "IdeviceGateway not initialized. start() should be called first."
-        case .tunnelPeerIpNotAvailable:
-            return "Tunnel peer IP is not available."
+        case .deviceEndpointIpNotAvailable:
+            return "Device endpoint IP is not available."
         }
     }
 
@@ -81,7 +81,7 @@ internal final class IdeviceGateway {
     private var pairingFile: OpaquePointer? = nil
     private var adapter: OpaquePointer? = nil
     private var handshake: OpaquePointer? = nil
-    private var tunnelPeerIp: String? = nil
+    private var deviceEndpointIp: String? = nil
     private var isInitialized = false
 
     private(set) var isRPPairing: Bool = false
@@ -185,22 +185,22 @@ internal final class IdeviceGateway {
         }
     }
 
-    func setTunnelPeerIp(_ ip: String?) {
-        debugLog("[IdeviceGateway] setTunnelPeerIp(\(ip ?? "nil")) called")
-        guard self.tunnelPeerIp != ip else {
-            debugLog("[IdeviceGateway] setTunnelPeerIp: IP is already \(ip ?? "nil"), skipping invalidation")
+    func setDeviceEndpointIp(_ ip: String?) {
+        debugLog("[IdeviceGateway] setDeviceEndpointIp(\(ip ?? "nil")) called")
+        guard self.deviceEndpointIp != ip else {
+            debugLog("[IdeviceGateway] setDeviceEndpointIp: IP is already \(ip ?? "nil"), skipping invalidation")
             return
         }
-        self.tunnelPeerIp = ip
+        self.deviceEndpointIp = ip
         
         // Invalidate current cached connections
         if handshake != nil {
-            debugLog("[IdeviceGateway] setTunnelPeerIp invalidating handshake")
+            debugLog("[IdeviceGateway] setDeviceEndpointIp invalidating handshake")
             rsd_handshake_free(handshake)
             self.handshake = nil
         }
         if adapter != nil {
-            debugLog("[IdeviceGateway] setTunnelPeerIp invalidating adapter")
+            debugLog("[IdeviceGateway] setDeviceEndpointIp invalidating adapter")
             adapter_free(adapter)
             self.adapter = nil
         }
@@ -284,21 +284,21 @@ internal final class IdeviceGateway {
             throw IdeviceGatewayError.invalidPairingFile(reason: "pairingFile is nil")
         }
 
-        guard let tunnelPeerIp = tunnelPeerIp else {
-            debugLog("[IdeviceGateway] ensureRPConnection() failed because tunnelPeerIp is nil")
-            throw IdeviceGatewayError.tunnelPeerIpNotAvailable
+        guard let deviceEndpointIp = deviceEndpointIp else {
+            debugLog("[IdeviceGateway] ensureRPConnection() failed because deviceEndpointIp is nil")
+            throw IdeviceGatewayError.deviceEndpointIpNotAvailable
         }
 
         // Standard RPPairing socket address
         var addr = sockaddr_in()
         addr.sin_family = sa_family_t(AF_INET)
         addr.sin_port = MinimuxerConstants.rsdPort.bigEndian
-        addr.sin_addr.s_addr = inet_addr(tunnelPeerIp)
+        addr.sin_addr.s_addr = inet_addr(deviceEndpointIp)
 
         let hostname = MinimuxerConstants.appName
         var err: UnsafeMutablePointer<IdeviceFfiError>? = nil
 
-        verboseLog("[IdeviceGateway] ensureRPConnection() calling tunnel_create_rppairing with tunnelPeerIp: \(tunnelPeerIp)")
+        verboseLog("[IdeviceGateway] ensureRPConnection() calling tunnel_create_rppairing with deviceEndpointIp: \(deviceEndpointIp)")
         try hostname.withCString { hostPtr in
             withUnsafePointer(to: &addr) { addrPtr in
                 addrPtr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPtr in
@@ -556,15 +556,15 @@ internal final class IdeviceGateway {
     ) throws -> T {
         verboseLog("[IdeviceGateway] performWithTcpService(\(serviceName)) started")
         
-        guard let tunnelPeerIp = tunnelPeerIp else {
-            debugLog("[IdeviceGateway] performWithTcpService(\(serviceName)) failed because tunnelPeerIp is nil")
-            throw IdeviceGatewayError.tunnelPeerIpNotAvailable
+        guard let deviceEndpointIp = deviceEndpointIp else {
+            debugLog("[IdeviceGateway] performWithTcpService(\(serviceName)) failed because deviceEndpointIp is nil")
+            throw IdeviceGatewayError.deviceEndpointIpNotAvailable
         }
         
         var sockAddr = sockaddr_in()
         sockAddr.sin_family = sa_family_t(AF_INET)
         sockAddr.sin_port = MinimuxerConstants.lockdowndPort.bigEndian
-        sockAddr.sin_addr.s_addr = inet_addr(tunnelPeerIp)
+        sockAddr.sin_addr.s_addr = inet_addr(deviceEndpointIp)
         #if os(macOS) || os(iOS)
         sockAddr.sin_len = __uint8_t(MemoryLayout<sockaddr_in>.size)
         #endif
@@ -1372,15 +1372,15 @@ internal final class IdeviceGateway {
     private func mountPersonalizedDdiIdevice(image: Data, trustcache: Data, manifest: Data) throws {
         verboseLog("[IdeviceGateway] mountPersonalizedDdiIdevice() starting traditional/TCP provider mounting")
 
-        guard let tunnelPeerIp = tunnelPeerIp else {
-            debugLog("[IdeviceGateway] mountPersonalizedDdiIdevice() failed because tunnelPeerIp is nil")
-            throw IdeviceGatewayError.tunnelPeerIpNotAvailable
+        guard let deviceEndpointIp = deviceEndpointIp else {
+            debugLog("[IdeviceGateway] mountPersonalizedDdiIdevice() failed because deviceEndpointIp is nil")
+            throw IdeviceGatewayError.deviceEndpointIpNotAvailable
         }
 
         var sockAddr = sockaddr_in()
         sockAddr.sin_family = sa_family_t(AF_INET)
         sockAddr.sin_port = MinimuxerConstants.lockdowndPort.bigEndian
-        sockAddr.sin_addr.s_addr = inet_addr(tunnelPeerIp)
+        sockAddr.sin_addr.s_addr = inet_addr(deviceEndpointIp)
 
         guard let pairingFileData = self.pairingFileData else {
             debugLog("[IdeviceGateway] error: pairingFileData is nil")
@@ -1401,7 +1401,7 @@ internal final class IdeviceGateway {
             throw IdeviceGatewayError.connectionFailed("Temporary pairing file was nil")
         }
 
-        verboseLog("[IdeviceGateway] creating TCP provider to \(tunnelPeerIp):\(MinimuxerConstants.lockdowndPort)...")
+        verboseLog("[IdeviceGateway] creating TCP provider to \(deviceEndpointIp):\(MinimuxerConstants.lockdowndPort)...")
         var provider: OpaquePointer? = nil
         let provErr = withUnsafePointer(to: &sockAddr) { ptr in
             ptr.withMemoryRebound(to: idevice_sockaddr.self, capacity: 1) { reboundPtr in

@@ -9,13 +9,13 @@
 import Foundation
 
 internal enum MinimuxerInternalError: Error, LocalizedError {
-    case tunnelPeerNotInitialized
+    case deviceEndpointNotInitialized
     case networkIfaceNotRefreshed
     case pairingFailed(String)
 
     var errorDescription: String? {
         switch self {
-        case .tunnelPeerNotInitialized: return "TunnelPeerNotInitialized"
+        case .deviceEndpointNotInitialized: return "DeviceEndpointNotInitialized"
         case .networkIfaceNotRefreshed: return "NetworkIfaceNotRefreshed"
         case .pairingFailed(let msg): return "PairingFailed(\(msg))"
         }

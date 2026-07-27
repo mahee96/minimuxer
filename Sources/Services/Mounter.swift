@@ -33,8 +33,8 @@ final internal class Mounter {
 
         // Prerequisite: device must be reachable
         guard (try? await DeviceEndpoint.shared.ip()) != nil else {
-            debugLog("[minimuxer] mounter: tunnel peer IP not available")
-            throw MinimuxerError.noDevice("Reachable tunnel peer IP not found")
+            debugLog("[minimuxer] mounter: device IP not available")
+            throw MinimuxerError.noDevice("Reachable device IP not found")
         }
 
         let isDDIMounted = try runIdevice("isDDIMounted") {

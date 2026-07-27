@@ -41,107 +41,136 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         return error.description
     }
     
-    func bindTunnelConfig(_ binding: TunnelConfigBinding) async {
-        await NetworkIfaceScanner.shared.bindTunnelConfig(binding)
+    func getConnectionMode() async -> DeviceConnectionMode {
+        await NetworkIfaceScanner.shared.getPreferredConnectionMode()
     }
     
-    var isReady: Result<Bool, MinimuxerError> {
-        get async {
-            // check connection status first
-            if !(Minimuxer.network.isWifiSatisfied /* ||
-                 Minimuxer.network.isWiredSatisfied ||
-                 Minimuxer.network.isUsbSatisfied   ||
-                 Minimuxer.network.isBridgeSatisfied */
-            ){
-                debugLog("[minimuxer] minimuxer not ready: no network connection")
-                return .failure(.noConnection("No wifi interface satisfied"))
-            }
+    func bindConnectionConfig(_ binding: ConnectionConfigBinding) async {
+        await NetworkIfaceScanner.shared.bindConnectionConfig(binding)
+    }
+    
+    func isReady() async -> Result<Bool, MinimuxerError> {
+        // check connection status first
+        if !(Minimuxer.network.isWifiSatisfied /* ||
+                Minimuxer.network.isWiredSatisfied ||
+                Minimuxer.network.isUsbSatisfied   ||
+                Minimuxer.network.isBridgeSatisfied */
+        ){
+            debugLog("[minimuxer] minimuxer not ready: no network connection")
+            return .failure(.noConnection("No wifi interface satisfied"))
+        }
 
-            // check VPN Availability for all modes
-            let net = Minimuxer.network
-            let uTunPresent = net.isUTunAvailable
-            if !uTunPresent {
-                debugLog("[minimuxer] minimuxer not ready: no utun interface found")
-                return .failure(.noVPN("No utun interface detected — LocalDevVPN is not connected"))
-            }
+        // check connection mode
+        let connectionMode = await getConnectionMode()
+        let net = Minimuxer.network
 
-            // check if pairing file is loaded
-            let pairingType = getPairingFileType()
-            if pairingType == .unknown {
-                debugLog("[minimuxer] minimuxer not ready: no valid pairing file loaded")
-                return .failure(.pairingFile(protocol: .lockdown, reason: "No valid pairing file has been loaded in Minimuxer"))
-            }
-
-            // check iKEv2 too if in lockdown mode and ios >= 26.4
-            if !isrppairing && !net.isIKEv2IPSecAvailable {
-                if #available(iOS 26.4, *) {
-                    debugLog("[minimuxer] minimuxer not ready: no ipsec interface (required for lockdown on iOS 26.4+)")
-                    return .failure(.invalidVPN("utun is present but no ipsec/IKEv2 interface found — LocalDevVPN may not support the lockdown protocol on iOS 26.4+"))
-                }
-            }
-
-            // then check if device is ready
-            let tunnelPeerIp: String
-            do {
-                tunnelPeerIp = try await TunnelPeer.shared.ip()
-            } catch {
-                debugLog("[minimuxer] minimuxer not ready: tunnel peer IP not available despite tunnel iface being present")
-                return .failure(.invalidVPN("VPN tunnel iface is up but tunnel peer IP is not yet available — VPN may not be routing device traffic correctly. Cause: \(error.localizedDescription)"))
-            }
+        switch connectionMode {
+            case .notConfigured:
+                return .failure(connectionNotConfiguredError())
             
-            let peerReachable = testDeviceConnection(ifaddr: tunnelPeerIp)
-            if !peerReachable {
+            case .localVPN:
+                let uTunPresent = net.isUTunAvailable
+                if !uTunPresent {
+                    debugLog("[minimuxer] minimuxer not ready: no utun interface found")
+                    return .failure(.noVPN("No utun interface detected — LocalDevVPN is not connected"))
+                }
+
+                // check iKEv2 too if in lockdown mode and ios >= 26.4
+                if !isrppairing && !net.isIKEv2IPSecAvailable {
+                    if #available(iOS 26.4, *) {
+                        debugLog("[minimuxer] minimuxer not ready: no ipsec interface (required for lockdown on iOS 26.4+)")
+                        return .failure(.invalidVPN("utun is present but no ipsec/IKEv2 interface found — LocalDevVPN may not support the lockdown protocol on iOS 26.4+"))
+                    }
+                }
+
+            case .remoteServer:
+                break
+        }
+
+        // check if pairing file is loaded
+        let pairingType = getPairingFileType()
+        if pairingType == .unknown {
+            debugLog("[minimuxer] minimuxer not ready: no valid pairing file loaded")
+            return .failure(.pairingFile(protocol: .lockdown, reason: "No valid pairing file has been loaded in Minimuxer"))
+        }
+
+        // then check if device is ready
+        let tunnelPeerIp: String
+        do {
+            tunnelPeerIp = try await DeviceEndpoint.shared.ip()
+        } catch {
+            switch connectionMode {
+            case .localVPN:
+                debugLog("[minimuxer] minimuxer not ready: tunnel peer IP not available despite tunnel iface being present")
+                return .failure(.invalidVPN("VPN tunnel iface is up but tunnel peer IP is not yet reachable — VPN may not be routing device traffic correctly. Cause: \(error.localizedDescription)"))
+            case .remoteServer:
+                debugLog("[minimuxer] minimuxer not ready: remote endpoint IP is not configured or reachable")
+                return .failure(.noConnection("Remote endpoint IP is not configured or available. Cause: \(error.localizedDescription)"))
+            case .notConfigured:
+                return .failure(connectionNotConfiguredError())
+            }
+        }
+        
+        let peerReachable = testDeviceConnection(ifaddr: tunnelPeerIp)
+        if !peerReachable {
+            switch connectionMode {
+            case .localVPN:
                 debugLog("[minimuxer] minimuxer not ready: failed to connect to tunnel peer IP")
                 return .failure(.invalidVPN("VPN tunnel iface is up and tunnel peer IP \(tunnelPeerIp) is known, but TCP port poll failed — device may be unreachable on this interface"))
+            case .remoteServer:
+                debugLog("[minimuxer] minimuxer not ready: failed to connect to remote endpoint IP \(tunnelPeerIp)")
+                return .failure(.noConnection("Remote endpoint \(tunnelPeerIp) is configured, but TCP port poll failed — target device is unreachable"))
+            case .notConfigured:
+                return .failure(connectionNotConfiguredError())
             }
+        }
 
 
-            let activeProtocol: PairingProtocol = isrppairing ? .rppairing : .lockdown
+        let activeProtocol: PairingProtocol = isrppairing ? .rppairing : .lockdown
 
-            let ddiMounted: Bool
-            do {
-                ddiMounted = try await runIdeviceCheckingVPN("while checking DDI mount status", fallback: false) {
-                    try await isDDIMounted()
-                }
-            } catch let err as MinimuxerError {
-                return .failure(err)
+        let ddiMounted: Bool
+        do {
+            ddiMounted = try await runIdeviceCheckingVPN("while checking DDI mount status", fallback: false) {
+                try await isDDIMounted()
             }
+        } catch let err as MinimuxerError {
+            return .failure(err)
+        }
 
-            if isrppairing {
-                guard ddiMounted else {
-                    let msg = "dmg=\(ddiMounted) started=\(MuxerService.isListening)"
-                    verboseLog("minimuxer not ready (RSD): \(msg)")
-                    return .failure(.mount(protocol: activeProtocol, reason: msg))
-                }
-                return .success(true)
-            }
-
-            let deviceUDID: String?
-            do {
-                deviceUDID = try await runIdeviceCheckingVPN("while fetching device UDID", fallback: nil) {
-                    try await fetchUDID()
-                }
-            } catch let err as MinimuxerError {
-                return .failure(err)
-            }
-
-            verboseLog(
-                "minimuxer status (usbmuxd): " +
-                "deviceUDID=\(deviceUDID ?? "nil") " +
-                "dmg=\(ddiMounted) " +
-                "started=\(MuxerService.isListening) "
-            )
-            guard deviceUDID != nil else {
-                return .failure(.invalidPairing(protocol: activeProtocol, reason: "Lockdown UDID not found"))
-            }
+        if isrppairing {
             guard ddiMounted else {
-                return .failure(.mount(protocol: activeProtocol, reason: "DeveloperDiskImage is not mounted"))
-            }
-            guard MuxerService.isListening else {
-                return .failure(.muxerNotListening("Usbmuxd fake server is not listening"))
+                let msg = "dmg=\(ddiMounted) started=\(MuxerService.isListening)"
+                verboseLog("minimuxer not ready (RSD): \(msg)")
+                return .failure(.mount(protocol: activeProtocol, reason: msg))
             }
             return .success(true)
         }
+
+        let deviceUDID: String?
+        do {
+            deviceUDID = try await runIdeviceCheckingVPN("while fetching device UDID", fallback: nil) {
+                try await fetchUDID()
+            }
+        } catch let err as MinimuxerError {
+            return .failure(err)
+        }
+
+        verboseLog(
+            "minimuxer status (usbmuxd): " +
+            "deviceUDID=\(deviceUDID ?? "nil") " +
+            "dmg=\(ddiMounted) " +
+            "started=\(MuxerService.isListening) "
+        )
+        guard deviceUDID != nil else {
+            return .failure(.invalidPairing(protocol: activeProtocol, reason: "Lockdown UDID not found"))
+        }
+        guard ddiMounted else {
+            return .failure(.mount(protocol: activeProtocol, reason: "DeveloperDiskImage is not mounted"))
+        }
+        guard MuxerService.isListening else {
+            return .failure(.muxerNotListening("Usbmuxd fake server is not listening"))
+        }
+        return .success(true)
     } 
 
     @inline(__always)
@@ -206,10 +235,20 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         verboseLog("[minimuxer] getenv(USBMUXD_SOCKET_ADDRESS) = \(value)")
     }
     
+    private func connectionNotConfiguredError() -> MinimuxerError{
+        let modes: [DeviceConnectionMode] = [.localVPN, .remoteServer]
+        debugLog("[minimuxer] minimuxer not ready: connection mode not configured. Supported modes: \(modes)")
+        return MinimuxerError.connectionModeNotConfigured("Connection mode not configured. Supported modes: \(modes)")
+    }
+    
     
     func start(pairingFile: String, mountPath: String) async throws {
+        let connectionMode = await getConnectionMode()
+        if DeviceConnectionMode.notConfigured == connectionMode {
+            throw connectionNotConfiguredError()
+        }
         await Minimuxer.network.start()
-        
+
         // actor serialization scope
         try await state.with{
             $0.status = .inprogress     // mark inprogress
@@ -329,7 +368,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
     }
 
     func testDeviceConnection(ifaddr: String?) -> Bool {
-        guard let ip = ifaddr else { return false }
+        guard let ip = ifaddr, !ip.isEmpty else { return false }
         if testTCPPort(ip: ip, port: MinimuxerConstants.rsdPort) {
             return true
         }

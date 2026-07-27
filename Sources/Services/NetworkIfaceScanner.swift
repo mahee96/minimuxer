@@ -87,16 +87,6 @@ internal struct NetInfo: Hashable, CustomStringConvertible, Sendable {
         }
     }
 
-    var peerIP: String? {
-        // if let peer = reportedPeer, peer == hostIP {
-        //     return derivedPeer
-        // }
-        // return reportedPeer
-        get async {
-            await NetworkIfaceScanner.shared.getPeer(for: self)
-        }
-    }
-
     var linkType: String {
         maskIP == "255.255.255.255" ? "p2pLink" : "subnetLink"
     }
@@ -112,9 +102,6 @@ internal struct NetInfo: Hashable, CustomStringConvertible, Sendable {
         if let der = derivedPeer {
             desc += " derivedPeer: \(der)"
         }
-        // if let peer = peerIP {
-        //     desc += " peerIP: \(peer)"
-        // }
         return desc
     }
     
@@ -125,76 +112,140 @@ actor NetworkIfaceScanner {
     static let shared = NetworkIfaceScanner()
 
     private var interfacesCache: Set<NetInfo> = []
-    private var refreshed = false
-    private var tunnelConfigCache: TunnelConfigBinding?
+    private var connectionConfigCache: ConnectionConfigBinding?
+    private var lastConnectionMode: DeviceConnectionMode? = nil
+    
+    // local vpn params
+    var vpnIface: NetInfo?
+    var derivedPeerIp: String?
+    var isDerivedPeerIpReachable = false
+    var overridePeerIp: String?
+    var isOverridePeerIpReachable = false
 
-    func bindTunnelConfig(_ binding: TunnelConfigBinding) async {
-        tunnelConfigCache = binding
+    // remote server params
+    var remoteServerIp: String?
+    var isRemoteServerIpReachable = false
+    
+    private init() {}
+
+    func bindConnectionConfig(_ binding: ConnectionConfigBinding) async {
+        connectionConfigCache = binding
+        // ensure started if not started already
+        let connectionMode = binding.getConnectionMode()
+        verboseLog("""
+        [minimuxer] [iface] preferred connection mode set in binding
+          • mode: .\(connectionMode) 
+          • overrideTunnelPeerIp: \(binding.getOverrideTunnelPeerIp()) 
+          • remoteServerIp: \(binding.getRemoteServerIp()) 
+        
+        """)
         await Minimuxer.network.refreshEndpoint()
     }
-
-    var cachedOverridePeerIp: String? {
-        tunnelConfigCache?.getOverridePeerIp()
+    
+    func getPreferredConnectionMode() -> DeviceConnectionMode {
+        connectionConfigCache?.getConnectionMode() ?? .notConfigured
     }
-
-    private init() {}
 
     @discardableResult
     func refresh(quietScan: Bool = false) async -> Bool {
-        let scannedInterfaces = Self.scan(quiet: quietScan)
-        
-        let isTunnelPeerInitialized = await TunnelPeer.shared.isInitialized
-        if refreshed && scannedInterfaces == interfacesCache && isTunnelPeerInitialized {
-            debugLog("[minimuxer] [iface] no interface changes detected, skipping scan refresh")
-            return false
-        }
-        debugLog(formatNetInfoList(scannedInterfaces))
-        
-        interfacesCache = scannedInterfaces
-        refreshed = true
+        let connectionMode = getPreferredConnectionMode()
+        defer { lastConnectionMode = connectionMode }
 
-        let vpnIface = try? probableVPN()
-        tunnelConfigCache?.setTunnelIfaceIp(vpnIface?.hostIP)
-        tunnelConfigCache?.setSubnetMask(vpnIface?.maskIP)
-        // let peerIP = vpnIface?.peerIP
-        let peerIP = await vpnIface?.peerIP
-        let isOverrideActive = peerIP != nil && peerIP == tunnelConfigCache?.getOverridePeerIp()
-        tunnelConfigCache?.setTunnelPeerIp(peerIP)
-        tunnelConfigCache?.setOverrideEffective(isOverrideActive)
-        
-        debugLog("""
-        [minimuxer] [iface] rescan routes
-          • interfaces: \(interfacesCache.count)
-          • vpn host: \(vpnIface?.hostIP ?? "nil")
-          • vpn mask: \(vpnIface?.maskIP ?? "nil")
-          • vpn peer: \(peerIP ?? "nil")
-          • cachedOverridePeerIp: \(tunnelConfigCache?.getOverridePeerIp() ?? "nil")
-          • overrideEffective: \(isOverrideActive)
-          • refreshed: \(refreshed)
-        """)
+        switch connectionMode {
+            case .notConfigured:
+                debugLog("[minimuxer] [iface] connection mode not configured. skipping refresh...")
+                return false
+            
+            case .localVPN:
+                // cache last state in locals
+                let lastInterfaceCache = interfacesCache
+                let lastVpnIface = vpnIface
+                let lastDerivedPeer = derivedPeerIp
+                let lastOverrideIp = overridePeerIp
+                let lastIsDerivedPeerIpReachable = isDerivedPeerIpReachable
+                let lastIsOverridePeerIpReachable = isOverridePeerIpReachable
+                // set new states
+                interfacesCache = Self.scan(quiet: quietScan)
+                vpnIface = probableVPN()
+                derivedPeerIp = vpnIface?.derivedPeer
+                overridePeerIp = connectionConfigCache?.getOverrideTunnelPeerIp()
+                isDerivedPeerIpReachable = Minimuxer.shared.testDeviceConnection(ifaddr: derivedPeerIp)
+                isOverridePeerIpReachable = Minimuxer.shared.testDeviceConnection(ifaddr: overridePeerIp)
+            
+                let isOverrideIpUnchanged = lastOverrideIp == overridePeerIp
+                let isDerivedIpUnchanged = lastDerivedPeer == derivedPeerIp
+                if lastConnectionMode == connectionMode &&
+                    lastInterfaceCache == interfacesCache &&
+                    isOverrideIpUnchanged && isDerivedIpUnchanged &&
+                    lastIsDerivedPeerIpReachable == isDerivedPeerIpReachable &&
+                    lastIsOverridePeerIpReachable == isOverridePeerIpReachable
+                {
+                    debugLog("[minimuxer] [iface] no interface state changes detected, skipping refresh")
+                    return false
+                }
+                
+                // continue updating
+                debugLog("[minimuxer] [iface] using the first uTun vpn interface info")
+                // set states for this mode
+                // NOTE: we do not alter user configured remote override peer IP
+                connectionConfigCache?.setTunnelIfaceIp(vpnIface?.hostIP)
+                connectionConfigCache?.setTunnelIfaceSubnetMask(vpnIface?.maskIP)
+                connectionConfigCache?.setTunnelPeerIp(derivedPeerIp)
+                connectionConfigCache?.setOverrideTunnelPeerReachable(isOverridePeerIpReachable)
+                // clear auto discovered reachability state
+                connectionConfigCache?.setRemoteReachable(false)
+            
+                debugLog("""
+                [minimuxer] [iface] refresh - rescan routes
+                  • mode: .\(connectionMode)
+                  • local iface count: \(interfacesCache.count)
+                  • probable-vpn host: \(vpnIface?.hostIP ?? "nil")
+                  • probable-vpn mask: \(vpnIface?.maskIP ?? "nil")
+                  • probable-vpn derived peer IP: \(derivedPeerIp ?? "nil")
+                  • override peer IP: \(overridePeerIp ?? "nil")
+                  • override peer reachable: \(isOverridePeerIpReachable)
+                
+                """)
+
+
+            case .remoteServer:
+                let serverIp = connectionConfigCache?.getRemoteServerIp()
+                let reachable = Minimuxer.shared.testDeviceConnection(ifaddr: serverIp)
+                if self.lastConnectionMode == connectionMode && serverIp == remoteServerIp && reachable == isRemoteServerIpReachable {
+                    debugLog("[minimuxer] [iface] no remote server state changes detected, skipping refresh")
+                    return false
+                }
+                remoteServerIp = serverIp
+                isRemoteServerIpReachable = reachable
+                // set states for this mode
+                // NOTE: we do not alter user configured remote server IP
+                connectionConfigCache?.setRemoteReachable(reachable)
+                // clear auto discovered states but not explicit override!
+                connectionConfigCache?.setTunnelIfaceIp(nil)
+                connectionConfigCache?.setTunnelIfaceSubnetMask(nil)
+                connectionConfigCache?.setTunnelPeerIp(nil)
+                connectionConfigCache?.setOverrideTunnelPeerReachable(false)
+            
+                debugLog("""
+                [minimuxer] [iface] refresh
+                  • mode: .\(connectionMode)
+                  • remote server IP: \(remoteServerIp ?? "nil")
+                  • remote server reachable: \(isRemoteServerIpReachable)
+                
+                """)
+
+        }
         return true
     }
 
-    var interfaces: Set<NetInfo> {
-        interfacesCache
-    }
-
-    private func ensureReady() throws {
-        guard refreshed else { 
-            throw MinimuxerInternalError.networkIfaceNotRefreshed 
-        }
-    }
-
-    func probableVPN() throws -> NetInfo? {
-        try ensureReady()
+    private func probableVPN() -> NetInfo? {
         // TODO: @mahee96: we shouldn't return just the first coz user can have multiple uTUN lets revisit later to have a proper option
         return interfacesCache.first { $0.name.hasPrefix("utun") }
     }
 
-    func probableLAN() throws -> NetInfo? {
-         try ensureReady()
+    private func probableLAN() -> NetInfo? {
         return interfacesCache.first { $0.name.hasPrefix("en") }
-   }
+    }
 
     // MARK: scan
     static func scan(quiet: Bool = false) -> Set<NetInfo> {
@@ -226,32 +277,6 @@ actor NetworkIfaceScanner {
         }
         return result
     }
-
-    func getPeer(for iface: NetInfo) -> String? {
-        if let autoPeerIp = iface.derivedPeer {
-            let reachable = Minimuxer.shared.testDeviceConnection(ifaddr: autoPeerIp)
-            if reachable {
-                debugLog("[minimuxer] [iface] auto-discovered peer reachable at: \(autoPeerIp)")
-                return autoPeerIp
-            } else {
-                debugLog("[minimuxer] [iface] auto-discovered peer NOT reachable at: \(autoPeerIp)")
-            }
-        }
-
-        if let cachedPeerIp = cachedOverridePeerIp {
-            let reachable = Minimuxer.shared.testDeviceConnection(ifaddr: cachedPeerIp)
-            if reachable {
-                debugLog("[minimuxer] [iface] override peer reachable at: \(cachedPeerIp)")
-                return cachedPeerIp
-            } else {
-                debugLog("[minimuxer] [iface] override peer NOT reachable at: \(cachedPeerIp)")
-                return nil
-            }
-        }
-        debugLog("[minimuxer] [iface] no override peer configured and no reachable auto-discovered peer found")
-        return nil
-    }
-
 }
 
 // MARK: - Logging Helpers

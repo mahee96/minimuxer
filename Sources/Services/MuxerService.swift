@@ -17,15 +17,15 @@ final internal class MuxerService {
     private static var listenSocket: Int32 = -1
     
     // Stable device state
-    private static var currentTunnelPeerIp: String?
+    private static var currentDeviceIp: String?
     private static var currentEvent: String?
 
     static func notifyDeviceAttached(tunnelPeerIp: String){
-        currentTunnelPeerIp = tunnelPeerIp
+        currentDeviceIp = tunnelPeerIp
         currentEvent = MinimuxerConstants.deviceAttach
     }
     static func notifyDeviceDetached(){
-        currentTunnelPeerIp = nil
+        currentDeviceIp = nil
         currentEvent = MinimuxerConstants.deviceDetach
     }
 
@@ -232,7 +232,7 @@ final internal class MuxerService {
         
         switch messageType {
             case "ListDevices":
-                guard let tunnelIfaceIp = currentTunnelPeerIp  else {
+                guard let tunnelIfaceIp = currentDeviceIp  else {
                     return ["DeviceList": []]
                 }
                 guard let udid = deviceUDID else {
@@ -246,7 +246,7 @@ final internal class MuxerService {
                         "DeviceID": 0,                                                  // fake device id
                         "EscapedFullServiceName": "\(udid)._apple-mobdev2._tcp.local",  // advert for mds discovery
                         "InterfaceIndex": 0,                                            // don't care
-                        "NetworkAddress": Data(networkAddr),                            // Tunnel Peer IP where device's lockdownd is accepting requests on
+                        "NetworkAddress": Data(networkAddr),                            // remote IP where device's lockdownd is accepting requests on
                         "SerialNumber": udid                                            // device UDID
                     ]
                 ]

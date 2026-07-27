@@ -2,8 +2,7 @@
 //  NetworkObserverService.swift
 //  Minimuxer
 //
-//  Original Rust Implementation by @jkcoxson
-//  Swift Port created by Magesh K on 02/03/26.
+//  Created by Magesh K on 02/03/26.
 //
 
 import Network
@@ -64,35 +63,74 @@ final internal class NetworkObserverService: NetworkObserverAPI, @unchecked Send
         let changed = await NetworkIfaceScanner.shared.refresh()
         guard changed else { return }
 
-        verboseLog("[minimuxer] [net] retrive the first uTun vpn interface info")
-        if let info = try? await NetworkIfaceScanner.shared.probableVPN() {
-            // let peerIP = info.peerIP
-            let peerIP = await info.peerIP
-            verboseLog("""
-            [minimuxer] [net] vpn interface detected
-              • name: \(info.name)
-              • ip: \(info.hostIP)
-              • mask: \(info.maskIP)
-              • linkType: \(info.linkType)
-              • reportedPeer: \(info.reportedPeer ?? "nil")
-              • derivedPeer: \(info.derivedPeer ?? "nil")
-              • activePeer: \(peerIP ?? "nil")
-            """)
+        let connectionMode = await NetworkIfaceScanner.shared.getPreferredConnectionMode()
 
-            if let peer = peerIP {
-                verboseLog("[minimuxer] [net] update tunnel peer IP with discovered peer on the vpn iface")
-                await TunnelPeer.shared.update(peer)
-                MuxerService.notifyDeviceAttached(tunnelPeerIp: peer)
-            } else {
-                verboseLog("[minimuxer] [net] peer not available for \(info.name)")
-                await TunnelPeer.shared.clear()
-                MuxerService.notifyDeviceDetached()
+        switch connectionMode {
+            case .notConfigured:
+                debugLog("[minimuxer] [net] connection mode not configured. skipping refreshEndpoint...")
+                return
+                
+            case .localVPN:
+                verboseLog("[minimuxer] [net] retrive the first uTun vpn interface info")
+                if let info = await NetworkIfaceScanner.shared.vpnIface {
+                    verboseLog("""
+                    [minimuxer] [net] vpn interface detected
+                      • name: \(info.name)
+                      • ip: \(info.hostIP)
+                      • mask: \(info.maskIP)
+                      • linkType: \(info.linkType)
+                      • reportedPeer: \(info.reportedPeer ?? "nil")
+                      • derivedPeer: \(info.derivedPeer ?? "nil")
+                    
+                    """)
+
+                    let scanner = await NetworkIfaceScanner.shared
+                    let overrideIp = await scanner.overridePeerIp
+                    let isOverridden = !(overrideIp ?? "").isEmpty
+
+                    let effectiveIp = await isOverridden
+                            ? (scanner.isOverridePeerIpReachable ? overrideIp : nil)            // when override active, we don't question user intent
+                            : (scanner.isDerivedPeerIpReachable ? scanner.derivedPeerIp : nil)  // only if not overriden, we try to use auto discovered
+                    let effectivePeer = isOverridden ? "overridePeer" : "derivedPeerIp"
+
+                    if let peer = effectiveIp {
+                        verboseLog("[minimuxer] [net] update device IP with effective tunnel peer: '\(effectivePeer)'")
+                        await DeviceEndpoint.shared.update(peer)
+                        MuxerService.notifyDeviceAttached(tunnelPeerIp: peer)
+                    } else {
+                        verboseLog("[minimuxer] [net] peer not available for \(info.name)")
+                        await DeviceEndpoint.shared.clear()
+                        MuxerService.notifyDeviceDetached()
+                    }
+
+                } else {
+                    verboseLog("[minimuxer] [net] no local VPN interface detected")
+                    await DeviceEndpoint.shared.clear()
+                    MuxerService.notifyDeviceDetached()
+                }
+            
+            case .remoteServer:
+                let scanner = await NetworkIfaceScanner.shared
+                let isReachable = await scanner.isRemoteServerIpReachable
+                if let remoteIp = await scanner.remoteServerIp  {
+                    verboseLog("""
+                    [minimuxer] [net] remote server endpoint detected \(isReachable ? "and reachable" : "but unreachable")
+                      • remoteServerIp: \(remoteIp)
+                    
+                    """)
+                    if isReachable {
+                        await DeviceEndpoint.shared.update(remoteIp)
+                        MuxerService.notifyDeviceAttached(tunnelPeerIp: remoteIp)
+                    } else {
+                        await DeviceEndpoint.shared.clear()
+                        MuxerService.notifyDeviceDetached()
+                    }
+                } else {
+                    verboseLog("[minimuxer] [net] remote server endpoint unreachable")
+                    await DeviceEndpoint.shared.clear()
+                    MuxerService.notifyDeviceDetached()
+                }
             }
-        } else {
-            verboseLog("[minimuxer] [net] no SideVPN endpoint detected")
-            await TunnelPeer.shared.clear()
-            MuxerService.notifyDeviceDetached()
-        }
     }
     
     @discardableResult

@@ -90,7 +90,7 @@ final internal class HeartbeatService {
             do {
                 tunnelPeerIp = try await DeviceEndpoint.shared.ip()
             } catch {
-                logIfNeeded("tunnel peer IP unavailable", isVerbose: true)
+                logIfNeeded("device IP unavailable", isVerbose: true)
                 lastBeatSuccessful = false
                 try? await Task.sleep(nanoseconds: MinimuxerConstants.heartbeatSleepNs)
                 continue
@@ -98,7 +98,7 @@ final internal class HeartbeatService {
             
             // verify tunnel/device reachability first
             if !Minimuxer.shared.testDeviceConnection(ifaddr: tunnelPeerIp) {
-                logIfNeeded("tunnel peer IP not reachable, waiting...", isVerbose: true)
+                logIfNeeded("device IP not reachable, waiting...", isVerbose: true)
                 lastBeatSuccessful = false
                 try? await Task.sleep(nanoseconds: MinimuxerConstants.heartbeatSleepNs)
                 continue

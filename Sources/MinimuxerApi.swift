@@ -13,25 +13,42 @@ public enum MinimuxerComponent: String {
     case mounter
 }
 
-public struct TunnelConfigBinding: Sendable {
+public enum DeviceConnectionMode: String, Codable, Sendable {
+    case localVPN      // On-device loopback VPN
+    case remoteServer  // Remote server endpoint ex: externalServer on VPN, on LAN, on router, etc
+    // invalid state
+    case notConfigured
+}
+
+public struct ConnectionConfigBinding: Sendable {
     public let setTunnelIfaceIp: @Sendable (String?) -> Void
     public let setTunnelPeerIp: @Sendable (String?) -> Void
-    public let setSubnetMask: @Sendable (String?) -> Void
-    public let getOverridePeerIp: @Sendable () -> String
-    public let setOverrideEffective: @Sendable (Bool) -> Void
+    public let setTunnelIfaceSubnetMask: @Sendable (String?) -> Void
+    public let setRemoteReachable: @Sendable (Bool) -> Void
+    public let setOverrideTunnelPeerReachable: @Sendable (Bool) -> Void
+
+    public let getConnectionMode: @Sendable () -> DeviceConnectionMode
+    public let getOverrideTunnelPeerIp: @Sendable () -> String
+    public let getRemoteServerIp: @Sendable () -> String
 
     public init(
         setTunnelIfaceIp: @escaping @Sendable (String?) -> Void,
         setTunnelPeerIp: @escaping @Sendable (String?) -> Void,
-        setSubnetMask: @escaping @Sendable (String?) -> Void,
-        getOverridePeerIp: @escaping @Sendable () -> String,
-        setOverrideEffective: @escaping @Sendable (Bool) -> Void
+        setTunnelIfaceSubnetMask: @escaping @Sendable (String?) -> Void,
+        getRemoteServerIp: @escaping @Sendable () -> String,
+        setRemoteReachable: @escaping @Sendable (Bool) -> Void,
+        getOverrideTunnelPeerIp: @escaping @Sendable () -> String,
+        setOverrideTunnelPeerReachable: @escaping @Sendable (Bool) -> Void,
+        getConnectionMode: @escaping @Sendable () -> DeviceConnectionMode
     ) {
         self.setTunnelIfaceIp = setTunnelIfaceIp
         self.setTunnelPeerIp = setTunnelPeerIp
-        self.setSubnetMask = setSubnetMask
-        self.getOverridePeerIp = getOverridePeerIp
-        self.setOverrideEffective = setOverrideEffective
+        self.setTunnelIfaceSubnetMask = setTunnelIfaceSubnetMask
+        self.getRemoteServerIp = getRemoteServerIp
+        self.setRemoteReachable = setRemoteReachable
+        self.getOverrideTunnelPeerIp = getOverrideTunnelPeerIp
+        self.setOverrideTunnelPeerReachable = setOverrideTunnelPeerReachable
+        self.getConnectionMode = getConnectionMode
     }
 }
 
@@ -41,9 +58,10 @@ public protocol MinimuxerAPI: AnyObject {
     var isPairingFileLoaded: Bool { get }
     func getPairingFileType() -> PairingProtocol
     
-    var isReady: Result<Bool, MinimuxerError> { get async }
+    func getConnectionMode() async -> DeviceConnectionMode
+    func isReady() async -> Result<Bool, MinimuxerError>
     func describeError(_ error: MinimuxerError) -> String
-    func bindTunnelConfig(_ binding: TunnelConfigBinding) async
+    func bindConnectionConfig(_ binding: ConnectionConfigBinding) async
     func setLogging(_ enabled: Bool)
 
     func start(pairingFile: String, mountPath: String) async throws

@@ -21,6 +21,7 @@ public enum MinimuxerError: Error, Equatable, CustomStringConvertible, Localized
     case noDevice(String)
     case noConnection(String)
     case noVPN(String)
+    case connectionModeNotConfigured(String)
     case pairingFile(protocol: PairingProtocol, reason: String)
     case restartAlreadyInProgressError(String)
     case invalidVPN(String)
@@ -110,6 +111,7 @@ public enum MinimuxerError: Error, Equatable, CustomStringConvertible, Localized
         case .imageLookup(let r): return "ImageLookup: \(r)"
         case .imageRead(let r): return "ImageRead: \(r)"
         case .mount(let proto, let reason): return "Mount(protocol: \(proto), reason: \(reason))"
+        case .connectionModeNotConfigured(let r): return "ConnectionModeNotConfigured: \(r)"
         }
     }
 

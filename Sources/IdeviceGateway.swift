@@ -367,9 +367,9 @@ internal final class IdeviceGateway {
         debugLog("[IdeviceGateway] performWithService(\(serviceName)) started")
         try ensureRPConnection()
         var client: OpaquePointer? = nil
-        let err = connect(adapter, handshake, &client)
-        if let err = err {
-            let ffiErr = err.pointee
+        var err = connect(adapter, handshake, &client)
+        if let firstErr = err {
+            let ffiErr = firstErr.pointee
             let code = ffiErr.code
             let subCode = ffiErr.sub_code
             var msg = ""
@@ -377,19 +377,44 @@ internal final class IdeviceGateway {
                 msg = String(cString: msgPtr)
             }
             debugLog("[IdeviceGateway] performWithService(\(serviceName)) connect failed with code: \(code), subCode: \(subCode), message: \(msg)")
-            defer { idevice_error_free(err) }
+            idevice_error_free(firstErr)
             
             invalidateConnection()
             
-            if isPairingError(err) {
-                let reason = "Service connection failed: \(msg.isEmpty ? "Unknown FFI error" : msg)"
-                let error = IdeviceGatewayError.invalidPairingFile(reason: reason)
-                lastError = error
-                throw error
-            } else {
-                let error = IdeviceGatewayError.serviceError("Failed to connect to \(serviceName): \(msg.isEmpty ? "Unknown FFI error" : msg)")
-                lastError = error
-                throw error
+            // Retry once with a fresh connection tunnel
+            debugLog("[IdeviceGateway] performWithService(\(serviceName)) retrying with fresh connection...")
+            do {
+                try ensureRPConnection()
+                err = connect(adapter, handshake, &client)
+            } catch {
+                let reason = "Service connection retry failed: \(error.localizedDescription)"
+                let errObj = IdeviceGatewayError.serviceError(reason)
+                lastError = errObj
+                throw errObj
+            }
+            
+            if let secondErr = err {
+                let ffiErr = secondErr.pointee
+                let code = ffiErr.code
+                let subCode = ffiErr.sub_code
+                var retryMsg = ""
+                if let msgPtr = ffiErr.message {
+                    retryMsg = String(cString: msgPtr)
+                }
+                debugLog("[IdeviceGateway] performWithService(\(serviceName)) retry connect failed with code: \(code), subCode: \(subCode), message: \(retryMsg)")
+                defer { idevice_error_free(secondErr) }
+                invalidateConnection()
+                
+                if isPairingError(secondErr) {
+                    let reason = "Service connection failed: \(retryMsg.isEmpty ? "Unknown FFI error" : retryMsg)"
+                    let error = IdeviceGatewayError.invalidPairingFile(reason: reason)
+                    lastError = error
+                    throw error
+                } else {
+                    let error = IdeviceGatewayError.serviceError("Failed to connect to \(serviceName): \(retryMsg.isEmpty ? "Unknown FFI error" : retryMsg)")
+                    lastError = error
+                    throw error
+                }
             }
         }
         guard let client = client else {
@@ -660,12 +685,26 @@ internal final class IdeviceGateway {
             }
             var lockdownClient: OpaquePointer? = nil
             verboseLog("[IdeviceGateway] fetchUDID() connecting lockdownd_connect_rsd")
-            let connectErr = lockdownd_connect_rsd(adapter, handshake, &lockdownClient)
-            if let connectErr = connectErr {
-                debugLog("[IdeviceGateway] fetchUDID() lockdownd_connect_rsd failed")
-                idevice_error_free(connectErr)
+            var connectErr = lockdownd_connect_rsd(adapter, handshake, &lockdownClient)
+            if let firstErr = connectErr {
+                debugLog("[IdeviceGateway] fetchUDID() lockdownd_connect_rsd failed on existing connection, invalidating and retrying with fresh connection")
+                idevice_error_free(firstErr)
                 invalidateConnection()
-                return nil
+                
+                do {
+                    try ensureRPConnection()
+                    guard let freshAdapter = adapter, let freshHandshake = handshake else { return nil }
+                    connectErr = lockdownd_connect_rsd(freshAdapter, freshHandshake, &lockdownClient)
+                    if let secondErr = connectErr {
+                        debugLog("[IdeviceGateway] fetchUDID() lockdownd_connect_rsd retry failed")
+                        idevice_error_free(secondErr)
+                        invalidateConnection()
+                        return nil
+                    }
+                } catch {
+                    debugLog("[IdeviceGateway] fetchUDID() retry ensureRPConnection failed with error: \(error)")
+                    return nil
+                }
             }
             guard let client = lockdownClient else {
                 debugLog("[IdeviceGateway] fetchUDID() lockdownClient is nil after connect")

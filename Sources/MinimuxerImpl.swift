@@ -59,7 +59,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         let currentStatus = await state.with { $0.status }
         if currentStatus != .started {
             debugLog("[minimuxer] minimuxer not ready: minimuxer has not been started")
-            return .failure(.notStarted("Minimuxer has not been started yet."))
+            return .failure(.notStarted("Minimuxer has not been started"))
         }
 
         // check connection status first

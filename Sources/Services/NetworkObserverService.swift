@@ -50,7 +50,6 @@ final internal class NetworkObserverService: NetworkObserverAPI, @unchecked Send
         let task = Task.detached { [weak self] in
             for await path in paths {
                 verboseLog("[minimuxer] [net] path changed, status: \(path.status)")
-                guard path.status == .satisfied else { continue }
                 await self?.refreshEndpoint()
             }
         }

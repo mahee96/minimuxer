@@ -7,12 +7,18 @@
 //
 
 import Foundation
+import Combine
 
 private enum MinimuxerStatus{
     case started, inprogress, stopped
 }
 
 final internal class MinimuxerImpl: MinimuxerAPI {
+    public let statusSubject = PassthroughSubject<Result<Bool, MinimuxerError>, Never>()
+    public var statusPublisher: AnyPublisher<Result<Bool, MinimuxerError>, Never> {
+        statusSubject.eraseToAnyPublisher()
+    }
+
     private actor State {
         var status: MinimuxerStatus = .stopped
         var mountTask: Task<Bool, Error>? = nil

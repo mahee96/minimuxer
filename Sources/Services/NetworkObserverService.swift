@@ -7,6 +7,7 @@
 
 import Network
 import Foundation
+import Combine
 
 final internal class NetworkObserverService: NetworkObserverAPI, @unchecked Sendable {
 
@@ -59,6 +60,15 @@ final internal class NetworkObserverService: NetworkObserverAPI, @unchecked Send
     }
     
     func refreshEndpoint() async {
+        debugLog("[minimuxer] [net] dispatching status update to subscribers")
+        Task.detached {
+            let readyResult = await Minimuxer.shared.isReady()
+            if let impl = Minimuxer.shared as? MinimuxerImpl {
+                debugLog("[minimuxer] [net] publishing status update to subscribers")
+                impl.statusSubject.send(readyResult)
+            }
+        }
+
         verboseLog("[minimuxer] [net] refreshing interfaces list and peers")
         let changed = await NetworkIfaceScanner.shared.refresh()
         guard changed else { return }

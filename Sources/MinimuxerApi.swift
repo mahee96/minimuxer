@@ -7,6 +7,7 @@
 //
 
 import Foundation
+import Combine
 
 public enum MinimuxerComponent: String {
     case heartbeat
@@ -57,6 +58,8 @@ public protocol MinimuxerAPI: AnyObject {
     var isLoggingEnabled: Bool { get }
     var isPairingFileLoaded: Bool { get }
     func getPairingFileType() -> PairingProtocol
+    
+    var statusPublisher: AnyPublisher<Result<Bool, MinimuxerError>, Never> { get }
     
     func getConnectionMode() async -> DeviceConnectionMode
     func isReady() async -> Result<Bool, MinimuxerError>

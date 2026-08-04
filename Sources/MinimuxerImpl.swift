@@ -56,6 +56,12 @@ final internal class MinimuxerImpl: MinimuxerAPI {
     }
     
     func isReady() async -> Result<Bool, MinimuxerError> {
+        let currentStatus = await state.with { $0.status }
+        if currentStatus != .started {
+            debugLog("[minimuxer] minimuxer not ready: minimuxer has not been started")
+            return .failure(.notStarted("Minimuxer has not been started yet."))
+        }
+
         // check connection status first
         if !(Minimuxer.network.isWifiSatisfied /* ||
                 Minimuxer.network.isWiredSatisfied ||

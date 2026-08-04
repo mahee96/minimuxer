@@ -88,7 +88,7 @@ final internal class Mounter {
                 let errStr = "\(error)"
                 if isPairingError(error, errStr) {
                     debugLog("[minimuxer] mounter: ERROR: Invalid pairing file — device rejected handshake. Please redo pairing.")
-                    throw MinimuxerError.pairingFile(protocol: activeProtocol, reason: "Device rejected pairing verify handshake: \(errStr)")
+                    throw MinimuxerError.invalidPairing(protocol: activeProtocol, reason: "Device rejected pairing verify handshake: \(errStr). Please redo pairing.")
                 }
                 throw error
             }
@@ -113,7 +113,7 @@ final internal class Mounter {
 
     private func isPairingError(_ error: Error, _ errStr: String) -> Bool {
         if let minErr = error as? MinimuxerError {
-            if case .pairingFile = minErr {
+            if case .invalidPairing = minErr {
                 return true
             }
         }

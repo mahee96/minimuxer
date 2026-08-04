@@ -56,6 +56,11 @@ final internal class MinimuxerImpl: MinimuxerAPI {
     }
     
     func isReady() async -> Result<Bool, MinimuxerError> {
+        if !isPairingFileLoaded {
+            debugLog("[minimuxer] minimuxer not ready: pairing file not loaded")
+            return .failure(.pairingNotLoaded("No valid pairing file has been loaded"))
+        }
+
         let currentStatus = await state.with { $0.status }
         if currentStatus != .started {
             debugLog("[minimuxer] minimuxer not ready: minimuxer has not been started")
@@ -103,7 +108,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         let pairingType = getPairingFileType()
         if pairingType == .unknown {
             debugLog("[minimuxer] minimuxer not ready: no valid pairing file loaded")
-            return .failure(.pairingFile(protocol: .lockdown, reason: "No valid pairing file has been loaded in Minimuxer"))
+            return .failure(.pairingNotLoaded("No valid pairing file has been loaded in Minimuxer"))
         }
 
         // then check if device is ready
@@ -218,13 +223,13 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         // restartMuxerServer only applies to the lockdown protocol path
         guard let pairingDict = IdeviceGateway.shared.pairingDataDict else {
             debugLog("[minimuxer] ERROR: Pairing DICT missing...ignoring restart MuxerServer")
-            throw MinimuxerError.pairingFile(protocol: .lockdown, reason: "Pairing dictionary is missing in gateway")
+            throw MinimuxerError.invalidPairing(protocol: .lockdown, reason: "Pairing dictionary is missing in gateway")
         }
         verboseLog("[minimuxer] loaded pairing file keys: \(pairingDict.keys)")
 
         guard let deviceUDID = pairingDict["UDID"] as? String else {
             debugLog("[minimuxer] ERROR: Pairing file missing UDID")
-            throw MinimuxerError.pairingFile(protocol: .lockdown, reason: "Pairing file is missing UDID value")
+            throw MinimuxerError.invalidPairing(protocol: .lockdown, reason: "Pairing file is missing UDID value")
         }
 
         // restart muxer
@@ -309,7 +314,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         guard let pairingData = IdeviceGateway.shared.pairingFileData,
               let pairingFile = String(data: pairingData, encoding: .utf8) else {
             debugLog("[minimuxer] restart: no existing pairing file — cannot restart")
-            throw MinimuxerError.pairingFile(protocol: activeProtocol, reason: "No existing pairing file found in gateway during restart")
+            throw MinimuxerError.invalidPairing(protocol: activeProtocol, reason: "No existing pairing file found in gateway during restart")
         }
         guard let mountPath = await state.lastDocsPath else {
             throw MinimuxerError.mount(protocol: activeProtocol, reason: "lastDocsPath is nil during restart")

@@ -236,7 +236,7 @@ final internal class MuxerService {
                     return ["DeviceList": []]
                 }
                 guard let udid = deviceUDID else {
-                    throw MinimuxerError.pairingFile(protocol: .lockdown, reason: "No device UDID available for ListDevices response")
+                    throw MinimuxerError.invalidPairing(protocol: .lockdown, reason: "No device UDID available for ListDevices response")
                 }
                 let networkAddr = convertIp(tunnelIfaceIp)
                 var payload: [String: Any] = [

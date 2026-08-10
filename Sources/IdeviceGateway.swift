@@ -39,6 +39,17 @@ internal enum IdeviceGatewayError: LocalizedError {
     }
 }
 
+extension String {
+    /// Formats error strings by collapsing embedded newlines and extra spaces into a clean single-line format.
+    var cleanedErrorFormatting: String {
+        return self
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+    }
+}
+
 internal final class IdeviceGateway {
     static let shared = IdeviceGateway()
     var lastError: Error? = nil
@@ -56,7 +67,7 @@ internal final class IdeviceGateway {
 
     private func getErrorMessage(from err: UnsafeMutablePointer<IdeviceFfiError>) -> String {
         if let msgPtr = err.pointee.message {
-            return String(cString: msgPtr)
+            return String(cString: msgPtr).cleanedErrorFormatting
         }
         return "Error code \(err.pointee.code)"
     }
@@ -406,12 +417,12 @@ internal final class IdeviceGateway {
                 invalidateConnection()
                 
                 if isPairingError(secondErr) {
-                    let reason = "Service connection failed: \(retryMsg.isEmpty ? "Unknown FFI error" : retryMsg)"
+                    let reason = "Service connection failed, error: (\(retryMsg.isEmpty ? "Unknown FFI error" : retryMsg))"
                     let error = IdeviceGatewayError.invalidPairingFile(reason: reason)
                     lastError = error
                     throw error
                 } else {
-                    let error = IdeviceGatewayError.serviceError("Failed to connect to \(serviceName): \(retryMsg.isEmpty ? "Unknown FFI error" : retryMsg)")
+                    let error = IdeviceGatewayError.serviceError("Failed to connect to \(serviceName), error: (\(retryMsg.isEmpty ? "Unknown FFI error" : retryMsg))")
                     lastError = error
                     throw error
                 }
@@ -559,7 +570,7 @@ internal final class IdeviceGateway {
             let msg = self.getErrorMessage(from: connectErr)
             debugLog("[IdeviceGateway] performWithUsbmuxdService(\(serviceName)) connect failed: code=\(connectErr.pointee.code), message=\(msg)")
             defer { idevice_error_free(connectErr) }
-            throw IdeviceGatewayError.serviceError("Failed to connect to \(serviceName): \(msg)")
+            throw IdeviceGatewayError.serviceError("Failed to connect to \(serviceName), error: (\(msg))")
         }
         guard let client = client else {
             debugLog("[IdeviceGateway] performWithUsbmuxdService(\(serviceName)) client is nil")
@@ -643,7 +654,7 @@ internal final class IdeviceGateway {
             let msg = self.getErrorMessage(from: connectErr)
             debugLog("[IdeviceGateway] error: \(serviceName) connect failed: code=\(connectErr.pointee.code), message=\(msg)")
             defer { safeFreeError(connectErr) }
-            throw IdeviceGatewayError.serviceError("Failed to connect to \(serviceName): \(msg)")
+            throw IdeviceGatewayError.serviceError("Failed to connect to \(serviceName), error: (\(msg))")
         }
         guard let client = client else {
             throw IdeviceGatewayError.noConnection
@@ -781,9 +792,10 @@ internal final class IdeviceGateway {
             verboseLog("[IdeviceGateway] getLockdownValue calling lockdownd_get_value for \(key)")
             let valErr = lockdownd_get_value(client, key, nil, &plistVal)
             if let valErr = valErr {
-                debugLog("[IdeviceGateway] getLockdownValue lockdownd_get_value failed for \(key)")
+                let msg = self.getErrorMessage(from: valErr)
+                debugLog("[IdeviceGateway] getLockdownValue lockdownd_get_value failed for \(key): \(msg)")
                 defer { safeFreeError(valErr) }
-                throw IdeviceGatewayError.serviceError("Failed to get lockdown value for key \(key)")
+                throw IdeviceGatewayError.serviceError("Failed to get lockdown value for key \(key), error: (\(msg))")
             }
             if let plistVal = plistVal {
                 defer {
@@ -815,7 +827,7 @@ internal final class IdeviceGateway {
                         let msg = self.getErrorMessage(from: installErr)
                         debugLog("[IdeviceGateway] installProvisioningProfile() misagent_install failed: \(msg)")
                         defer { safeFreeError(installErr) }
-                        throw IdeviceGatewayError.serviceError("Failed to install profile: \(msg)")
+                        throw IdeviceGatewayError.serviceError("Failed to install profile, error: (\(msg))")
                     }
                     debugLog("[IdeviceGateway] installProvisioningProfile() misagent_install succeeded")
                 }
@@ -839,7 +851,7 @@ internal final class IdeviceGateway {
                     let msg = self.getErrorMessage(from: removeErr)
                     debugLog("[IdeviceGateway] removeProvisioningProfile() misagent_remove failed: \(msg)")
                     defer { safeFreeError(removeErr) }
-                    throw IdeviceGatewayError.serviceError("Failed to remove profile: \(msg)")
+                    throw IdeviceGatewayError.serviceError("Failed to remove profile, error: (\(msg))")
                 }
                 debugLog("[IdeviceGateway] removeProvisioningProfile() misagent_remove succeeded")
             }
@@ -859,9 +871,10 @@ internal final class IdeviceGateway {
                 verboseLog("[IdeviceGateway] removeApp() calling installation_proxy_uninstall")
                 let uninstallErr = installation_proxy_uninstall(client, bundleIdPtr, nil)
                 if let uninstallErr = uninstallErr {
-                    debugLog("[IdeviceGateway] removeApp() installation_proxy_uninstall failed")
+                    let msg = self.getErrorMessage(from: uninstallErr)
+                    debugLog("[IdeviceGateway] removeApp() installation_proxy_uninstall failed: \(msg)")
                     defer { idevice_error_free(uninstallErr) }
-                    throw IdeviceGatewayError.serviceError("Failed to uninstall app")
+                    throw IdeviceGatewayError.serviceError("Failed to uninstall app, error: (\(msg))")
                 }
                 debugLog("[IdeviceGateway] removeApp() installation_proxy_uninstall succeeded")
             }
@@ -896,9 +909,10 @@ internal final class IdeviceGateway {
                 afc_file_open(client, pathPtr, AfcFopenMode(rawValue: 4), &fileHandle) // WrOnly/Wr mode
             }
             if let openErr = openErr {
-                debugLog("[IdeviceGateway] yeetAppAfc() afc_file_open failed")
+                let msg = self.getErrorMessage(from: openErr)
+                debugLog("[IdeviceGateway] yeetAppAfc() afc_file_open failed: \(msg)")
                 defer { idevice_error_free(openErr) }
-                throw IdeviceGatewayError.serviceError("Failed to open remote AFC file")
+                throw IdeviceGatewayError.serviceError("Failed to open remote AFC file, error: (\(msg))")
             }
             defer {
                 verboseLog("[IdeviceGateway] yeetAppAfc() closing remote file handle")
@@ -910,9 +924,10 @@ internal final class IdeviceGateway {
                     verboseLog("[IdeviceGateway] yeetAppAfc() writing data to AFC file")
                     let writeErr = afc_file_write(fileHandle, baseAddress, ipaBytes.count)
                     if let writeErr = writeErr {
-                        debugLog("[IdeviceGateway] yeetAppAfc() afc_file_write failed")
+                        let msg = self.getErrorMessage(from: writeErr)
+                        debugLog("[IdeviceGateway] yeetAppAfc() afc_file_write failed: \(msg)")
                         defer { idevice_error_free(writeErr) }
-                        throw IdeviceGatewayError.serviceError("Failed to write to AFC file")
+                        throw IdeviceGatewayError.serviceError("Failed to write to AFC file, error: (\(msg))")
                     }
                     debugLog("[IdeviceGateway] yeetAppAfc() afc_file_write succeeded")
                 }
@@ -934,9 +949,10 @@ internal final class IdeviceGateway {
                 verboseLog("[IdeviceGateway] installIpa() calling installation_proxy_install for path: \(path)")
                 let installErr = installation_proxy_install(client, pathPtr, nil)
                 if let installErr = installErr {
-                    debugLog("[IdeviceGateway] installIpa() installation_proxy_install failed")
+                    let msg = self.getErrorMessage(from: installErr)
+                    debugLog("[IdeviceGateway] installIpa() installation_proxy_install failed: \(msg)")
                     defer { idevice_error_free(installErr) }
-                    throw IdeviceGatewayError.serviceError("Failed to install IPA")
+                    throw IdeviceGatewayError.serviceError("Failed to install IPA, error: (\(msg))")
                 }
                 debugLog("[IdeviceGateway] installIpa() installation_proxy_install succeeded")
             }
@@ -959,9 +975,10 @@ internal final class IdeviceGateway {
                 verboseLog("[IdeviceGateway] getAppPaths() calling installation_proxy_get_apps")
                 let err = installation_proxy_get_apps(client, nil, &bundleIds, 1, &outResult, &outLen)
                 if let err = err {
-                    debugLog("[IdeviceGateway] getAppPaths() installation_proxy_get_apps failed")
+                    let msg = self.getErrorMessage(from: err)
+                    debugLog("[IdeviceGateway] getAppPaths() installation_proxy_get_apps failed: \(msg)")
                     defer { idevice_error_free(err) }
-                    throw IdeviceGatewayError.serviceError("Failed to lookup app paths")
+                    throw IdeviceGatewayError.serviceError("Failed to lookup app paths, error: (\(msg))")
                 }
             }
             
@@ -1023,9 +1040,10 @@ internal final class IdeviceGateway {
                 verboseLog("[IdeviceGateway] sendDebugProxyCommand() sending command \(name)")
                 let sendErr = debug_proxy_send_command(client, cmdHandle, &response)
                 if let sendErr = sendErr {
-                    debugLog("[IdeviceGateway] sendDebugProxyCommand() failed for command \(name)")
+                    let msg = self.getErrorMessage(from: sendErr)
+                    debugLog("[IdeviceGateway] sendDebugProxyCommand() failed for command \(name): \(msg)")
                     defer { idevice_error_free(sendErr) }
-                    throw IdeviceGatewayError.serviceError("Failed to send command to debug proxy: \(name)")
+                    throw IdeviceGatewayError.serviceError("Failed to send command to debug proxy: \(name), error: (\(msg))")
                 }
                 if let response = response {
                     let respStr = String(cString: response)
@@ -1059,9 +1077,10 @@ internal final class IdeviceGateway {
                 return lockdownd_start_service(lockdownClient, serviceNamePtr, &port, &ssl)
             }
             if let err = err {
-                debugLog("[IdeviceGateway] launchAppPre17() failed to start debugserver")
+                let msg = self.getErrorMessage(from: err)
+                debugLog("[IdeviceGateway] launchAppPre17() failed to start debugserver: \(msg)")
                 defer { idevice_error_free(err) }
-                throw IdeviceGatewayError.serviceError("Failed to start debugserver service")
+                throw IdeviceGatewayError.serviceError("Failed to start debugserver service, error: (\(msg))")
             }
             debugLog("[IdeviceGateway] launchAppPre17() debugserver started on port: \(port)")
             
@@ -1162,9 +1181,10 @@ internal final class IdeviceGateway {
             verboseLog("[IdeviceGateway] launchAppPre17() creating debug proxy client")
             let proxyErr = debug_proxy_new(stream, &debugProxyClient)
             if let proxyErr = proxyErr {
-                debugLog("[IdeviceGateway] launchAppPre17() debug_proxy_new failed")
+                let msg = self.getErrorMessage(from: proxyErr)
+                debugLog("[IdeviceGateway] launchAppPre17() debug_proxy_new failed: \(msg)")
                 defer { idevice_error_free(proxyErr) }
-                throw IdeviceGatewayError.serviceError("Failed to create debug proxy client")
+                throw IdeviceGatewayError.serviceError("Failed to create debug proxy client, error: (\(msg))")
             }
             streamNeedsFree = false
             
@@ -1184,9 +1204,10 @@ internal final class IdeviceGateway {
                 verboseLog("[IdeviceGateway] launchAppPre17() setting argv for \(bundlePath)")
                 let argvErr = debug_proxy_set_argv(debugProxyClient, &argvptrs, UInt(argvptrs.count), &response)
                 if let argvErr = argvErr {
-                    debugLog("[IdeviceGateway] launchAppPre17() debug_proxy_set_argv failed")
+                    let msg = self.getErrorMessage(from: argvErr)
+                    debugLog("[IdeviceGateway] launchAppPre17() debug_proxy_set_argv failed: \(msg)")
                     defer { idevice_error_free(argvErr) }
-                    throw IdeviceGatewayError.serviceError("Failed to set debug proxy argv")
+                    throw IdeviceGatewayError.serviceError("Failed to set debug proxy argv, error: (\(msg))")
                 }
                 if let response = response {
                     let respStr = String(cString: response)
@@ -1273,9 +1294,10 @@ internal final class IdeviceGateway {
             verboseLog("[IdeviceGateway] dumpProfiles() calling misagent_copy_all")
             let copyErr = misagent_copy_all(client, &outProfiles, &outProfilesLen, &outCount)
             if let copyErr = copyErr {
-                debugLog("[IdeviceGateway] dumpProfiles() misagent_copy_all failed")
+                let msg = self.getErrorMessage(from: copyErr)
+                debugLog("[IdeviceGateway] dumpProfiles() misagent_copy_all failed: \(msg)")
                 defer { idevice_error_free(copyErr) }
-                throw IdeviceGatewayError.serviceError("Failed to copy profiles from misagent")
+                throw IdeviceGatewayError.serviceError("Failed to copy profiles from misagent, error: (\(msg))")
             }
 
             let path = docsPath.hasPrefix("file://") ? String(docsPath.dropFirst(7)) : docsPath
@@ -1324,16 +1346,18 @@ internal final class IdeviceGateway {
            verboseLog("[IdeviceGateway] performHeartbeat() calling heartbeat_get_marco")
            let getErr = heartbeat_get_marco(client, interval, newInterval)
            if let getErr = getErr {
-               debugLog("[IdeviceGateway] performHeartbeat() heartbeat_get_marco failed")
+               let msg = self.getErrorMessage(from: getErr)
+               debugLog("[IdeviceGateway] performHeartbeat() heartbeat_get_marco failed: \(msg)")
                defer { idevice_error_free(getErr) }
-               throw IdeviceGatewayError.serviceError("Heartbeat receive failed")
+               throw IdeviceGatewayError.serviceError("Heartbeat receive failed, error: (\(msg))")
            }
            verboseLog("[IdeviceGateway] performHeartbeat() calling heartbeat_send_polo")
            let sendErr = heartbeat_send_polo(client)
            if let sendErr = sendErr {
-               debugLog("[IdeviceGateway] performHeartbeat() heartbeat_send_polo failed")
+               let msg = self.getErrorMessage(from: sendErr)
+               debugLog("[IdeviceGateway] performHeartbeat() heartbeat_send_polo failed: \(msg)")
                defer { idevice_error_free(sendErr) }
-               throw IdeviceGatewayError.serviceError("Heartbeat send failed")
+               throw IdeviceGatewayError.serviceError("Heartbeat send failed, error: (\(msg))")
            }
            debugLog("[IdeviceGateway] performHeartbeat() succeeded, newInterval: \(newInterval.pointee)")
        }
@@ -1399,7 +1423,7 @@ internal final class IdeviceGateway {
                             let msg = self.getErrorMessage(from: mountErr)
                             debugLog("[IdeviceGateway] mountPersonalizedDdiRsd() mount failed: code=\(mountErr.pointee.code), message=\(msg)")
                             defer { idevice_error_free(mountErr) }
-                            throw IdeviceGatewayError.serviceError("Failed to mount personalized DDI: \(msg)")
+                            throw IdeviceGatewayError.serviceError("Failed to mount personalized DDI, error: (\(msg))")
                         }
                         debugLog("[IdeviceGateway] mountPersonalizedDdiRsd() mount succeeded")
                     }
@@ -1567,7 +1591,7 @@ internal final class IdeviceGateway {
                         let msg = self.getErrorMessage(from: mountErr)
                         debugLog("[IdeviceGateway] mountPersonalizedDdiIdevice() mount failed: code=\(mountErr.pointee.code), message=\(msg)")
                         defer { idevice_error_free(mountErr) }
-                        throw IdeviceGatewayError.serviceError("Failed to mount personalized DDI: \(msg)")
+                        throw IdeviceGatewayError.serviceError("Failed to mount personalized DDI, error: (\(msg))")
                     }
                     verboseLog("[IdeviceGateway] mountPersonalizedDdiIdevice() mount succeeded")
                 }
@@ -1670,9 +1694,10 @@ internal final class IdeviceGateway {
                         signature.count
                     )
                     if let uploadErr = uploadErr {
-                        debugLog("[IdeviceGateway] mountDeveloperImage() upload failed")
+                        let msg = self.getErrorMessage(from: uploadErr)
+                        debugLog("[IdeviceGateway] mountDeveloperImage() upload failed: \(msg)")
                         defer { idevice_error_free(uploadErr) }
-                        throw IdeviceGatewayError.serviceError("Failed to upload developer image")
+                        throw IdeviceGatewayError.serviceError("Failed to upload developer image, error: (\(msg))")
                     }
                     debugLog("[IdeviceGateway] mountDeveloperImage() upload succeeded")
                 }
@@ -1694,7 +1719,7 @@ internal final class IdeviceGateway {
                     let msg = self.getErrorMessage(from: mountErr)
                     debugLog("[IdeviceGateway] mountDeveloperImage() mount failed: code=\(mountErr.pointee.code), message=\(msg)")
                     defer { idevice_error_free(mountErr) }
-                    throw IdeviceGatewayError.serviceError("Failed to mount developer image: \(msg)")
+                    throw IdeviceGatewayError.serviceError("Failed to mount developer image, error: (\(msg))")
                 }
                 debugLog("[IdeviceGateway] mountDeveloperImage() mount succeeded")
             }
@@ -1905,7 +1930,7 @@ internal final class IdeviceGateway {
                 let msg = self.getErrorMessage(from: err)
                 debugLog("[IdeviceGateway] startHouseArrestAfc() house_arrest_vend_container failed: \(msg)")
                 defer { safeFreeError(err) }
-                throw IdeviceGatewayError.serviceError("Failed to vend container for \(bundleId): \(msg)")
+                throw IdeviceGatewayError.serviceError("Failed to vend container for \(bundleId), error: (\(msg))")
             }
             debugLog("[IdeviceGateway] startHouseArrestAfc() house_arrest_vend_container succeeded")
         }
@@ -1925,9 +1950,10 @@ internal final class IdeviceGateway {
             afc_list_directory(client, pathPtr, &entriesRaw, &count)
         }
         if let err = err {
-            debugLog("[IdeviceGateway] afcListDirectory() afc_list_directory failed for: \(path)")
+            let msg = self.getErrorMessage(from: err)
+            debugLog("[IdeviceGateway] afcListDirectory() afc_list_directory failed for: \(path), error: (\(msg))")
             defer { safeFreeError(err) }
-            throw IdeviceGatewayError.serviceError("Failed to list directory: \(path)")
+            throw IdeviceGatewayError.serviceError("Failed to list directory: \(path), error: (\(msg))")
         }
         var items: [String] = []
         if let entries = entriesRaw {
@@ -1950,9 +1976,10 @@ internal final class IdeviceGateway {
             afc_file_open(client, pathPtr, AfcFopenMode(rawValue: 1), &fileHandle) // RdOnly mode
         }
         if let openErr = openErr {
-            debugLog("[IdeviceGateway] afcReadFile() afc_file_open failed for: \(path)")
+            let msg = self.getErrorMessage(from: openErr)
+            debugLog("[IdeviceGateway] afcReadFile() afc_file_open failed for: \(path), error: (\(msg))")
             defer { safeFreeError(openErr) }
-            throw IdeviceGatewayError.serviceError("Failed to open file: \(path)")
+            throw IdeviceGatewayError.serviceError("Failed to open file: \(path), error: (\(msg))")
         }
         defer {
             verboseLog("[IdeviceGateway] afcReadFile() closing file handle")
@@ -1963,9 +1990,10 @@ internal final class IdeviceGateway {
         var length: Int = 0
         let readErr = afc_file_read_entire(fileHandle, &dataPtr, &length)
         if let readErr = readErr {
-            debugLog("[IdeviceGateway] afcReadFile() afc_file_read_entire failed")
+            let msg = self.getErrorMessage(from: readErr)
+            debugLog("[IdeviceGateway] afcReadFile() afc_file_read_entire failed, error: (\(msg))")
             defer { safeFreeError(readErr) }
-            throw IdeviceGatewayError.serviceError("Failed to read file: \(path)")
+            throw IdeviceGatewayError.serviceError("Failed to read file: \(path), error: (\(msg))")
         }
         
         if let ptr = dataPtr {

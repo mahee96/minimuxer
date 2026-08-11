@@ -8,7 +8,6 @@
 
 import Foundation
 import Combine
-import EMProxy
 
 public enum MinimuxerComponent: String {
     case heartbeat

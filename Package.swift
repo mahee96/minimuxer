@@ -36,8 +36,8 @@ let package = Package(
 //         ),
         .binaryTarget(
             name: "EMProxy",
-            url: "https://github.com/SideStore/em_proxy/releases/download/v0.9.1/EMProxy.xcframework.zip",
-            checksum: "39994dd5c4e1b9dc0365dd2f2ce7c40e7bc94eaa4118c7c62fca8a9131cbfffb"
+            url: "https://github.com/SideStore/em_proxy/releases/download/v0.9.0/EMProxy.xcframework.zip",
+            checksum: "bafb3689f3d20ccefc600e8e64a7aac2d12db75f0a596420e4e59efbcca4492c"
         ),
 
         // MARK: Main SPM target

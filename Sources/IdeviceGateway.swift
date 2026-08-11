@@ -40,13 +40,11 @@ internal enum IdeviceGatewayError: LocalizedError {
 }
 
 extension String {
-    /// Formats error strings by collapsing embedded newlines and extra spaces into a clean single-line format.
+    /// Un-escapes literal "\\n" and "\\\"" escape sequences into real line breaks and quotes.
     var cleanedErrorFormatting: String {
         return self
-            .components(separatedBy: .newlines)
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
-            .joined(separator: " ")
+            .replacingOccurrences(of: "\\n", with: "\n")
+            .replacingOccurrences(of: "\\\"", with: "\"")
     }
 }
 

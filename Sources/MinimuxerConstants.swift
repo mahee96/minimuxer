@@ -17,6 +17,10 @@ public enum MinimuxerConstants {
     public static let usbmuxdHost = "127.0.0.1"
     public static let usbmuxdPort: UInt16 = 27015       // usbmux daemon port
     public static let usbmuxdSocket = "\(usbmuxdHost):\(usbmuxdPort)"
+
+    public static let empHost = "127.0.0.1"
+    public static let empPort: UInt16 = 51820           // default EMProxy WireGuard loopback port
+    public static let empBindAddress = "\(empHost):\(empPort)"
     
     public static let heartbeatTimeoutMs: UInt32 = 12000
     public static let deviceFetchTimeoutMs: UInt16 = 5000

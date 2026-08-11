@@ -8,6 +8,7 @@
 
 import Foundation
 import Combine
+import EMProxy
 
 public enum MinimuxerComponent: String {
     case heartbeat
@@ -96,6 +97,18 @@ public enum Minimuxer {
     public static let shared: any MinimuxerAPI = MinimuxerImpl()
     public static let network: any NetworkObserverAPI = NetworkObserverService()
     public static let wirelessPair: any WirelessPairAPI = WirelessPairService()
+    public static let emproxy: any EMProxyAPI = EMProxyImpl()
+}
+
+public protocol EMProxyAPI: AnyObject, Sendable {
+    func start(host: String, port: UInt16) async throws
+    func stop() async
+}
+
+public extension EMProxyAPI {
+    func start() async throws {
+        try await start(host: MinimuxerConstants.empHost, port: MinimuxerConstants.empPort)
+    }
 }
 
 // MARK: - Network Observer API

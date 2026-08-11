@@ -30,16 +30,16 @@ let package = Package(
             url: "https://github.com/SideStore/idevice/releases/download/v0.1.64-ss-7ec402e/idevice-xcframework-v0.1.64-ss-7ec402e.zip",
             checksum: "b148f8dc918e9c6ac8c1e573ec571250a7fb9d63c7a28116b732d598b5ba96b5"
         ),
-        .binaryTarget(
-            name: "EMProxy",
-            url: "https://github.com/SideStore/em_proxy/releases/download/v0.9.0/EMProxy.xcframework.zip",
-            checksum: "1420cb1538c116d19ee78a72457e9460bc808b5c3ed98e30732dbfcde1306564"
-        ),
 //         .binaryTarget(
 //             name: "IDevice",
 //             path: "../../local/idevice/swift/bundle.zip"
 //         ),
-        
+        .binaryTarget(
+            name: "EMProxy",
+            url: "https://github.com/SideStore/em_proxy/releases/download/v0.9.1/EMProxy.xcframework.zip",
+            checksum: "39994dd5c4e1b9dc0365dd2f2ce7c40e7bc94eaa4118c7c62fca8a9131cbfffb"
+        ),
+
         // MARK: Main SPM target
         .target(
             name: "Minimuxer",

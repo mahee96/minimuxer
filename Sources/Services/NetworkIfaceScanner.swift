@@ -274,7 +274,8 @@ actor NetworkIfaceScanner {
             cur = e.ifa_next
         }
         
-        if !quiet{
+        if !quiet {
+            verboseLog(formatNetInfoList(result))
             debugLog("[minimuxer] [iface] total: \(result.count)")
         }
         return result

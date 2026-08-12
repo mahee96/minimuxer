@@ -41,7 +41,7 @@ let package = Package(
         ),
 //         .binaryTarget(
 //             name: "EMProxy",
-//             path: "../em_proxy/libs/EMProxy.xcframework"
+//             path: "../../local/em_proxy/libs/EMProxy.xcframework"
 //         ),
 
         // MARK: Main SPM target

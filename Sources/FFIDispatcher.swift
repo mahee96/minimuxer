@@ -14,7 +14,7 @@ import Foundation
  */
 @inline(__always)
 internal func withFFIDispatch<T: Sendable>(
-    on queue: DispatchQueue = DispatchQueue.global(qos: .userInitiated),
+    on queue: DispatchQueue = .global(),
     _ body: @escaping @Sendable () throws -> T
 ) async throws -> T {
     try await withCheckedThrowingContinuation { continuation in

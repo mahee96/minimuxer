@@ -55,7 +55,7 @@ public final class EMProxyImpl: EMProxyAPI {
     public init() {
         set_log_callback { level, msgPtr in
             guard let msgPtr = msgPtr else { return false }
-            let msg = "[em_proxy] \(String(cString: msgPtr))"
+            let msg = "[EMProxy] \(String(cString: msgPtr))"
             if level <= 1 {
                 verboseLog(msg)
             } else {

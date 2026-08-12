@@ -99,7 +99,7 @@ final class EMProxyTests: XCTestCase {
         
         connection.start(queue: .global())
         
-        await fulfillment(of: [payloadReceivedExpectation], timeout: 20.0)
+        await fulfillment(of: [payloadReceivedExpectation], timeout: 15.0)
         
         connection.cancel()
         

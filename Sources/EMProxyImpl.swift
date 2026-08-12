@@ -136,31 +136,68 @@ public final class EMProxyImpl: @unchecked Sendable, EMProxyAPI {
 
 
     private func triggerVPNHandshake(host: String, port: UInt16) async {
-        await withCheckedContinuation { continuation in
+        let timeout = Double(MinimuxerConstants.vpnHandshakeTimeoutNs) / 1_000_000_000.0
+        let startTime = Date()
+        
+        while Date().timeIntervalSince(startTime) < timeout {
             let connection = NWConnection(host: NWEndpoint.Host(host), port: NWEndpoint.Port(rawValue: port)!, using: .tcp)
-            var resumed = false
-            connection.stateUpdateHandler = { state in
-                debugLog("[EMProxy] triggerVPNHandshake state: \(state)")
-                switch state {
-                    case .ready, .failed, .cancelled:
-                        if !resumed {
-                            resumed = true
-                            continuation.resume()
-                        }
-                    default:
-                        break
-                }
-            }
-            connection.start(queue: .global())
             
-            Task {
-                try? await Task.sleep(nanoseconds: MinimuxerConstants.vpnHandshakeTimeoutNs)
-                if !resumed {
-                    resumed = true
-                    continuation.resume()
+            let success = await withCheckedContinuation { continuation in
+                var resolved = false
+                let lock = NSLock()
+                
+                let resolve = { (result: Bool) in
+                    lock.withLock {
+                        if !resolved {
+                            resolved = true
+                            continuation.resume(returning: result)
+                        }
+                    }
                 }
-                connection.cancel()
+                
+                connection.stateUpdateHandler = { state in
+                    debugLog("[EMProxy] triggerVPNHandshake state: \(state)")
+                    if let result = self.isProbeSuccessful(for: state) {
+                        resolve(result)
+                    }
+                }
+                connection.start(queue: .global())
+                
+                // Limit this probe attempt to 1 second
+                Task {
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    resolve(false)
+                    connection.cancel()
+                }
             }
+            
+            connection.cancel()
+            
+            if success {
+                return // Tunnel is ready!
+            }
+            
+            // Wait 200ms before starting the next probe
+            try? await Task.sleep(nanoseconds: 200_000_000)
+        }
+    }
+
+    private func isProbeSuccessful(for state: NWConnection.State) -> Bool? {
+        switch state {
+            case .ready:
+                return true
+            case .failed, .cancelled:
+                return false
+            case .waiting(let error):
+                // POSIX error 61 is "Connection refused".
+                // This means the tunnel is fully working and routed, but nothing is listening on that port yet.
+                let isRefused = (error as NSError).code == 61
+                if isRefused {
+                    return true
+                }
+                return nil
+            default:
+                return nil
         }
     }
 }

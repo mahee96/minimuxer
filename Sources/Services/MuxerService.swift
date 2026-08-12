@@ -7,246 +7,196 @@
 //
 
 import Foundation
+import Network
 
 final internal class MuxerService {
-    static private(set) var started = false
-    static private(set) var isListening = false
+    static let shared = MuxerService()
 
-    private static var deviceUDID: String?
-    private static var serverThread: Thread?
-    private static var listenSocket: Int32 = -1
-    
+    private var maxBufferLen: Int { MinimuxerConstants.usbmuxMaxPacketBufferLength }
+    private var headerLen: Int { MinimuxerConstants.usbmuxHeaderLen }
+
+    private(set) var started = false
+    private(set) var isListening = false
+
+    private var deviceUDID: String?
+    private var listener: NWListener?
+    private let queue = DispatchQueue(label: "minimuxer.MuxerService", qos: .userInitiated)
+
     // Stable device state
-    private static var currentDeviceIp: String?
-    private static var currentEvent: String?
+    private var currentDeviceIp: String?
+    private var currentEvent: String?
 
-    static func notifyDeviceAttached(tunnelPeerIp: String){
+    func notifyDeviceAttached(tunnelPeerIp: String) {
         currentDeviceIp = tunnelPeerIp
         currentEvent = MinimuxerConstants.deviceAttach
     }
-    static func notifyDeviceDetached(){
+    func notifyDeviceDetached() {
         currentDeviceIp = nil
         currentEvent = MinimuxerConstants.deviceDetach
     }
 
-    private static var lastLogMessage: String?
-
-    private static func logIfNeeded(_ message: String, isVerbose: Bool = false) {
-        if message != lastLogMessage {
-            if isVerbose {
-                verboseLog("[minimuxer] \(message)")
-            } else {
-                debugLog("[minimuxer] \(message)")
-            }
-            lastLogMessage = message
-        }
-    }
-
+    // Binds a TCP server on 127.0.0.1:27015 and accepts incoming connections
+    // from libusbmuxd. This is our fake usbmuxd — it speaks
+    // just enough of the usbmuxd protocol for the library to discover the
+    // device, read the pairing record, and open services (AFC, lockdown, etc.).
     @discardableResult
-    static func start(udid: String) async throws -> Bool {
+    func start(udid: String) async throws -> Bool {
         guard !started else {
             verboseLog("[minimuxer] Already started MuxerService, skipping")
             return false
         }
         deviceUDID = udid
         isListening = false
-        
-        let thread = Thread {
-            listenLoop()
+
+        guard let port = NWEndpoint.Port(rawValue: MinimuxerConstants.usbmuxdPort) else {
+            throw MinimuxerError.connect("Invalid usbmuxd port: \(MinimuxerConstants.usbmuxdPort)")
         }
-        thread.name = "Muxer-Server"
-        thread.qualityOfService = .userInitiated
-        thread.start()
-        
-        serverThread = thread
-        started = true
+        let params = NWParameters.tcp
+        params.allowLocalEndpointReuse = true
 
-        let maxPolls = 10
-        let pollIntervalNs: UInt64 = 100_000_000 // 100ms
-        let totalTimeoutMs = 1000
+        let newListener = try NWListener(using: params, on: port)
 
-        for _ in 0..<maxPolls {
-            if isListening {
-                verboseLog("[minimuxer] MuxerService is listening on socket!")
-                return true
+        return try await withCheckedThrowingContinuation { continuation in
+            var hasResponded = false
+
+            newListener.stateUpdateHandler = { [weak self] state in
+                guard let self = self else { return }
+                switch state {
+                    case .ready:
+                        verboseLog("[minimuxer] MuxerService (NWListener) bound successfully to \(MinimuxerConstants.usbmuxdHost):\(MinimuxerConstants.usbmuxdPort)")
+                        self.isListening = true
+                        self.started = true
+                        if !hasResponded {
+                            hasResponded = true
+                            continuation.resume(returning: true)
+                        }
+                    case .failed(let error):
+                        debugLog("[minimuxer] MuxerService listener failed with error: \(error)")
+                        self.isListening = false
+                        self.started = false
+                        if !hasResponded {
+                            hasResponded = true
+                            continuation.resume(throwing: MinimuxerError.connect("MuxerService failed to bind: \(error.localizedDescription)"))
+                        }
+                    case .cancelled:
+                        self.isListening = false
+                        self.started = false
+                    default:
+                        break
+                }
             }
-            try? await Task.sleep(nanoseconds: pollIntervalNs)
-        }
-        
-        debugLog("[minimuxer] MuxerService failed to bind/listen in time")
-        let addr = "\(MinimuxerConstants.usbmuxdHost):\(MinimuxerConstants.usbmuxdPort)"
-        let pollMs = pollIntervalNs / 1_000_000
-        throw MinimuxerError.connect("MuxerService failed to listen on \(addr) within \(totalTimeoutMs)ms (\(maxPolls) × \(pollMs)ms polls)")
-    }
-    
-    
-    static func stop() {
-        guard started else { return }
-        serverThread?.cancel()
 
+            newListener.newConnectionHandler = { [weak self] connection in
+                self?.handleConnection(connection)
+            }
+
+            listener = newListener
+            newListener.start(queue: queue)
+        }
+    }
+
+    func stop() async {
+        guard started else { return }
+        let currentListener = listener
         started = false
         isListening = false
         deviceUDID = nil
-        
-        if listenSocket >= 0 {
-            shutdown(listenSocket, SHUT_RDWR)
-            close(listenSocket)
-            listenSocket = -1
-        }
-        serverThread = nil
-    }
-    
-    // MARK: - Listener
+        listener = nil
 
-    // Binds a TCP server on 127.0.0.1:27015 and accepts incoming connections
-    // from libimobiledevice/libusbmuxd. This is our fake usbmuxd — it speaks
-    // just enough of the usbmuxd protocol for the library to discover the
-    // device, read the pairing record, and open services (AFC, lockdown, etc.).
-    private static func listenLoop() {
-        while !Thread.current.isCancelled {
-            logIfNeeded("MuxerService - Starting usbmuxd proxy server (listener loop)", isVerbose: true)
+        guard let currentListener = currentListener else { return }
 
-            let fd = socket(AF_INET, SOCK_STREAM, 0)
-            guard fd >= 0 else {
-                Thread.sleep(forTimeInterval: 1)
-                continue
-            }
-
-            var yes = 1
-            setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &yes, socklen_t(MemoryLayout<Int>.size))
-            setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &yes, socklen_t(MemoryLayout<Int32>.size))
-
-            var addr = sockaddr_in()
-            addr.sin_family = sa_family_t(AF_INET)
-            addr.sin_port = MinimuxerConstants.usbmuxdPort.bigEndian
-            addr.sin_addr.s_addr = inet_addr(MinimuxerConstants.usbmuxdHost)
-
-            let bindResult = withUnsafePointer(to: &addr) {
-                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                    bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
-                }
-            }
-
-            let value = String(cString: getenv(MinimuxerConstants.usbmuxdEnvKey))
-            logIfNeeded("muxer: (ENV) USBMUXD_SOCKET_ADDRESS = \(value)", isVerbose: true)
-
-            guard bindResult == 0, listen(fd, 16) == 0 else {
-                logIfNeeded("WARN: Failed to bind/listen")
-                close(fd)
-                isListening = false
-                started = false
-                Thread.sleep(forTimeInterval: 1)
-                continue
-            }
-
-            verboseLog("[minimuxer] Bound successfully to \(MinimuxerConstants.usbmuxdHost):\(MinimuxerConstants.usbmuxdPort)")
-            listenSocket = fd
-            isListening = true
-            started = true
-            lastLogMessage = nil
-
-            // accept loop — runs until socket dies
-            var consecutiveErrors = 0
-            while true {
-                var clientAddr = sockaddr()
-                var addrLen = socklen_t(MemoryLayout<sockaddr>.size)
-                let clientFd = accept(fd, &clientAddr, &addrLen)
-                guard clientFd >= 0 else {
-                    consecutiveErrors += 1
-                    debugLog("[minimuxer] WARN: accept() failed (\(consecutiveErrors)): \(String(cString: strerror(errno)))")
-                    if consecutiveErrors > 0 {
-                        debugLog("[minimuxer] ERROR: accept() repeatedly failing, restarting socket")
-                        break  // break inner → outer loop recreates socket
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            var hasResponded = false
+            currentListener.stateUpdateHandler = { state in
+                if case .cancelled = state {
+                    if !hasResponded {
+                        hasResponded = true
+                        continuation.resume()
                     }
-                    Thread.sleep(forTimeInterval: 0.1)
-                    continue
                 }
-                consecutiveErrors = 0
-
-                var nosig = 1
-                setsockopt(clientFd, SOL_SOCKET, SO_NOSIGPIPE, &nosig, socklen_t(MemoryLayout<Int32>.size))
-
-                Task.detached { handleClient(fd: clientFd) }
             }
-
-            // socket died — close and let outer loop restart
-            close(fd)
-            listenSocket = -1
-            isListening = false
-            started = false
-            logIfNeeded("[minimuxer] listener restarting...", isVerbose: true)
-            Thread.sleep(forTimeInterval: 1)
+            currentListener.cancel()
         }
     }
-    
-    private static func handleClient(fd: Int32) {
-        var shouldCloseFd = true
-        defer {
-            if shouldCloseFd {
-                close(fd)
+
+    private func handleConnection(_ connection: NWConnection) {
+        connection.start(queue: queue)
+        receiveNextPacket(on: connection)
+    }
+    private func receiveNextPacket(on connection: NWConnection) {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: maxBufferLen) { [weak self] data, context, isComplete, error in
+            guard let self = self, let data = data, !data.isEmpty else {
+                connection.cancel()
+                return
             }
-        }
-
-        let bufLen = 0xfff
-        var buffer = [UInt8](repeating: 0, count: bufLen)
-
-        while true {
-            let bytesRead = recv(fd, &buffer, bufLen, 0)
-            guard bytesRead > 0 else { return }
-            var totalRead = bytesRead
 
             // libimobiledevice sometimes sends the 16-byte packet header in
             // one write and the plist body in a follow-up write. If we only
             // got the header, block for the body before trying to parse.
-            if bytesRead == 16 {
-                let extra = recv(fd, &buffer[16], bufLen - 16, 0)
-                if extra > 0 { totalRead += extra }
-            }
-
-            let data = Data(buffer[0..<totalRead])
-            guard let packet = RawPacket(data: data) else { return }
-
-            do {
-                let response = try handlePacket(packet, fd: fd)
-                let responsePacket = RawPacket(plist: response, version: 1, message: 8, tag: packet.tag)
-                let responseData = responsePacket.data
-                responseData.withUnsafeBytes { ptr in
-                    _ = send(fd, ptr.baseAddress!, responseData.count, 0)
+            if data.count == self.headerLen {
+                let maxBodyLen = self.maxBufferLen - self.headerLen
+                connection.receive(minimumIncompleteLength: 1, maximumLength: maxBodyLen) { [weak self] bodyData, _, _, _ in
+                    guard let self = self else { return }
+                    var fullData = data
+                    if let bodyData = bodyData {
+                        fullData.append(bodyData)
+                    }
+                    self.processPacketData(fullData, on: connection)
                 }
-            } catch {}
+            } else {
+                self.processPacketData(data, on: connection)
+            }
         }
     }
 
-    
+    private func processPacketData(_ data: Data, on connection: NWConnection) {
+        defer {
+            receiveNextPacket(on: connection)
+        }
+
+        guard let packet = RawPacket(data: data) else { return }
+
+        do {
+            let response = try handlePacket(packet)
+            let responsePacket = RawPacket(plist: response, version: 1, message: 8, tag: packet.tag)
+            let responseData = responsePacket.data
+
+            connection.send(content: responseData, completion: .contentProcessed({ error in
+                if let error = error {
+                    debugLog("[minimuxer] MuxerService send error: \(error)")
+                }
+            }))
+        } catch {}
+    }
+
     // MARK: - Packet Handling
 
     // Responds to the only usbmuxd protocol message("ListDevices") that
     // idevice requires to establish lockdown session when using lockdown based pairing file
     // (lockdown requires UDID to start session, so our server responds with data read from pair file)
-    private static func handlePacket(_ packet: RawPacket, fd: Int32) throws -> [String: Any] {
+    private func handlePacket(_ packet: RawPacket) throws -> [String: Any] {
         guard let messageType = packet.plist["MessageType"] as? String else {
             throw MinimuxerError.connect("Malformed usbmuxd packet: missing MessageType field")
         }
-        
+
         verboseLog("[minimuxer] usbmux message: \(messageType)")
-        
+
         switch messageType {
             case "ListDevices":
-                guard let tunnelIfaceIp = currentDeviceIp  else {
+                guard let tunnelIfaceIp = currentDeviceIp else {
                     return ["DeviceList": []]
                 }
                 guard let udid = deviceUDID else {
                     throw MinimuxerError.invalidPairing(protocol: .lockdown, reason: "No device UDID available for ListDevices response")
                 }
-                let networkAddr = convertIp(tunnelIfaceIp)
-                var payload: [String: Any] = [
+                let payload: [String: Any] = [
                     "DeviceID": 0,                                                      // don't care
                     "Properties": [
                         "ConnectionType": "Network",                                    // using 'network' protocol of usbmuxd
                         "DeviceID": 0,                                                  // fake device id
                         "EscapedFullServiceName": "\(udid)._apple-mobdev2._tcp.local",  // advert for mds discovery
                         "InterfaceIndex": 0,                                            // don't care
-                        "NetworkAddress": Data(networkAddr),                            // remote IP where device's lockdownd is accepting requests on
+                        "NetworkAddress": convertIp(tunnelIfaceIp),                     // remote IP where device's lockdownd is accepting requests on
                         "SerialNumber": udid                                            // device UDID
                     ]
                 ]
@@ -256,23 +206,20 @@ final internal class MuxerService {
                 throw MinimuxerError.connect("Unsupported usbmuxd message type: \(messageType)")
         }
     }
-    
-    private static let sockaddrInLength = UInt8(MemoryLayout<sockaddr_in>.size)
-    private static let ipv4AddressFamily = UInt8(AF_INET)
-    
+
     // Encodes an IPv4 address into the 152-byte sockaddr_storage layout that
     // libusbmuxd expects in the NetworkAddress field of the device properties.
-    private static func convertIp(_ ip: String) -> [UInt8] {
-        var data = [UInt8](repeating: 0, count: 152)
-        var addr = in_addr()
+    private func convertIp(_ ip: String) -> Data {
+        var sa = sockaddr_in()
+        sa.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        sa.sin_family = sa_family_t(AF_INET)
 
-        if inet_pton(AF_INET, ip, &addr) == 1 {
-            data[0] = sockaddrInLength
-            data[1] = ipv4AddressFamily
-
-            let ipBytes = withUnsafeBytes(of: &addr.s_addr) { Array($0) }
-            for (i, byte) in ipBytes.enumerated() {
-                data[4 + i] = byte
+        var data = Data(count: 152)
+        if inet_pton(AF_INET, ip, &sa.sin_addr) == 1 {
+            withUnsafeBytes(of: sa) { src in
+                data.withUnsafeMutableBytes { dst in
+                    dst.copyMemory(from: src)
+                }
             }
         }
         return data

@@ -45,6 +45,8 @@ public enum MinimuxerConstants {
     // MuxerService Constants
     static let deviceAttach = "Attached"
     static let deviceDetach = "Detached"
+    static let usbmuxMaxPacketBufferLength = 4095
+    static let usbmuxHeaderLen = 16
 
     // Sleep / Threading timeouts
     static let heartbeatSleepNs: UInt64 = 1_000_000_000

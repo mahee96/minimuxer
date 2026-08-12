@@ -156,7 +156,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
 
         if isrppairing {
             guard ddiMounted else {
-                let msg = "dmg=\(ddiMounted) started=\(MuxerService.isListening)"
+                let msg = "dmg=\(ddiMounted) started=\(MuxerService.shared.isListening)"
                 verboseLog("minimuxer not ready (RSD): \(msg)")
                 return .failure(.mount(protocol: activeProtocol, reason: msg))
             }
@@ -176,7 +176,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
             "minimuxer status (usbmuxd): " +
             "deviceUDID=\(deviceUDID ?? "nil") " +
             "dmg=\(ddiMounted) " +
-            "started=\(MuxerService.isListening) "
+            "started=\(MuxerService.shared.isListening) "
         )
         guard deviceUDID != nil else {
             return .failure(.invalidPairing(protocol: activeProtocol, reason: "Lockdown UDID not found"))
@@ -184,7 +184,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         guard ddiMounted else {
             return .failure(.mount(protocol: activeProtocol, reason: "DeveloperDiskImage is not mounted"))
         }
-        guard MuxerService.isListening else {
+        guard MuxerService.shared.isListening else {
             return .failure(.muxerNotListening("Usbmuxd fake server is not listening"))
         }
         return .success(true)
@@ -241,8 +241,8 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         }
 
         // restart muxer
-        MuxerService.stop()
-        try await MuxerService.start(udid: deviceUDID)
+        await MuxerService.shared.stop()
+        try await MuxerService.shared.start(udid: deviceUDID)
     }
     
     
@@ -289,7 +289,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
             return task
         }
         _ = await oldTask?.result       // await cancelled mount task completion
-        MuxerService.stop()
+        await MuxerService.shared.stop()
         // mark ready!
         await state.with {
             $0.status = .stopped

@@ -25,7 +25,7 @@ final internal class Mounter {
 
         // Prerequisite: usbmuxd must be up (RP pairing connects via RSD, skips muxer)
         if !isRPPairing {
-            guard MuxerService.isListening else {
+            guard MuxerService.shared.isListening else {
                 debugLog("[minimuxer] mounter: usbmuxd not ready!")
                 throw MinimuxerError.noConnection("Usbmuxd fake server is not listening")
             }

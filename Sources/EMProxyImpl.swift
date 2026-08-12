@@ -8,6 +8,8 @@
 
 import Foundation
 import EMProxy
+import Network
+
 
 public enum EMProxyError: Error, LocalizedError, CustomStringConvertible, Equatable, Sendable {
     case invalidBindAddressPointer
@@ -18,7 +20,7 @@ public enum EMProxyError: Error, LocalizedError, CustomStringConvertible, Equata
     case serverNotRunning
     case stopSignalFailed
     case threadJoinFailed
-    case testConnectionFailed
+    case handshakeClientNotConfigured
     case unknownError(Int32)
 
     public var description: String {
@@ -39,8 +41,8 @@ public enum EMProxyError: Error, LocalizedError, CustomStringConvertible, Equata
             return "Failed to send stop signal to EMProxy server"
         case .threadJoinFailed:
             return "Failed to join EMProxy loopback thread"
-        case .testConnectionFailed:
-            return "EMProxy loopback test connection failed"
+        case .handshakeClientNotConfigured:
+            return "EMProxy WireGuard VPN handshake client not configured"
         case .unknownError(let code):
             return "EMProxy error code: \(code)"
         }
@@ -51,7 +53,21 @@ public enum EMProxyError: Error, LocalizedError, CustomStringConvertible, Equata
     }
 }
 
-public final class EMProxyImpl: EMProxyAPI {
+public final class EMProxyImpl: @unchecked Sendable, EMProxyAPI {
+    private struct HandshakeConfig: Sendable {
+        let host: String
+        let port: UInt16
+        let enabled: Bool
+    }
+    private var handshakeConfig: HandshakeConfig?
+    private let handshakeLock = NSLock()
+
+    public func setHandshakeClient(host: String, port: UInt16, enabled: Bool) {
+        handshakeLock.withLock {
+            self.handshakeConfig = HandshakeConfig(host: host, port: port, enabled: enabled)
+        }
+    }
+
     public init() {
         set_log_callback { level, msgPtr in
             guard let msgPtr = msgPtr else { return false }
@@ -68,12 +84,16 @@ public final class EMProxyImpl: EMProxyAPI {
 
 
     public func start(host: String, port: UInt16) async throws {
+        let config = handshakeLock.withLock { self.handshakeConfig }
+        guard let config = config else {
+            throw EMProxyError.handshakeClientNotConfigured
+        }
         let address = "\(host):\(port)"
         try await matchingPriority {
             try await withFFIDispatch {
                 switch start_emotional_damage(address) {
                     case 0:
-                        return
+                        break
                     case -1:
                         throw EMProxyError.invalidBindAddressPointer
                     case -2:
@@ -88,6 +108,9 @@ public final class EMProxyImpl: EMProxyAPI {
                         throw EMProxyError.unknownError(err)
                 }
             }
+        }
+        if config.enabled {
+            await triggerVPNHandshake(host: config.host, port: config.port)
         }
     }
 
@@ -110,17 +133,33 @@ public final class EMProxyImpl: EMProxyAPI {
         }
     }
 
-    public func testConnection(timeoutMs: Int32) async throws {
-        try await matchingPriority {
-            try await withFFIDispatch {
-                switch test_emotional_damage(timeoutMs) {
-                    case 0:
-                        return
-                    case -1:
-                        throw EMProxyError.testConnectionFailed
-                    case let err:
-                        throw EMProxyError.unknownError(err)
+
+
+    private func triggerVPNHandshake(host: String, port: UInt16) async {
+        await withCheckedContinuation { continuation in
+            let connection = NWConnection(host: NWEndpoint.Host(host), port: NWEndpoint.Port(rawValue: port)!, using: .tcp)
+            var resumed = false
+            connection.stateUpdateHandler = { state in
+                debugLog("[EMProxy] triggerVPNHandshake state: \(state)")
+                switch state {
+                    case .ready, .failed, .cancelled:
+                        if !resumed {
+                            resumed = true
+                            continuation.resume()
+                        }
+                    default:
+                        break
                 }
+            }
+            connection.start(queue: .global())
+            
+            Task {
+                try? await Task.sleep(nanoseconds: MinimuxerConstants.vpnHandshakeTimeoutNs)
+                if !resumed {
+                    resumed = true
+                    continuation.resume()
+                }
+                connection.cancel()
             }
         }
     }

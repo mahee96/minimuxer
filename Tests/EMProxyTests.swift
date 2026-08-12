@@ -12,39 +12,112 @@ import CryptoKit
 import Network
 @testable import Minimuxer
 
+
+/*
+Packet flow:
+
+1. Source ports are ephemereal at the connection initiator side.
+2. Applications initiating connection are bound to same iface 
+they are sending traffic-towards(outbound) the local interface (including virtual).
+
+    App (10.7.0.2)
+    |   ^
+    |   | [Send: Dest 10.7.0.1:3344   (Src 10.7.0.2:3232)]
+    v   | [Recv: Dest 10.7.0.2:3232   (Src 10.7.0.1:3344)]
+    VPN Client (iface ip = 10.7.0.2)
+    |   ^
+    |   | [Send: Dest 127.0.0.1:51820 (Src 127.0.0.1:4234)]
+    v   | [Recv: Dest 127.0.0.1:4234  (Src 127.0.0.1:51820)]
+    EMProxy (boringtun Server)
+    |   ^
+    |   | [Send: Dest 127.0.0.1:62078 (Src 127.0.0.1:2232)]
+    v   | [Recv: Dest 127.0.0.1:2232  (Src 127.0.0.1:62078)]
+    Lockdownd (at 62078)
+
+*/
+
 final class EMProxyTests: XCTestCase {
-    func testEMProxyMinimuxerAPI() async throws {
+
+
+
+    // Test-1: full end to end test passing packets thru real wireguard VPN client
+    //         expects a properly functioning VPN configured to match the VPN source/tunnel routes list
+    //         and a VPN destination endpoint used by EMProxy in start() which is the wireguard server 
+    //         handling packets forwarded from the VPN
+    func testEMProxyWireGuardDeviceHandshake() async throws {
+        let HELLO_WORLD_PAYLOAD = "Hello World"
+
+        let peerIp = "10.7.0.1"
+        let testPort: UInt16 = 39483
+
+        let payloadReceivedExpectation = expectation(description: "Payload received by dummy listener")
+
+        print("[EMProxyTests] Spawning dummy TCP listener on port \(testPort)...")
+        let listener = try NWListener(using: .tcp, on: NWEndpoint.Port(rawValue: testPort)!)
+        listener.newConnectionHandler = { newConnection in
+            newConnection.stateUpdateHandler = { state in
+                if case .ready = state {
+                    newConnection.receive(minimumIncompleteLength: 1, maximumLength: 1024) { data, _, _, error in
+                        if let data = data, let text = String(data: data, encoding: .utf8) {
+                            print("[EMProxyTests] [DummyListener] Received payload: \"\(text)\"")
+                            if text == HELLO_WORLD_PAYLOAD {
+                                payloadReceivedExpectation.fulfill()
+                            }
+                        }
+                    }
+                }
+            }
+            newConnection.start(queue: .global())
+        }
+        listener.start(queue: .global())
+        defer { listener.cancel() }
+
+        Minimuxer.emproxy.setHandshakeClient(host: peerIp, port: testPort)
         print("[EMProxyTests] Starting Minimuxer.emproxy...")
         try await Minimuxer.emproxy.start()
 
-        print("[EMProxyTests] Testing end-to-end loopback connection & packet relay via testConnection()...")
-        try await Minimuxer.emproxy.testConnection(timeoutMs: 1000)
-        print("[EMProxyTests] testConnection() passed!")
+        print("[EMProxyTests] Using VPN peer IP: \(peerIp)")
 
+        print("[EMProxyTests] Attempting to connect to \(peerIp):\(testPort) to trigger system VPN handshake...")
+        let connection = NWConnection(host: NWEndpoint.Host(peerIp), port: NWEndpoint.Port(rawValue: testPort)!, using: .tcp)
+        
+        connection.stateUpdateHandler = { state in
+            print("[EMProxyTests] Connection state changed: \(state)")
+            if case .ready = state {
+                print("[EMProxyTests] Connection established successfully!")
+                let payload = HELLO_WORLD_PAYLOAD.data(using: .utf8)!
+                print("[EMProxyTests] Sending payload over connection to \(peerIp):\(testPort) (which will route through the wireguard VPN client which then forwards to EMProxy that then sends to our dummy listener on localhost)...")
+                connection.send(content: payload, completion: .contentProcessed { error in
+                    if let error = error {
+                        print("[EMProxyTests] Send error: \(error)")
+                    } else {
+                        print("[EMProxyTests] Send completed successfully!")
+                    }
+                })
+            }
+        }
+        
+        connection.start(queue: .global())
+        
+        await fulfillment(of: [payloadReceivedExpectation], timeout: 20.0)
+        
+        connection.cancel()
+        
         print("[EMProxyTests] Stopping Minimuxer.emproxy...")
         try await Minimuxer.emproxy.stop()
-        print("[EMProxyTests] EMProxy test completed successfully!")
+        print("[EMProxyTests] WireGuard device handshake test completed!")
     }
 
-    func testEMProxySwiftLoopbackConnection() async throws {
-        print("[EMProxyTests] Starting Minimuxer.emproxy for pure Swift loopback test...")
-        try await Minimuxer.emproxy.start()
-
-        print("[EMProxyTests] Executing Swift UDP loopback packet exchange...")
-        let testPayload = "SideStore-EMP-Test-Payload".data(using: .utf8)!
-        let isPayloadIntact = try verifySwiftUDPLoopbackPacketExchange(port: 39482, testPayload: testPayload)
-        XCTAssertTrue(isPayloadIntact, "Pure Swift loopback test packet exchange failed")
-
-        print("[EMProxyTests] Stopping Minimuxer.emproxy...")
-        try await Minimuxer.emproxy.stop()
-        print("[EMProxyTests] Pure Swift loopback test completed successfully!")
-    }
-
-    func testEMProxyWireGuardHandshakePacket_v040() async throws {
-        try await Task.sleep(nanoseconds: 500_000_000)
+    // Test-2: This serves as a mock for a real wireguard VPN client that would be talking wg protocol 
+    // (doing a wg-handshake) to the wg server which here is our EMProxy using the boringTun wg server implemenation.
+    // in case one swaps boringTun with wireguard-go/wireguard-rs etc, then this can confirm 
+    // if our implementation is still safe.
+    func testEMProxyWireGuardServerHandshake_v040() async throws {
         let handshakeState = try makeWireGuardHandshakeInitiationPacket()
         let handshakePacket = handshakeState.packet
 
+        print("[EMProxyTests] Configuring EMProxy handshake client (disabled)...")
+        Minimuxer.emproxy.setHandshakeClient(host: "", port: 0, enabled: false)
         print("[EMProxyTests] Starting Minimuxer.emproxy for WireGuard handshake test...")
         try await Minimuxer.emproxy.start()
 
@@ -161,37 +234,6 @@ final class EMProxyTests: XCTestCase {
 // Private Helper Extensions Describing Verification Methods
 
 private extension EMProxyTests {
-    func verifySwiftUDPLoopbackPacketExchange(port: UInt16, testPayload: Data) throws -> Bool {
-        let listener = try NWListener(using: .udp, on: NWEndpoint.Port(rawValue: port)!)
-        let receivedExpectation = expectation(description: "UDP loopback payload received")
-        var receivedData: Data?
-
-        listener.newConnectionHandler = { connection in
-            connection.start(queue: .global())
-            connection.receiveMessage { data, _, _, _ in
-                receivedData = data
-                receivedExpectation.fulfill()
-                connection.cancel()
-            }
-        }
-        listener.start(queue: .global())
-        defer { listener.cancel() }
-
-        dispatchUDPSender(port: port, payload: testPayload)
-
-        wait(for: [receivedExpectation], timeout: 3.0)
-        return receivedData == testPayload
-    }
-
-    func dispatchUDPSender(port: UInt16, payload: Data) {
-        DispatchQueue.global().async {
-            let connection = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: port)!, using: .udp)
-            connection.start(queue: .global())
-            connection.send(content: payload, completion: .idempotent)
-            usleep(100_000)
-            connection.cancel()
-        }
-    }
 
     struct HandshakeState {
         let packet: Data

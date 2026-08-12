@@ -37,8 +37,8 @@ final internal class Mounter {
             throw MinimuxerError.noDevice("Reachable device IP not found")
         }
 
-        let isDDIMounted = try runIdevice("isDDIMounted") {
-            try IdeviceGateway.shared.isDDIMounted()
+        let isDDIMounted = try await runIdevice("isDDIMounted") {
+            try await IdeviceGateway.shared.isDDIMounted()
         }
         if isDDIMounted {
             verboseLog("[minimuxer] mounter: DeveloperDiskImage is already mounted. Bypassing mount.")
@@ -49,8 +49,8 @@ final internal class Mounter {
         var major = 17
         var versionStr: String? = nil
         if !isRPPairing {
-            guard let v = try runIdevice("getLockdownValue(ProductVersion)", body: {
-                try IdeviceGateway.shared.getLockdownValue(key: "ProductVersion")
+            guard let v = try await runIdevice("getLockdownValue(ProductVersion)", body: {
+                try await IdeviceGateway.shared.getLockdownValue(key: "ProductVersion")
             }) else {
                 debugLog("[minimuxer] mounter: could not get device version")
                 throw MinimuxerError.noDevice("ProductVersion not found in lockdown")
@@ -102,9 +102,9 @@ final internal class Mounter {
         throw lastError
     }
 
-    private func runIdevice<T>(_ description: String, body: () throws -> T) throws -> T {
+    private func runIdevice<T>(_ description: String, body: () async throws -> T) async throws -> T {
         do {
-            return try body()
+            return try await body()
         } catch {
             debugLog("[minimuxer] mounter: \(description) failed: \(error)")
             throw error
@@ -127,7 +127,9 @@ final internal class Mounter {
             // Pre-17: lockdown only — load DMG + signature, mount via imagemounter
             let (dmgData, sigData) = try loadPre17Image(iosVersion: iosVersion, dmgDocsPath: dmgDocsPath)
             verboseLog("[minimuxer] Uploading and mounting image (dmg=\(dmgData.count) bytes, sig=\(sigData.count) bytes)...")
-            try IdeviceGateway.shared.mountDeveloperImage(image: dmgData, signature: sigData)
+            try await runIdevice("mountDeveloperImage") {
+                try await IdeviceGateway.shared.mountDeveloperImage(image: dmgData, signature: sigData)
+            }
             verboseLog("[minimuxer] Successfully mounted the image")
         } else {
             // Post-17: both RP and lockdown use mountPersonalizedDdi.
@@ -139,7 +141,9 @@ final internal class Mounter {
                 "trustcache=\(trustcacheData.count) bytes, " +
                 "manifest=\(manifestData.count) bytes)"
             )
-            try IdeviceGateway.shared.mountPersonalizedDdi(image: imageData, trustcache: trustcacheData, manifest: manifestData)
+            try await runIdevice("mountPersonalizedDdi") {
+                try await IdeviceGateway.shared.mountPersonalizedDdi(image: imageData, trustcache: trustcacheData, manifest: manifestData)
+            }
             verboseLog("[minimuxer] DDI mounted successfully")
         }
     }

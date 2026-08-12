@@ -101,12 +101,17 @@ public enum Minimuxer {
 
 public protocol EMProxyAPI: AnyObject, Sendable {
     func start(host: String, port: UInt16) async throws
-    func stop() async
+    func stop() async throws
+    func testConnection(timeoutMs: Int32) async throws
 }
 
 public extension EMProxyAPI {
     func start() async throws {
         try await start(host: MinimuxerConstants.empHost, port: MinimuxerConstants.empPort)
+    }
+
+    func testConnection(timeoutMs: Int32 = 1000) async throws {
+        try await testConnection(timeoutMs: timeoutMs)
     }
 }
 

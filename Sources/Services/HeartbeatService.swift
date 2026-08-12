@@ -106,7 +106,7 @@ final internal class HeartbeatService {
 
             do {
                 var newInterval: UInt64 = 0
-                try IdeviceGateway.shared.performHeartbeat(interval: currentInterval, newInterval: &newInterval)
+                try await IdeviceGateway.shared.performHeartbeat(interval: currentInterval, newInterval: &newInterval)
                 currentInterval = newInterval > 0 ? newInterval : 1000
                 lastBeatSuccessful = true
                 lastErrorDescription = nil

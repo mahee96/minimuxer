@@ -204,40 +204,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
             return fallback
         }
     }
-    
-    // This is required since we want to dissociate the caller priority from what rust internally uses so that
-    // thread checker doesn't complain inversion of priority (ex: if caller was Task instantiated from MainThread,
-    // then it is of .userInitiated priority by default, but our rust tokio threads are at .background priority
-    //
-    // NOTE: For now this wrapping is only required for IdeviceGateway apis that do device services like fetchUDID, install etc
-    //
-    @inline(__always)
-    private func matchingPriority<T: Sendable>(priority: TaskPriority = .medium, _ body: @escaping @Sendable () async throws -> T) async throws -> T {
-        try await Task.detached(priority: priority) {
-            try await body()
-        }.value
-    }
 
-    private func restartMuxerServer() async throws {
-        guard !isrppairing else { return }
-        // restartMuxerServer only applies to the lockdown protocol path
-        guard let pairingDict = IdeviceGateway.shared.pairingDataDict else {
-            debugLog("[minimuxer] ERROR: Pairing DICT missing...ignoring restart MuxerServer")
-            throw MinimuxerError.invalidPairing(protocol: .lockdown, reason: "Pairing dictionary is missing in gateway")
-        }
-        verboseLog("[minimuxer] loaded pairing file keys: \(pairingDict.keys)")
-
-        guard let deviceUDID = pairingDict["UDID"] as? String else {
-            debugLog("[minimuxer] ERROR: Pairing file missing UDID")
-            throw MinimuxerError.invalidPairing(protocol: .lockdown, reason: "Pairing file is missing UDID value")
-        }
-
-        // restart muxer
-        MuxerService.stop()
-        try await MuxerService.start(udid: deviceUDID)
-    }
-    
-    
     func setLogging(_ enabled: Bool) {
         self.isLoggingEnabled = enabled
         IdeviceGateway.shared.setLogging(enabled)
@@ -259,6 +226,27 @@ final internal class MinimuxerImpl: MinimuxerAPI {
     }
     
     
+    private func restartMuxerServer() async throws {
+        guard !isrppairing else { return }
+        // restartMuxerServer only applies to the lockdown protocol path
+        guard let pairingDict = IdeviceGateway.shared.pairingDataDict else {
+            debugLog("[minimuxer] ERROR: Pairing DICT missing...ignoring restart MuxerServer")
+            throw MinimuxerError.invalidPairing(protocol: .lockdown, reason: "Pairing dictionary is missing in gateway")
+        }
+        verboseLog("[minimuxer] loaded pairing file keys: \(pairingDict.keys)")
+
+        guard let deviceUDID = pairingDict["UDID"] as? String else {
+            debugLog("[minimuxer] ERROR: Pairing file missing UDID")
+            throw MinimuxerError.invalidPairing(protocol: .lockdown, reason: "Pairing file is missing UDID value")
+        }
+
+        // restart muxer
+        MuxerService.stop()
+        try await MuxerService.start(udid: deviceUDID)
+    }
+    
+    
+    
     func start(pairingFile: String, mountPath: String) async throws {
         let connectionMode = await getConnectionMode()
         if DeviceConnectionMode.notConfigured == connectionMode {
@@ -267,47 +255,56 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         await Minimuxer.network.start()
 
         // actor serialization scope
-        try await state.with{
+        await state.with{
             $0.status = .inprogress     // mark inprogress
             $0.lastDocsPath = mountPath // record the mountPath
         }
         // let idevice initialize its state and set isRPPairing
-        try IdeviceGateway.shared.start(pairingFileContent: pairingFile)
+        try await matchingPriority {
+            try await IdeviceGateway.shared.start(pairingFileContent: pairingFile)
+        }
         // retarget usbmuxd to our fake usbmuxd server (over network)
         retargetUsbmuxdAddr()
         // start our fake usbmuxd server for lockdown protocol based clients if required
         try await restartMuxerServer()
         
         do {
-            try await matchingPriority{
-                try await Mounter.shared.mount(docsPath: mountPath)
-            }
+            try await mountDDI(docsPath: mountPath)
         } catch {
             debugLog("[minimuxer] WARN: Initial DDI mount skipped during startup: \(error.localizedDescription)")
         }
         // mark ready!
-        try await state.with{
+        await state.with{
             $0.status = .started
         }
     }
 
     func stop() async {
         // actor serialization scope
-        try await state.with{
-            $0.status = .inprogress // mark inprogress
-            $0.mountTask?.cancel()  // cancel the task
+        let oldTask = await state.with { state -> Task<Bool, Error>? in
+            state.status = .inprogress  // mark inprogress
+            let task = state.mountTask
+            task?.cancel()              // cancel the task
+            state.mountTask = nil
+            return task
         }
-        try await state.with{
-            $0.status = .inprogress
-            $0.mountTask = nil
-        }
+        _ = await oldTask?.result       // await cancelled mount task completion
         MuxerService.stop()
         // mark ready!
-        try await state.with{
+        await state.with {
             $0.status = .stopped
         }
     }
     
+    private func restartWith(pairingFile: String, op: String) async throws {
+        let activeProtocol: PairingProtocol = isrppairing ? .rppairing : .lockdown
+        guard let mountPath = await state.lastDocsPath else {
+            throw MinimuxerError.mount(protocol: activeProtocol, reason: "start() should be invoked before requesting \(op). cause: lastDocsPath is nil")
+        }
+        await stop()
+        try await start(pairingFile: pairingFile, mountPath: mountPath)
+    }
+
     func restart() async throws {
         verboseLog("[minimuxer] Restarting services...")
         let activeProtocol: PairingProtocol = isrppairing ? .rppairing : .lockdown
@@ -316,50 +313,15 @@ final internal class MinimuxerImpl: MinimuxerAPI {
             debugLog("[minimuxer] restart: no existing pairing file — cannot restart")
             throw MinimuxerError.invalidPairing(protocol: activeProtocol, reason: "No existing pairing file found in gateway during restart")
         }
-        guard let mountPath = await state.lastDocsPath else {
-            throw MinimuxerError.mount(protocol: activeProtocol, reason: "lastDocsPath is nil during restart")
-        }
-        await stop()
-        try await start(pairingFile: pairingFile, mountPath: mountPath)
+        try await restartWith(pairingFile: pairingFile, op: "restart")
         await Minimuxer.network.refreshEndpoint()
-    }
-    
-    func mountDDI(docsPath: String) async throws -> Bool {
-        // actor serialization scope
-        await state.with{
-            $0.lastDocsPath = docsPath  // record the mountPath
-            $0.mountTask?.cancel()      // cancel the task
-        }
-        let task = Task.detached(priority: .medium) {
-            try await Mounter.shared.mount(docsPath: docsPath)
-        }
-        await state.with{
-            $0.mountTask = task
-        }
-        return try await task.value
-    }
-    func isDDIMounted() async throws -> Bool {
-        try await matchingPriority{
-            try IdeviceGateway.shared.isDDIMounted()
-        }
     }
 
     func reinitializePairingData(pairingFile: String) async throws {
         verboseLog("[minimuxer] Reinitializing with new pairing file...")
-        await stop()
-        guard let mountPath = await state.lastDocsPath else {
-            let activeProtocol: PairingProtocol = isrppairing ? .rppairing : .lockdown
-            throw MinimuxerError.mount(protocol: activeProtocol, reason: "start() should be invoked before requesting pairing data reinitialization. cause: lastDocsPath is nil")
-        }
-        try await start(pairingFile: pairingFile, mountPath: mountPath)
+        try await restartWith(pairingFile: pairingFile, op: "reinitializePairingData")
     }
-
-    func fetchUDID() async throws -> String? {
-        try await matchingPriority{
-            try IdeviceGateway.shared.fetchUDID()
-        }
-    }
-    
+  
     private func testTCPPort(ip: String, port: UInt16) -> Bool {
         var addr = sockaddr_in()
         addr.sin_family = sa_family_t(AF_INET)
@@ -392,31 +354,6 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         return testTCPPort(ip: ip, port: MinimuxerConstants.lockdowndPort)
     }
 
-
-    func yeetAppAfc(bundleId: String, ipaBytes: Data) async throws {
-        try await matchingPriority{
-            try IdeviceGateway.shared.yeetAppAfc(bundleId: bundleId, ipaBytes: ipaBytes)
-        }
-    }
-
-    func installIpa(bundleId: String) async throws {
-        try await matchingPriority{
-            try IdeviceGateway.shared.installIpa(bundleId: bundleId)
-        }
-    }
-
-    func removeApp(bundleId: String) async throws {
-        try await matchingPriority{
-            try IdeviceGateway.shared.removeApp(bundleId: bundleId)
-        }
-    }
-
-    func wipeContainer(identifier: String) async throws {
-        try await matchingPriority{
-            try IdeviceGateway.shared.wipeContainer(identifier: identifier)
-        }
-    }
-
     private func ensureDDIMounted() async throws {
         let isMounted = (try? await IdeviceGateway.shared.isDDIMounted()) ?? false
         if isMounted {
@@ -427,56 +364,113 @@ final internal class MinimuxerImpl: MinimuxerAPI {
             throw MinimuxerError.mount(protocol: activeProtocol, reason: "DDI mount path not set")
         }
         verboseLog("[minimuxer] DDI not mounted, mounting now before launching debug session...")
-        _ = try await Mounter.shared.mount(docsPath: mountPath)
+        try await Mounter.shared.mount(docsPath: mountPath)
+    }
+
+    
+    @discardableResult
+    func mountDDI(docsPath: String) async throws -> Bool {
+        // actor serialization scope
+        let oldTask = await state.with { state -> Task<Bool, Error>? in
+            state.lastDocsPath = docsPath   // record the mountPath
+            let task = state.mountTask
+            task?.cancel()                  // cancel the task
+            state.mountTask = nil
+            return task
+        }
+        _ = await oldTask?.result           // await cancelled mount task completion
+        let task = Task.detached(priority: .medium) {
+            try await Mounter.shared.mount(docsPath: docsPath)
+        }
+        await state.with {
+            $0.mountTask = task
+        }
+        return try await task.value
+    }
+
+    func isDDIMounted() async throws -> Bool {
+        try await matchingPriority{
+            try await IdeviceGateway.shared.isDDIMounted()
+        }
+    }
+
+    func fetchUDID() async throws -> String? {
+        try await matchingPriority{
+            try await IdeviceGateway.shared.fetchUDID()
+        }
+    }
+
+    func yeetAppAfc(bundleId: String, ipaBytes: Data) async throws {
+        try await matchingPriority{
+            try await IdeviceGateway.shared.yeetAppAfc(bundleId: bundleId, ipaBytes: ipaBytes)
+        }
+    }
+
+    func installIpa(bundleId: String) async throws {
+        try await matchingPriority{
+            try await IdeviceGateway.shared.installIpa(bundleId: bundleId)
+        }
+    }
+
+    func removeApp(bundleId: String) async throws {
+        try await matchingPriority{
+            try await IdeviceGateway.shared.removeApp(bundleId: bundleId)
+        }
+    }
+
+    func wipeContainer(identifier: String) async throws {
+        try await matchingPriority{
+            try await IdeviceGateway.shared.wipeContainer(identifier: identifier)
+        }
     }
 
     func debugApp(appId: String) async throws {
-        try await ensureDDIMounted()
         try await matchingPriority{
-            try IdeviceGateway.shared.debugApp(appId: appId)
+            try await self.ensureDDIMounted()
+            try await IdeviceGateway.shared.debugApp(appId: appId)
         }
     }
 
     func attachDebugger(pid: UInt32) async throws {
-        try await ensureDDIMounted()
         try await matchingPriority{
-            try IdeviceGateway.shared.debugProcess(pid: pid)
+            try await self.ensureDDIMounted()
+            try await IdeviceGateway.shared.debugProcess(pid: pid)
         }
     }
 
     func installProvisioningProfile(profile: Data) async throws {
         try await matchingPriority{
-            try IdeviceGateway.shared.installProvisioningProfile(profile: profile)
+            try await IdeviceGateway.shared.installProvisioningProfile(profile: profile)
         }
     }
 
     func removeProvisioningProfile(id: String) async throws {
         try await matchingPriority{
-            try IdeviceGateway.shared.removeProvisioningProfile(id: id)
+            try await IdeviceGateway.shared.removeProvisioningProfile(id: id)
         }
     }
 
     func dumpProfiles(docsPath: String) async throws -> String {
         try await matchingPriority{
-            try IdeviceGateway.shared.dumpProfiles(docsPath: docsPath)
+            try await IdeviceGateway.shared.dumpProfiles(docsPath: docsPath)
         }
     }
 
     func afcListDirectory(bundleId: String, path: String) async throws -> [String] {
         try await matchingPriority {
-            try IdeviceGateway.shared.afcListDirectory(bundleId: bundleId, path: path)
+            try await IdeviceGateway.shared.afcListDirectory(bundleId: bundleId, path: path)
         }
     }
 
     func afcReadFile(bundleId: String, path: String) async throws -> Data {
         try await matchingPriority {
-            try IdeviceGateway.shared.afcReadFile(bundleId: bundleId, path: path)
+            try await IdeviceGateway.shared.afcReadFile(bundleId: bundleId, path: path)
         }
     }
 
     func afcGetFileInfo(bundleId: String, path: String) async throws -> (isDirectory: Bool, fileSize: Int64) {
         try await matchingPriority {
-            try IdeviceGateway.shared.afcGetFileInfo(bundleId: bundleId, path: path)
+            try await IdeviceGateway.shared.afcGetFileInfo(bundleId: bundleId, path: path)
         }
     }
 }

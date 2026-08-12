@@ -37,8 +37,12 @@ let package = Package(
         .binaryTarget(
             name: "EMProxy",
             url: "https://github.com/SideStore/em_proxy/releases/download/v0.9.0/EMProxy.xcframework.zip",
-            checksum: "bafb3689f3d20ccefc600e8e64a7aac2d12db75f0a596420e4e59efbcca4492c"
+            checksum: "a3aa336e0c1239e87cb39624d6a14ba3e9b7cb000906bd514de96f0f237880b0"
         ),
+//         .binaryTarget(
+//             name: "EMProxy",
+//             path: "../em_proxy/libs/EMProxy.xcframework"
+//         ),
 
         // MARK: Main SPM target
         .target(
@@ -49,6 +53,11 @@ let package = Package(
                 .product(name: "ZIPFoundation", package: "ZIPFoundation")
             ],
             path: "Sources"
+        ),
+        .testTarget(
+            name: "MinimuxerTests",
+            dependencies: ["Minimuxer"],
+            path: "Tests"
         )
     ]
 )

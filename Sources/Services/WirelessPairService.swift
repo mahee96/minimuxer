@@ -35,7 +35,7 @@ final internal class WirelessPairService: WirelessPairAPI {
             
             let outcome: Result<WirelessPairPairedDevice, Swift.Error>
             do {
-                let device = try IdeviceGateway.shared.startWirelessPair(
+                let device = try await IdeviceGateway.shared.startWirelessPair(
                     hostName: hostName,
                     hostModel: hostModel,
                     outPath: outPath,

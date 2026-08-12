@@ -224,7 +224,7 @@ internal final class IdeviceGateway {
         #endif
     }
 
-    func start(pairingFileContent: String) throws {
+    private func syncStart(pairingFileContent: String) throws {
         debugLog("[IdeviceGateway] start() called, pairingFileContent length: \(pairingFileContent.count)")
         cleanup()
         
@@ -677,7 +677,7 @@ internal final class IdeviceGateway {
         }
     }
 
-    func fetchUDID() throws -> String? {
+    private func syncFetchUDID() throws -> String? {
         debugLog("[IdeviceGateway] fetchUDID() started, isRPPairing: \(isRPPairing) (mode = .\(pairingFileType))")
         try verifyInitialized()
         if isRPPairing {
@@ -776,7 +776,7 @@ internal final class IdeviceGateway {
         }
     }
 
-    func getLockdownValue(key: String) throws -> String? {
+    private func syncGetLockdownValue(key: String) throws -> String? {
         debugLog("[IdeviceGateway] getLockdownValue(key: \(key)) started, isRPPairing: \(isRPPairing) (mode = .\(pairingFileType))")
         try verifyInitialized()
 
@@ -808,7 +808,7 @@ internal final class IdeviceGateway {
         }
     }
 
-    func installProvisioningProfile(profile: Data) throws {
+    private func syncInstallProvisioningProfile(profile: Data) throws {
         debugLog("[IdeviceGateway] installProvisioningProfile() called, profile length: \(profile.count)")
         try verifyInitialized()
         try performWithEitherService(
@@ -833,7 +833,7 @@ internal final class IdeviceGateway {
         }
     }
 
-    func removeProvisioningProfile(id: String) throws {
+    private func syncRemoveProvisioningProfile(id: String) throws {
         debugLog("[IdeviceGateway] removeProvisioningProfile() called, id: \(id)")
         try verifyInitialized()
         try performWithEitherService(
@@ -856,7 +856,7 @@ internal final class IdeviceGateway {
         }
     }
 
-    func removeApp(bundleId: String) throws {
+    private func syncRemoveApp(bundleId: String) throws {
         debugLog("[IdeviceGateway] removeApp() called, bundleId: \(bundleId)")
         try verifyInitialized()
         try performWithEitherService(
@@ -879,7 +879,7 @@ internal final class IdeviceGateway {
         }
     }
 
-    func yeetAppAfc(bundleId: String, ipaBytes: Data) throws {
+    private func syncYeetAppAfc(bundleId: String, ipaBytes: Data) throws {
         debugLog("[IdeviceGateway] yeetAppAfc() called, bundleId: \(bundleId), ipaBytes size: \(ipaBytes.count)")
         try verifyInitialized()
         try performWithEitherService(
@@ -933,7 +933,7 @@ internal final class IdeviceGateway {
         }
     }
 
-    func installIpa(bundleId: String) throws {
+    private func syncInstallIpa(bundleId: String) throws {
         debugLog("[IdeviceGateway] installIpa() called, bundleId: \(bundleId)")
         try verifyInitialized()
         try performWithEitherService(
@@ -1229,10 +1229,10 @@ internal final class IdeviceGateway {
         return err
     }
 
-    func debugApp(appId: String) throws {
+    private func syncDebugApp(appId: String) throws {
         debugLog("[IdeviceGateway] debugApp() called, appId: \(appId)")
         try verifyInitialized()
-        guard let versionStr = try getLockdownValue(key: "ProductVersion"),
+        guard let versionStr = try syncGetLockdownValue(key: "ProductVersion"),
               let majorStr = versionStr.split(separator: ".").first,
               let major = Int(majorStr) else {
             debugLog("[IdeviceGateway] debugApp() failed to get ProductVersion")
@@ -1257,7 +1257,7 @@ internal final class IdeviceGateway {
         }
     }
 
-    func debugProcess(pid: UInt32) throws {
+    private func syncDebugProcess(pid: UInt32) throws {
         debugLog("[IdeviceGateway] debugProcess() called, pid: \(pid)")
         try verifyInitialized()
         try performWithEitherService(
@@ -1276,7 +1276,7 @@ internal final class IdeviceGateway {
         }
     }
 
-    func dumpProfiles(docsPath: String) throws -> String {
+    private func syncDumpProfiles(docsPath: String) throws -> String {
         debugLog("[IdeviceGateway] dumpProfiles() called, docsPath: \(docsPath)")
         try verifyInitialized()
         return try performWithEitherService(
@@ -1332,7 +1332,7 @@ internal final class IdeviceGateway {
         }
     }
 
-    func performHeartbeat(interval: UInt64, newInterval: UnsafeMutablePointer<UInt64>) throws {
+    private func syncPerformHeartbeat(interval: UInt64, newInterval: UnsafeMutablePointer<UInt64>) throws {
        debugLog("[IdeviceGateway] performHeartbeat() called, interval: \(interval)")
        try verifyInitialized()
        try performWithEitherService(
@@ -1361,7 +1361,7 @@ internal final class IdeviceGateway {
        }
     }
 
-    func mountPersonalizedDdi(image: Data, trustcache: Data, manifest: Data) throws {
+    private func syncMountPersonalizedDdi(image: Data, trustcache: Data, manifest: Data) throws {
         debugLog("[IdeviceGateway] mountPersonalizedDdi() called, image size: \(image.count), trustcache size: \(trustcache.count), manifest size: \(manifest.count)")
         try verifyInitialized()
 
@@ -1597,7 +1597,7 @@ internal final class IdeviceGateway {
         }
     }
 
-    func isDDIMounted() throws -> Bool {
+    private func syncIsDDIMounted() throws -> Bool {
         debugLog("[IdeviceGateway] isDDIMounted() called")
         try verifyInitialized()
         return try performWithEitherService(
@@ -1670,7 +1670,7 @@ internal final class IdeviceGateway {
         return Data(bytes: xmlPtr, count: Int(xmlLen))
     }
 
-    func mountDeveloperImage(image: Data, signature: Data) throws {
+    private func syncMountDeveloperImage(image: Data, signature: Data) throws {
         debugLog("[IdeviceGateway] mountDeveloperImage() called, image size: \(image.count), signature size: \(signature.count)")
         try verifyInitialized()
         try performWithEitherService(
@@ -1732,7 +1732,7 @@ internal final class IdeviceGateway {
         let hostAltIrkHex: String
     }
 
-    func startWirelessPair(
+    private func syncStartWirelessPair(
         hostName: String,
         hostModel: String,
         outPath: String,
@@ -2027,19 +2027,19 @@ internal final class IdeviceGateway {
         return (isDirectory, size)
     }
 
-    func afcListDirectory(bundleId: String, path: String) throws -> [String] {
+    private func syncAfcListDirectory(bundleId: String, path: String) throws -> [String] {
         let client = try startHouseArrestAfc(bundleId: bundleId)
         defer { afcClientFree(client: client) }
         return try afcListDirectory(client: client, path: path)
     }
 
-    func afcReadFile(bundleId: String, path: String) throws -> Data {
+    private func syncAfcReadFile(bundleId: String, path: String) throws -> Data {
         let client = try startHouseArrestAfc(bundleId: bundleId)
         defer { afcClientFree(client: client) }
         return try afcReadFile(client: client, path: path)
     }
 
-    func afcGetFileInfo(bundleId: String, path: String) throws -> (isDirectory: Bool, fileSize: Int64) {
+    private func syncAfcGetFileInfo(bundleId: String, path: String) throws -> (isDirectory: Bool, fileSize: Int64) {
         let client = try startHouseArrestAfc(bundleId: bundleId)
         defer { afcClientFree(client: client) }
         return try afcGetFileInfo(client: client, path: path)
@@ -2065,7 +2065,7 @@ internal final class IdeviceGateway {
         }
     }
 
-    func wipeContainer(identifier: String) throws {
+    private func syncWipeContainer(identifier: String) throws {
         debugLog("[IdeviceGateway] wipeContainer() called, identifier: \(identifier)")
         let client = try startHouseArrestAfc(bundleId: identifier)
         defer { afcClientFree(client: client) }
@@ -2081,5 +2081,140 @@ internal final class IdeviceGateway {
     private func afcClientFree(client: OpaquePointer) {
         debugLog("[IdeviceGateway] afcClientFree() freeing AFC client handle")
         afc_client_free(client)
+    }
+}
+
+// Async FFI Dispatcher Extensions
+extension IdeviceGateway {
+    func start(pairingFileContent: String) async throws {
+        try await withFFIDispatch {
+            try self.syncStart(pairingFileContent: pairingFileContent)
+        }
+    }
+
+    func fetchUDID() async throws -> String? {
+        try await withFFIDispatch {
+            try self.syncFetchUDID()
+        }
+    }
+
+    func getLockdownValue(key: String) async throws -> String? {
+        try await withFFIDispatch {
+            try self.syncGetLockdownValue(key: key)
+        }
+    }
+
+    func installProvisioningProfile(profile: Data) async throws {
+        try await withFFIDispatch {
+            try self.syncInstallProvisioningProfile(profile: profile)
+        }
+    }
+
+    func removeProvisioningProfile(id: String) async throws {
+        try await withFFIDispatch {
+            try self.syncRemoveProvisioningProfile(id: id)
+        }
+    }
+
+    func removeApp(bundleId: String) async throws {
+        try await withFFIDispatch {
+            try self.syncRemoveApp(bundleId: bundleId)
+        }
+    }
+
+    func yeetAppAfc(bundleId: String, ipaBytes: Data) async throws {
+        try await withFFIDispatch {
+            try self.syncYeetAppAfc(bundleId: bundleId, ipaBytes: ipaBytes)
+        }
+    }
+
+    func installIpa(bundleId: String) async throws {
+        try await withFFIDispatch {
+            try self.syncInstallIpa(bundleId: bundleId)
+        }
+    }
+
+    func debugApp(appId: String) async throws {
+        try await withFFIDispatch {
+            try self.syncDebugApp(appId: appId)
+        }
+    }
+
+    func debugProcess(pid: UInt32) async throws {
+        try await withFFIDispatch {
+            try self.syncDebugProcess(pid: pid)
+        }
+    }
+
+    func dumpProfiles(docsPath: String) async throws -> String {
+        try await withFFIDispatch {
+            try self.syncDumpProfiles(docsPath: docsPath)
+        }
+    }
+
+    func performHeartbeat(interval: UInt64, newInterval: UnsafeMutablePointer<UInt64>) async throws {
+        try await withFFIDispatch {
+            try self.syncPerformHeartbeat(interval: interval, newInterval: newInterval)
+        }
+    }
+
+    func mountPersonalizedDdi(image: Data, trustcache: Data, manifest: Data) async throws {
+        try await withFFIDispatch {
+            try self.syncMountPersonalizedDdi(image: image, trustcache: trustcache, manifest: manifest)
+        }
+    }
+
+    func isDDIMounted() async throws -> Bool {
+        try await withFFIDispatch {
+            try self.syncIsDDIMounted()
+        }
+    }
+
+    func mountDeveloperImage(image: Data, signature: Data) async throws {
+        try await withFFIDispatch {
+            try self.syncMountDeveloperImage(image: image, signature: signature)
+        }
+    }
+
+    func startWirelessPair(
+        hostName: String,
+        hostModel: String,
+        outPath: String,
+        onReady: @escaping (String, UInt16, [String: String]) -> Void,
+        onPin: @escaping (String) -> Void
+    ) async throws -> PairedDevice {
+        try await withFFIDispatch {
+            try self.syncStartWirelessPair(
+                hostName: hostName,
+                hostModel: hostModel,
+                outPath: outPath,
+                onReady: onReady,
+                onPin: onPin
+            )
+        }
+    }
+
+    func afcListDirectory(bundleId: String, path: String) async throws -> [String] {
+        try await withFFIDispatch {
+            try self.syncAfcListDirectory(bundleId: bundleId, path: path)
+        }
+    }
+
+    func afcReadFile(bundleId: String, path: String) async throws -> Data {
+        try await withFFIDispatch {
+            try self.syncAfcReadFile(bundleId: bundleId, path: path)
+        }
+    }
+
+    func afcGetFileInfo(bundleId: String, path: String) async throws -> (isDirectory: Bool, fileSize: Int64) {
+        try await withFFIDispatch {
+            try self.syncAfcGetFileInfo(bundleId: bundleId, path: path)
+        }
+    }
+
+    func wipeContainer(identifier: String) async throws {
+        try await withFFIDispatch {
+            try self.syncWipeContainer(identifier: identifier)
+        }
     }
 }

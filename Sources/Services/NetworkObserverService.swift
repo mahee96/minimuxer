@@ -11,6 +11,11 @@ import Combine
 
 final internal class NetworkObserverService: NetworkObserverAPI, @unchecked Sendable {
 
+    public let pathSubject = PassthroughSubject<NWPath, Never>()
+    public var pathPublisher: AnyPublisher<NWPath, Never> {
+        pathSubject.eraseToAnyPublisher()
+    }
+
     private let monitor = NWPathMonitor()
     private let queue = DispatchQueue(label: "net.monitor")
     private let state = State()
@@ -41,6 +46,7 @@ final internal class NetworkObserverService: NetworkObserverAPI, @unchecked Send
                 return
             }
             self.monitor.pathUpdateHandler = { path in
+                self.pathSubject.send(path)
                 continuation.yield(path)
             }
         }
@@ -50,7 +56,7 @@ final internal class NetworkObserverService: NetworkObserverAPI, @unchecked Send
         let task = Task.detached { [weak self] in
             for await path in paths {
                 verboseLog("[minimuxer] [net] path changed, status: \(path.status)")
-                await self?.refreshEndpoint()
+                await self?.handleNetworkChange()
             }
         }
         await state.with { $0.observationTask = task }
@@ -58,25 +64,30 @@ final internal class NetworkObserverService: NetworkObserverAPI, @unchecked Send
         return true
     }
     
-    func refreshEndpoint() async {
+    func handleNetworkChange() async {
+        await refreshEndpoint()
+        
+        // Always re-evaluate and publish network change events as is
         debugLog("[minimuxer] [net] dispatching status update to subscribers")
-        Task.detached {
-            let readyResult = await Minimuxer.shared.isReady()
-            if let impl = Minimuxer.shared as? MinimuxerImpl {
-                debugLog("[minimuxer] [net] publishing status update to subscribers")
-                impl.statusSubject.send(readyResult)
-            }
+        let readyResult = await Minimuxer.shared.isReady()
+        if let impl = Minimuxer.shared as? MinimuxerImpl {
+            debugLog("[minimuxer] [net] publishing status update to subscribers")
+            impl.statusSubject.send(readyResult)
         }
-
+    }
+    
+    func refreshEndpoint() async {
         verboseLog("[minimuxer] [net] refreshing interfaces list and peers")
-        let changed = await NetworkIfaceScanner.shared.refresh()
-        guard changed else { return }
-
+        let ifacesChanged = await NetworkIfaceScanner.shared.refresh()
+        
+        guard ifacesChanged else {
+            return
+        }
+        
         let connectionMode = await NetworkIfaceScanner.shared.getPreferredConnectionMode()
-
         switch connectionMode {
             case .notConfigured:
-                debugLog("[minimuxer] [net] connection mode not configured. skipping refreshEndpoint...")
+                debugLog("[minimuxer] [net] connection mode not configured. skipping endpoint update...")
                 return
                 
             case .localVPN:

@@ -8,6 +8,7 @@
 
 import Foundation
 import Combine
+import Network
 
 public enum MinimuxerComponent: String {
     case heartbeat
@@ -123,6 +124,8 @@ public protocol NetworkObserverAPI: AnyObject {
     var isBridgeSatisfied: Bool { get }
     var isUTunAvailable: Bool { get }
     var isIKEv2IPSecAvailable: Bool { get }
+
+    var pathPublisher: AnyPublisher<NWPath, Never> { get }
 
     @discardableResult
     func start() async -> Bool

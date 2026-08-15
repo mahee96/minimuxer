@@ -115,7 +115,20 @@ public extension EMProxyAPI {
     }
 }
 
-// MARK: - Network Observer API
+public struct LocalInterfaceInfo: Hashable, Identifiable, Sendable {
+    public var id: String { name + "-" + ip }
+    public let name: String
+    public let ip: String
+    public let subnet: String
+    public let type: String
+
+    public init(name: String, ip: String, subnet: String, type: String) {
+        self.name = name
+        self.ip = ip
+        self.subnet = subnet
+        self.type = type
+    }
+}
 
 public protocol NetworkObserverAPI: AnyObject {
     var isWifiSatisfied: Bool { get }
@@ -126,6 +139,7 @@ public protocol NetworkObserverAPI: AnyObject {
     var isIKEv2IPSecAvailable: Bool { get }
 
     var pathPublisher: AnyPublisher<NWPath, Never> { get }
+    var activeInterfaces: [LocalInterfaceInfo] { get }
 
     @discardableResult
     func start() async -> Bool

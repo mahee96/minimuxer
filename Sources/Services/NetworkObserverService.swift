@@ -210,4 +210,37 @@ final internal class NetworkObserverService: NetworkObserverAPI, @unchecked Send
     var isIKEv2IPSecAvailable: Bool {
         return NetworkIfaceScanner.scan(quiet: true).contains { $0.name.hasPrefix("ipsec") }
     }
+
+    var activeInterfaces: [LocalInterfaceInfo] {
+        return NetworkIfaceScanner.scan(quiet: true).map { info in
+            let name = info.name.lowercased()
+            let type: String
+            
+            if name.hasPrefix("utun") {
+                type = "VPN (uTun)"
+            } else if name.hasPrefix("ipsec") {
+                type = "VPN (IPSec)"
+            } else if name == "en0" {
+                type = "Wi-Fi"
+            } else if name.hasPrefix("en") {
+                type = info.hostIP.hasPrefix("169.254.") ? "USB / Link-Local" : "Ethernet / Adapter"
+            } else if name.hasPrefix("pdp") {
+                type = "Cellular"
+            } else if name.hasPrefix("awdl") {
+                type = "AirDrop (AWDL)"
+            } else if name.hasPrefix("llw") {
+                type = "Low-Latency WLAN"
+            } else if name.hasPrefix("bridge") || name.hasPrefix("ap") {
+                type = "Personal Hotspot / Bridge"
+            } else if name.hasPrefix("lo") {
+                type = "Loopback"
+            } else if name.hasPrefix("pktap") {
+                type = "Packet Capture"
+            } else {
+                type = "Other"
+            }
+            
+            return LocalInterfaceInfo(name: info.name, ip: info.hostIP, subnet: info.maskIP, type: type)
+        }.sorted { $0.name.localizedCompare($1.name) == .orderedAscending }
+    }
 }

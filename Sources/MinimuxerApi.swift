@@ -115,16 +115,86 @@ public extension EMProxyAPI {
     }
 }
 
+public enum LocalInterfaceType: String, Hashable, Sendable, CaseIterable, Comparable {
+    case vpnUtun = "VPN (uTun)"
+    case vpnIpsec = "VPN (IPSec)"
+    case wifi = "Wi-Fi"
+    case usbLinkLocal = "USB / Link-Local"
+    case ethernet = "Ethernet / Adapter"
+    case cellular = "Cellular"
+    case airdrop = "AirDrop (AWDL)"
+    case lowLatencyWLAN = "Low-Latency WLAN"
+    case hotspotBridge = "Personal Hotspot / Bridge"
+    case loopback = "Loopback"
+    case packetCapture = "Packet Capture"
+    case other = "Other"
+
+    private static let priorityOrder: [LocalInterfaceType] = [
+        .wifi,
+        .vpnUtun,
+        .vpnIpsec,
+        .usbLinkLocal,
+        .cellular,
+        .hotspotBridge,
+        .ethernet,
+        .airdrop,
+        .lowLatencyWLAN,
+        .loopback,
+        .packetCapture,
+        .other
+    ]
+
+    public var priority: Int {
+        Self.priorityOrder.firstIndex(of: self) ?? Int.max
+    }
+
+    public static func < (lhs: LocalInterfaceType, rhs: LocalInterfaceType) -> Bool {
+        lhs.priority < rhs.priority
+    }
+
+    public var isVPN: Bool {
+        self == .vpnUtun || self == .vpnIpsec
+    }
+
+    private struct Prefix {
+        let value: String
+        init(_ value: String) { self.value = value }
+        static func ~= (pattern: Prefix, text: String) -> Bool {
+            text.hasPrefix(pattern.value)
+        }
+    }
+
+    public init(name: String, isLinkLocal: Bool = false) {
+        let lower = name.lowercased()
+        switch lower {
+            case "en0":             self = .wifi
+            case Prefix("en"):      self = isLinkLocal ? .usbLinkLocal : .ethernet
+            case Prefix("utun"):    self = .vpnUtun
+            case Prefix("ipsec"):   self = .vpnIpsec
+            case Prefix("pdp"):     self = .cellular
+            case Prefix("awdl"):    self = .airdrop
+            case Prefix("llw"):     self = .lowLatencyWLAN
+            case Prefix("bridge"),
+                Prefix("ap"):      self = .hotspotBridge
+            case Prefix("lo"):      self = .loopback
+            case Prefix("pktap"):   self = .packetCapture
+            default:                self = .other
+        }
+    }
+}
+
 public struct LocalInterfaceInfo: Hashable, Identifiable, Sendable {
-    public var id: String { name + "-" + ip }
+    public var id: String { name.lowercased() + "-" + ip }
     public let name: String
     public let ip: String
+    public let ipv6: String?
     public let subnet: String
-    public let type: String
+    public let type: LocalInterfaceType
 
-    public init(name: String, ip: String, subnet: String, type: String) {
+    public init(name: String, ip: String, ipv6: String? = nil, subnet: String, type: LocalInterfaceType) {
         self.name = name
         self.ip = ip
+        self.ipv6 = ipv6
         self.subnet = subnet
         self.type = type
     }

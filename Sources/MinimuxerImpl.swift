@@ -48,11 +48,11 @@ final internal class MinimuxerImpl: MinimuxerAPI {
     }
     
     func getConnectionMode() async -> DeviceConnectionMode {
-        await NetworkIfaceScanner.shared.getPreferredConnectionMode()
+        await DeviceConnectionManager.shared.getPreferredConnectionMode()
     }
     
     func bindConnectionConfig(_ binding: ConnectionConfigBinding) async {
-        await NetworkIfaceScanner.shared.bindConnectionConfig(binding)
+        await DeviceConnectionManager.shared.bindConnectionConfig(binding)
     }
     
     func isReady() async -> Result<Bool, MinimuxerError> {

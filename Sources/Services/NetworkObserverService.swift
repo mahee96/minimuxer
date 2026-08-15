@@ -78,13 +78,13 @@ final internal class NetworkObserverService: NetworkObserverAPI, @unchecked Send
     
     func refreshEndpoint() async {
         verboseLog("[minimuxer] [net] refreshing interfaces list and peers")
-        let ifacesChanged = await NetworkIfaceScanner.shared.refresh()
+        let ifacesChanged = await DeviceConnectionManager.shared.refresh()
         
         guard ifacesChanged else {
             return
         }
         
-        let connectionMode = await NetworkIfaceScanner.shared.getPreferredConnectionMode()
+        let connectionMode = await DeviceConnectionManager.shared.getPreferredConnectionMode()
         switch connectionMode {
             case .notConfigured:
                 debugLog("[minimuxer] [net] connection mode not configured. skipping endpoint update...")
@@ -92,25 +92,25 @@ final internal class NetworkObserverService: NetworkObserverAPI, @unchecked Send
                 
             case .localVPN:
                 verboseLog("[minimuxer] [net] retrive the first uTun vpn interface info")
-                if let info = await NetworkIfaceScanner.shared.vpnIface {
+                if let info = await DeviceConnectionManager.shared.vpnIface {
                     verboseLog("""
                     [minimuxer] [net] vpn interface detected
                       • name: \(info.name)
-                      • ip: \(info.hostIP)
-                      • mask: \(info.maskIP)
+                      • addresses: \(info.interfaceAddresses.description)
                       • linkType: \(info.linkType)
-                      • reportedPeer: \(info.reportedPeer ?? "nil")
-                      • derivedPeer: \(info.derivedPeer ?? "nil")
+                      • linkLayerDestinationIP: \(info.linkLayerDestinationIP?.description ?? "nil")
+                      • destinationIPs: [\(info.destinationIPs.map { $0.description }.joined(separator: ", "))]
+                      • destinationGatewayIPs: [\(info.destinationGatewayIPs.map { $0.description }.joined(separator: ", "))]
                     
                     """)
 
-                    let scanner = await NetworkIfaceScanner.shared
-                    let overrideIp = await scanner.overridePeerIp
+                    let manager = DeviceConnectionManager.shared
+                    let overrideIp = await manager.overridePeerIp
                     let isOverridden = !(overrideIp ?? "").isEmpty
 
                     let effectiveIp = await isOverridden
-                            ? (scanner.isOverridePeerIpReachable ? overrideIp : nil)            // when override active, we don't question user intent
-                            : (scanner.isDerivedPeerIpReachable ? scanner.derivedPeerIp : nil)  // only if not overriden, we try to use auto discovered
+                            ? (manager.isOverridePeerIpReachable ? overrideIp : nil)            // when override active, we don't question user intent
+                            : (manager.isDerivedPeerIpReachable ? manager.derivedPeerIp : nil)  // only if not overriden, we try to use auto discovered
                     let effectivePeer = isOverridden ? "overridePeer" : "derivedPeerIp"
 
                     if let peer = effectiveIp {
@@ -130,9 +130,9 @@ final internal class NetworkObserverService: NetworkObserverAPI, @unchecked Send
                 }
             
             case .remoteServer:
-                let scanner = await NetworkIfaceScanner.shared
-                let isReachable = await scanner.isRemoteServerIpReachable
-                if let remoteIp = await scanner.remoteServerIp  {
+                let manager = DeviceConnectionManager.shared
+                let isReachable = await manager.isRemoteServerIpReachable
+                if let remoteIp = await manager.remoteServerIp {
                     verboseLog("""
                     [minimuxer] [net] remote server endpoint detected \(isReachable ? "and reachable" : "but unreachable")
                       • remoteServerIp: \(remoteIp)
@@ -185,7 +185,7 @@ final internal class NetworkObserverService: NetworkObserverAPI, @unchecked Send
     var isUsbSatisfied: Bool {
         return NetworkIfaceScanner.scan(quiet: true).contains { info in
             let name = info.name.lowercased()
-            return name.hasPrefix("en") && name != "en0" && info.hostIP.hasPrefix("169.254.")
+            return name.hasPrefix("en") && name != "en0" && (info.interfaceAddresses.v4.first?.host.hasPrefix("169.254.") == true)
         }
     }
     
@@ -203,44 +203,33 @@ final internal class NetworkObserverService: NetworkObserverAPI, @unchecked Send
 
     // True when at least one `utun*` interface is active (userspace VPN — ex: wireguard).
     var isUTunAvailable: Bool {
-        return NetworkIfaceScanner.scan(quiet: true).contains { $0.name.hasPrefix("utun") }
+        return NetworkIfaceScanner.scan(quiet: true).contains { $0.name.lowercased().hasPrefix("utun") }
     }
 
     // True when at least one `ipsec*` interface is active (IKEv2/IPSec kernel VPN).
     var isIKEv2IPSecAvailable: Bool {
-        return NetworkIfaceScanner.scan(quiet: true).contains { $0.name.hasPrefix("ipsec") }
+        return NetworkIfaceScanner.scan(quiet: true).contains { $0.name.lowercased().hasPrefix("ipsec") }
     }
 
     var activeInterfaces: [LocalInterfaceInfo] {
         return NetworkIfaceScanner.scan(quiet: true).map { info in
-            let name = info.name.lowercased()
-            let type: String
+            let isLinkLocal = info.interfaceAddresses.v4.first?.host.hasPrefix("169.254.") == true
+            let type = LocalInterfaceType(name: info.name, isLinkLocal: isLinkLocal)
+            let v4 = info.interfaceAddresses.v4.first
+            let v6 = info.interfaceAddresses.v6.first
             
-            if name.hasPrefix("utun") {
-                type = "VPN (uTun)"
-            } else if name.hasPrefix("ipsec") {
-                type = "VPN (IPSec)"
-            } else if name == "en0" {
-                type = "Wi-Fi"
-            } else if name.hasPrefix("en") {
-                type = info.hostIP.hasPrefix("169.254.") ? "USB / Link-Local" : "Ethernet / Adapter"
-            } else if name.hasPrefix("pdp") {
-                type = "Cellular"
-            } else if name.hasPrefix("awdl") {
-                type = "AirDrop (AWDL)"
-            } else if name.hasPrefix("llw") {
-                type = "Low-Latency WLAN"
-            } else if name.hasPrefix("bridge") || name.hasPrefix("ap") {
-                type = "Personal Hotspot / Bridge"
-            } else if name.hasPrefix("lo") {
-                type = "Loopback"
-            } else if name.hasPrefix("pktap") {
-                type = "Packet Capture"
-            } else {
-                type = "Other"
+            return LocalInterfaceInfo(
+                name: info.name,
+                ip: v4?.host ?? (v6 ?? ""),
+                ipv6: v6,
+                subnet: v4?.mask ?? "",
+                type: type
+            )
+        }.sorted {
+            if $0.type != $1.type {
+                return $0.type < $1.type
             }
-            
-            return LocalInterfaceInfo(name: info.name, ip: info.hostIP, subnet: info.maskIP, type: type)
-        }.sorted { $0.name.localizedCompare($1.name) == .orderedAscending }
+            return $0.name.lowercased().localizedCompare($1.name.lowercased()) == .orderedAscending
+        }
     }
 }

@@ -136,6 +136,10 @@ public final class EMProxyImpl: @unchecked Sendable, EMProxyAPI {
 
 
     private func triggerVPNHandshake(host: String, port: UInt16) async {
+        guard !host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            debugLog("[EMProxy] triggerVPNHandshake skipped: host is empty")
+            return
+        }
         let timeout = Double(MinimuxerConstants.vpnHandshakeTimeoutNs) / 1_000_000_000.0
         let startTime = Date()
         

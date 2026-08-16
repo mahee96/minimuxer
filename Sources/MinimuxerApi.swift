@@ -25,6 +25,7 @@ public enum DeviceConnectionMode: String, Codable, Sendable {
 public struct ConnectionConfigBinding: Sendable {
     public let setTunnelIfaceIp: @Sendable (String?) -> Void
     public let setTunnelPeerIp: @Sendable (String?) -> Void
+    public let setTunnelPeerSubnetMask: @Sendable (String?) -> Void
     public let setTunnelPeerReachable: @Sendable (Bool) -> Void
     public let setTunnelIfaceSubnetMask: @Sendable (String?) -> Void
     public let setRemoteReachable: @Sendable (Bool) -> Void
@@ -37,6 +38,7 @@ public struct ConnectionConfigBinding: Sendable {
     public init(
         setTunnelIfaceIp: @escaping @Sendable (String?) -> Void,
         setTunnelPeerIp: @escaping @Sendable (String?) -> Void,
+        setTunnelPeerSubnetMask: @escaping @Sendable (String?) -> Void,
         setTunnelPeerReachable: @escaping @Sendable (Bool) -> Void,
         setTunnelIfaceSubnetMask: @escaping @Sendable (String?) -> Void,
         getRemoteServerIp: @escaping @Sendable () -> String,
@@ -47,6 +49,7 @@ public struct ConnectionConfigBinding: Sendable {
     ) {
         self.setTunnelIfaceIp = setTunnelIfaceIp
         self.setTunnelPeerIp = setTunnelPeerIp
+        self.setTunnelPeerSubnetMask = setTunnelPeerSubnetMask
         self.setTunnelPeerReachable = setTunnelPeerReachable
         self.setTunnelIfaceSubnetMask = setTunnelIfaceSubnetMask
         self.getRemoteServerIp = getRemoteServerIp

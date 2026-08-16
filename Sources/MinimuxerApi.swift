@@ -63,7 +63,7 @@ public protocol MinimuxerAPI: AnyObject {
     var statusPublisher: AnyPublisher<Result<Bool, MinimuxerError>, Never> { get }
     
     func getConnectionMode() async -> DeviceConnectionMode
-    func isReady() async -> Result<Bool, MinimuxerError>
+    func isReady(withDDIMountCheck: Bool) async -> Result<Bool, MinimuxerError>
     func describeError(_ error: MinimuxerError) -> String
     func bindConnectionConfig(_ binding: ConnectionConfigBinding) async
     func setLogging(_ enabled: Bool)
@@ -91,6 +91,12 @@ public protocol MinimuxerAPI: AnyObject {
     func afcListDirectory(bundleId: String, path: String) async throws -> [String]
     func afcReadFile(bundleId: String, path: String) async throws -> Data
     func afcGetFileInfo(bundleId: String, path: String) async throws -> (isDirectory: Bool, fileSize: Int64)
+}
+
+public extension MinimuxerAPI {
+    func isReady() async -> Result<Bool, MinimuxerError> {
+        await isReady(withDDIMountCheck: false)
+    }
 }
 
 public enum Minimuxer {

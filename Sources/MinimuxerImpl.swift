@@ -55,7 +55,23 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         await DeviceConnectionManager.shared.bindConnectionConfig(binding)
     }
     
-    func isReady() async -> Result<Bool, MinimuxerError> {
+    @discardableResult
+    private func checkDDIMountStatus() async throws(MinimuxerError) -> Bool {
+        let activeProtocol: PairingProtocol = isrppairing ? .rppairing : .lockdown
+        let ddiMounted = try await runIdeviceCheckingVPN("while checking DDI mount status", fallback: false) {
+            try await isDDIMounted()
+        }
+        guard ddiMounted else {
+            let msg = isrppairing ? "dmg=\(ddiMounted) started=\(MuxerService.shared.isListening)" : "DeveloperDiskImage is not mounted"
+            if isrppairing {
+                verboseLog("minimuxer not ready (\(activeProtocol)): \(msg)")
+            }
+            throw MinimuxerError.mount(protocol: activeProtocol, reason: msg)
+        }
+        return true
+    }
+
+    func isReady(withDDIMountCheck: Bool = false) async -> Result<Bool, MinimuxerError> {
         if !isPairingFileLoaded {
             debugLog("[minimuxer] minimuxer not ready: pairing file not loaded")
             return .failure(.pairingNotLoaded("No valid pairing file has been loaded"))
@@ -142,26 +158,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
             }
         }
 
-
         let activeProtocol: PairingProtocol = isrppairing ? .rppairing : .lockdown
-
-        let ddiMounted: Bool
-        do {
-            ddiMounted = try await runIdeviceCheckingVPN("while checking DDI mount status", fallback: false) {
-                try await isDDIMounted()
-            }
-        } catch let err as MinimuxerError {
-            return .failure(err)
-        }
-
-        if isrppairing {
-            guard ddiMounted else {
-                let msg = "dmg=\(ddiMounted) started=\(MuxerService.shared.isListening)"
-                verboseLog("minimuxer not ready (RSD): \(msg)")
-                return .failure(.mount(protocol: activeProtocol, reason: msg))
-            }
-            return .success(true)
-        }
 
         let deviceUDID: String?
         do {
@@ -173,17 +170,26 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         }
 
         verboseLog(
-            "minimuxer status (usbmuxd): " +
+            "minimuxer status (.\(activeProtocol)): " +
             "deviceUDID=\(deviceUDID ?? "nil") " +
-            "dmg=\(ddiMounted) " +
             "started=\(MuxerService.shared.isListening) "
         )
         guard deviceUDID != nil else {
-            return .failure(.invalidPairing(protocol: activeProtocol, reason: "Lockdown UDID not found"))
+            return .failure(.invalidPairing(protocol: activeProtocol, reason: ".\(activeProtocol) UDID not found"))
         }
-        guard ddiMounted else {
-            return .failure(.mount(protocol: activeProtocol, reason: "DeveloperDiskImage is not mounted"))
+
+        if withDDIMountCheck {
+            do {
+                try await checkDDIMountStatus()
+            } catch let err as MinimuxerError {
+                return .failure(err)
+            }
         }
+
+        if isrppairing {
+            return .success(true)
+        }
+
         guard MuxerService.shared.isListening else {
             return .failure(.muxerNotListening("Usbmuxd fake server is not listening"))
         }

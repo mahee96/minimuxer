@@ -178,21 +178,27 @@ final internal class MinimuxerImpl: MinimuxerAPI {
             return .failure(.invalidPairing(protocol: activeProtocol, reason: ".\(activeProtocol) UDID not found"))
         }
 
+        if !isrppairing {
+            guard MuxerService.shared.isListening else {
+                return .failure(.muxerNotListening("Usbmuxd fake server is not listening"))
+            }
+        }
+
+        // end of core validation
+
         if withDDIMountCheck {
             do {
                 try await checkDDIMountStatus()
             } catch let err as MinimuxerError {
-                return .failure(err)
+                if case .mount = err {
+                    return .failure(err)
+                }
+                return .failure(.mount(protocol: activeProtocol, reason: err.description))
+            } catch {
+                return .failure(.mount(protocol: activeProtocol, reason: error.localizedDescription))
             }
         }
 
-        if isrppairing {
-            return .success(true)
-        }
-
-        guard MuxerService.shared.isListening else {
-            return .failure(.muxerNotListening("Usbmuxd fake server is not listening"))
-        }
         return .success(true)
     } 
 

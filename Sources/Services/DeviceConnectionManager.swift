@@ -100,6 +100,7 @@ actor DeviceConnectionManager {
                 connectionConfigCache?.setTunnelIfaceIp(vpnIface?.interfaceAddresses.v4.first?.host)
                 connectionConfigCache?.setTunnelIfaceSubnetMask(vpnIface?.interfaceAddresses.v4.first?.mask)
                 connectionConfigCache?.setTunnelPeerIp(derivedPeerIp)
+                connectionConfigCache?.setTunnelPeerReachable(isDerivedPeerIpReachable)
                 connectionConfigCache?.setOverrideTunnelPeerReachable(isOverridePeerIpReachable)
                 // clear auto discovered reachability state
                 connectionConfigCache?.setRemoteReachable(false)
@@ -135,6 +136,7 @@ actor DeviceConnectionManager {
                 connectionConfigCache?.setTunnelIfaceIp(nil)
                 connectionConfigCache?.setTunnelIfaceSubnetMask(nil)
                 connectionConfigCache?.setTunnelPeerIp(nil)
+                connectionConfigCache?.setTunnelPeerReachable(false)
                 connectionConfigCache?.setOverrideTunnelPeerReachable(false)
                 reportedPeerIp = nil
             

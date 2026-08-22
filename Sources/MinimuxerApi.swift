@@ -9,8 +9,9 @@
 import Foundation
 import Combine
 import Network
-import DeviceGatewayAPI
-import IdeviceGateway
+internal import IdeviceGateway
+internal import MinimuxerCommon
+public import DeviceGatewayAPI
 
 public enum MinimuxerComponent: String {
     case heartbeat

@@ -8,7 +8,8 @@
 
 import Foundation
 import Combine
-import DeviceGatewayAPI
+internal import DeviceGatewayAPI
+internal import MinimuxerCommon
 
 private enum MinimuxerStatus{
     case started, inprogress, stopped

@@ -9,6 +9,7 @@
 import Foundation
 import IDevice
 import DeviceGatewayAPI
+internal import MinimuxerCommon
 
 internal final class IdeviceGatewayError: DeviceGatewayError {
     override var errorDescription: String? {

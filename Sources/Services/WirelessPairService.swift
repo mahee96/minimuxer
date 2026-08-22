@@ -7,6 +7,8 @@
 //
 
 import Foundation
+internal import MinimuxerCommon
+internal import DeviceGatewayAPI
 // import RustBridge
 
 // MARK: - Wireless Pair API

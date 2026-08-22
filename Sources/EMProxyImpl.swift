@@ -9,6 +9,7 @@
 import Foundation
 import EMProxy
 import Network
+internal import MinimuxerCommon
 
 
 public enum EMProxyError: Error, LocalizedError, CustomStringConvertible, Equatable, Sendable {

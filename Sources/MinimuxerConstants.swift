@@ -37,24 +37,24 @@ public enum MinimuxerConstants {
     public static let ddiManifestURL = "https://raw.githubusercontent.com/doronz88/DeveloperDiskImage/refs/heads/main/PersonalizedImages/Xcode_iOS_DDI_Personalized/BuildManifest.plist"
 
     // WirelessPair Constants
-    static let defaultHostName = "SideStore"
-    static let defaultHostModel = "Mac17,7"
-    static let defaultBindIP = "0.0.0.0"
-    static let defaultBindPort: UInt16 = 0
-    static let defaultAdDomain = ""
-    static let remotepairingServiceType = "_remotepairing-pairable-host._tcp."
+    public static let defaultHostName = "SideStore"
+    public static let defaultHostModel = "Mac17,7"
+    public static let defaultBindIP = "0.0.0.0"
+    public static let defaultBindPort: UInt16 = 0
+    public static let defaultAdDomain = ""
+    public static let remotepairingServiceType = "_remotepairing-pairable-host._tcp."
 
     // UsbmuxdProxyServer Constants
-    static let deviceAttach = "Attached"
-    static let deviceDetach = "Detached"
-    static let usbmuxMaxPacketBufferLength = 4095
-    static let usbmuxHeaderLen = 16
+    public static let deviceAttach = "Attached"
+    public static let deviceDetach = "Detached"
+    public static let usbmuxMaxPacketBufferLength = 4095
+    public static let usbmuxHeaderLen = 16
 
     // Sleep / Threading timeouts
-    static let heartbeatSleepNs: UInt64 = 1_000_000_000
-    static let mounterSleepNs: UInt64 = 1_000_000_000
+    public static let heartbeatSleepNs: UInt64 = 1_000_000_000
+    public static let mounterSleepNs: UInt64 = 1_000_000_000
 
     // Packet Configuration
-    static let maxPacketSize = 1024
-    static let packetHeaderLen = 16
+    public static let maxPacketSize = 1024
+    public static let packetHeaderLen = 16
 }

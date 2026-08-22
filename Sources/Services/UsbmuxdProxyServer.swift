@@ -9,7 +9,8 @@
 
 import Foundation
 import Network
-import DeviceGatewayAPI
+internal import DeviceGatewayAPI
+internal import MinimuxerCommon
 
 final internal class UsbmuxdProxyServer {
     static let shared = UsbmuxdProxyServer()

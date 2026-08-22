@@ -7,7 +7,7 @@
 //
 
 import Foundation
-// import RustBridge
+internal import MinimuxerCommon
 
 final internal class HeartbeatService {
     

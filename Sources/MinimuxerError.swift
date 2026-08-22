@@ -7,7 +7,7 @@
 //
 
 import Foundation
-import DeviceGatewayAPI
+public import DeviceGatewayAPI
 
 public struct MinimuxerServiceError: Error, CustomStringConvertible {
     public let component: MinimuxerComponent

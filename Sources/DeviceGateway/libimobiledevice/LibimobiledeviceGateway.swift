@@ -9,6 +9,7 @@
 import Foundation
 import libimobiledevice
 import DeviceGatewayAPI
+internal import MinimuxerCommon
 
 internal final class LibimobiledeviceGatewayError: DeviceGatewayError {
     override var errorDescription: String? {

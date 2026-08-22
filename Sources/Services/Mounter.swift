@@ -8,7 +8,8 @@
 
 import Foundation
 import ZIPFoundation
-import DeviceGatewayAPI
+internal import DeviceGatewayAPI
+internal import MinimuxerCommon
 
 final internal class Mounter {
     static let shared = Mounter()

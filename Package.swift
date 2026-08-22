@@ -55,20 +55,29 @@ let package = Package(
 
         // Main SPM targets
         .target(
-            name: "DeviceGatewayAPI",
-            path: "Sources/DeviceGateway",
+            name: "MinimuxerCommon",
+            path: "Sources",
             sources: [
-                "DeviceGatewayAPI.swift",
-                "DeviceGatewayError.swift",
-                "DeviceGatewayLogging.swift",
-                "PairingProtocol.swift",
-                "../Common/FFIDispatcher.swift"
+                "FFIDispatcher.swift",
+                "MinimuxerConstants.swift"
+            ]
+        ),
+        .target(
+            name: "DeviceGatewayAPI",
+            dependencies: [
+                "MinimuxerCommon"
+            ],
+            path: "Sources/DeviceGateway",
+            exclude: [
+                "idevice", 
+                "libimobiledevice"
             ]
         ),
         .target(
             name: "IdeviceGateway",
             dependencies: [
                 "DeviceGatewayAPI",
+                "MinimuxerCommon",
                 "IDevice"
             ],
             path: "Sources/DeviceGateway/idevice"
@@ -77,6 +86,7 @@ let package = Package(
             name: "LibimobiledeviceGateway",
             dependencies: [
                 "DeviceGatewayAPI",
+                "MinimuxerCommon",
                 "libimobiledevice"
             ],
             path: "Sources/DeviceGateway/libimobiledevice"
@@ -84,6 +94,7 @@ let package = Package(
         .target(
             name: "Minimuxer",
             dependencies: [
+                "MinimuxerCommon",
                 "DeviceGatewayAPI",
                 "IdeviceGateway",
                 "LibimobiledeviceGateway",
@@ -91,7 +102,11 @@ let package = Package(
                 .product(name: "ZIPFoundation", package: "ZIPFoundation")
             ],
             path: "Sources",
-            exclude: ["DeviceGateway"]
+            exclude: [
+                "DeviceGateway",
+                "FFIDispatcher.swift",
+                "MinimuxerConstants.swift"
+            ]
         ),
         .testTarget(
             name: "MinimuxerTests",

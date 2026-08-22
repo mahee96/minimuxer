@@ -7,6 +7,7 @@
 //
 
 import Foundation
+internal import MinimuxerCommon
 
 internal struct RawPacket {
     let version: UInt32

@@ -124,37 +124,55 @@ final internal class UsbmuxdProxyServer {
 
     private func handleConnection(_ connection: NWConnection) {
         connection.start(queue: queue)
-        receiveNextPacket(on: connection)
+        readNextPacket(on: connection)
     }
-    private func receiveNextPacket(on connection: NWConnection) {
-        connection.receive(minimumIncompleteLength: 1, maximumLength: maxBufferLen) { [weak self] data, context, isComplete, error in
-            guard let self = self, let data = data, !data.isEmpty else {
+
+    private func readNextPacket(on connection: NWConnection) {
+        // 1. Read the 4-byte size header
+        connection.receive(minimumIncompleteLength: 4, maximumLength: 4) { [weak self] sizeData, _, _, error in
+            guard let self = self else { return }
+            if let error = error {
+                debugLog("[minimuxer] UsbmuxdProxyServer receive size error: \(error)")
+                connection.cancel()
+                return
+            }
+            guard let sizeData = sizeData, sizeData.count == 4 else {
                 connection.cancel()
                 return
             }
 
-            // libimobiledevice sometimes sends the 16-byte packet header in
-            // one write and the plist body in a follow-up write. If we only
-            // got the header, block for the body before trying to parse.
-            if data.count == self.headerLen {
-                let maxBodyLen = self.maxBufferLen - self.headerLen
-                connection.receive(minimumIncompleteLength: 1, maximumLength: maxBodyLen) { [weak self] bodyData, _, _, _ in
-                    guard let self = self else { return }
-                    var fullData = data
-                    if let bodyData = bodyData {
-                        fullData.append(bodyData)
-                    }
-                    self.processPacketData(fullData, on: connection)
+            let size = sizeData.withUnsafeBytes { $0.load(as: UInt32.self).littleEndian }
+            guard size >= UInt32(self.headerLen) && size <= UInt32(self.maxBufferLen) else {
+                debugLog("[minimuxer] UsbmuxdProxyServer invalid packet size: \(size)")
+                connection.cancel()
+                return
+            }
+
+            // 2. Read the remaining size - 4 bytes
+            let bodyLen = Int(size - 4)
+            connection.receive(minimumIncompleteLength: bodyLen, maximumLength: bodyLen) { [weak self] bodyData, _, _, bodyError in
+                guard let self = self else { return }
+                if let bodyError = bodyError {
+                    debugLog("[minimuxer] UsbmuxdProxyServer receive body error: \(bodyError)")
+                    connection.cancel()
+                    return
                 }
-            } else {
-                self.processPacketData(data, on: connection)
+                guard let bodyData = bodyData, bodyData.count == bodyLen else {
+                    connection.cancel()
+                    return
+                }
+
+                var fullPacketData = sizeData
+                fullPacketData.append(bodyData)
+
+                self.processPacketData(fullPacketData, on: connection)
             }
         }
     }
 
     private func processPacketData(_ data: Data, on connection: NWConnection) {
         defer {
-            receiveNextPacket(on: connection)
+            readNextPacket(on: connection)
         }
 
         guard let packet = RawPacket(data: data) else { return }
@@ -192,10 +210,10 @@ final internal class UsbmuxdProxyServer {
                     throw MinimuxerError.invalidPairing(protocol: .lockdown, reason: "No device UDID available for ListDevices response")
                 }
                 let payload: [String: Any] = [
-                    "DeviceID": 0,                                                      // don't care
+                    "DeviceID": 1,                                                      // non-zero ID
                     "Properties": [
                         "ConnectionType": "Network",                                    // using 'network' protocol of usbmuxd
-                        "DeviceID": 0,                                                  // fake device id
+                        "DeviceID": 1,                                                  // fake non-zero device id
                         "EscapedFullServiceName": "\(udid)._apple-mobdev2._tcp.local",  // advert for mds discovery
                         "InterfaceIndex": 0,                                            // don't care
                         "NetworkAddress": convertIp(tunnelIfaceIp),                     // remote IP where device's lockdownd is accepting requests on

@@ -43,6 +43,15 @@ let package = Package(
 //             name: "EMProxy",
 //             path: "../../local/em_proxy/libs/EMProxy.xcframework"
 //         ),
+        .binaryTarget(
+            name: "libimobiledevice",
+            url: "https://github.com/SideStore/libimobiledevice-xcframework/releases/download/1.4.0-ss-22ed647/libimobiledevice.xcframework.zip",
+            checksum: "0c5faa6fae3ec2effe51e9f4e1d3817cc615fb956a0cfcac36933ebcc66e7759"
+        ),
+//        .binaryTarget(
+//            name: "libimobiledevice",
+//            path: "../../local/libimobiledevice-xcframework/libs/libimobiledevice.xcframework"
+//        ),
 
         // MARK: Main SPM target
         .target(
@@ -50,6 +59,7 @@ let package = Package(
             dependencies: [
                 "IDevice",
                 "EMProxy",
+                "libimobiledevice",
                 .product(name: "ZIPFoundation", package: "ZIPFoundation")
             ],
             path: "Sources"
@@ -59,5 +69,7 @@ let package = Package(
             dependencies: ["Minimuxer"],
             path: "Tests"
         )
-    ]
+    ],
+    cLanguageStandard: .gnu11,
+    cxxLanguageStandard: .gnucxx14
 )

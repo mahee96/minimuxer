@@ -25,7 +25,7 @@ internal final class IdeviceGatewayError: DeviceGatewayError {
 
 
 extension String {
-    /// Un-escapes literal "\\n" and "\\\"" escape sequences into real line breaks and quotes.
+    // Un-escapes literal "\\n" and "\\\"" escape sequences into real line breaks and quotes.
     var cleanedErrorFormatting: String {
         return self
             .replacingOccurrences(of: "\\n", with: "\n")
@@ -33,8 +33,8 @@ extension String {
     }
 }
 
-package final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
-    package static let shared = IdeviceGateway()
+public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
+    public static let shared = IdeviceGateway()
     var lastError: Error? = nil
 
     private func getRustPlistString(_ node: plist_t) -> String? {
@@ -123,7 +123,7 @@ package final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
     }
     public private(set) var pairingDataDict: [String: Any]? = nil
 
-    package init() {}
+    private init() {}
 
     deinit {
         cleanup()

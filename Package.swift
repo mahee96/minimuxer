@@ -19,8 +19,8 @@ let package = Package(
             url: "https://github.com/weichsel/ZIPFoundation.git",
             .upToNextMajor(from: "0.9.0")
         ),
-        .package(path: "Sources/Common"),
-        .package(path: "Sources/DeviceGateway")
+        .package(path: "Common"),
+        .package(path: "DeviceGateway")
     ],
     targets: [
         .binaryTarget(
@@ -44,11 +44,7 @@ let package = Package(
                 "EMProxy",
                 .product(name: "ZIPFoundation", package: "ZIPFoundation")
             ],
-            path: "Sources",
-            exclude: [
-                "Common",
-                "DeviceGateway"
-            ]
+            path: "Sources"
         ),
         .testTarget(
             name: "MinimuxerTests",

@@ -158,27 +158,26 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
             throw LibimobiledeviceGatewayError(.invalidPairingFile, reason: "Could not parse plist")
         }
 
-        let requiredLockdownKeys = [
-            "WiFiMACAddress", "SystemBUID", "RootPrivateKey", "HostPrivateKey",
-            "HostID", "RootCertificate", "UDID", "EscrowBag", "HostCertificate",
-            "DeviceCertificate"
-        ]
-        let missing = requiredLockdownKeys.filter { plist[$0] == nil }
-        guard missing.isEmpty else {
-            throw LibimobiledeviceGatewayError(.invalidPairingFile, reason: "Missing Lockdown attributes: \(missing.joined(separator: ", "))")
-        }
-
-        guard let udid = plist["UDID"] as? String, !udid.isEmpty else {
-            throw LibimobiledeviceGatewayError(.invalidPairingFile, reason: "Missing UDID in pairing file")
-        }
-
+        let pairingType = try PairingProtocol.validatePairingFile(from: plist)
         self.pairingFileData = data
-        self.pairingFileType = .lockdown
-        self.isRPPairing = false
+        self.pairingFileType = pairingType
+        self.isRPPairing = (pairingType == .rppairing)
+
+        let udid: String?
+        if pairingType == .rppairing {
+            udid = (plist["UDID"] as? String) ?? (plist["identifier"] as? String)
+        } else {
+            udid = plist["UDID"] as? String
+        }
+
+        guard let udid, !udid.isEmpty else {
+            throw LibimobiledeviceGatewayError(.invalidPairingFile, reason: "Missing UDID/identifier in pairing file")
+        }
+
         self.cachedUDID = udid
         self.isInitialized = true
 
-        debugLog("[LibimobiledeviceGateway] Initialized successfully with Lockdown pairing for UDID: \(udid)")
+        debugLog("[LibimobiledeviceGateway] Initialized successfully with \(pairingType.rawValue) pairing for UDID: \(udid)")
     }
 
     func syncFetchUDID() throws -> String? {

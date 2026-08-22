@@ -48,7 +48,7 @@ extension String {
     }
 }
 
-internal final class IdeviceGateway {
+internal final class IdeviceGateway: @unchecked Sendable {
     static let shared = IdeviceGateway()
     var lastError: Error? = nil
 
@@ -2085,7 +2085,7 @@ internal final class IdeviceGateway {
 }
 
 // Async FFI Dispatcher Extensions
-extension IdeviceGateway {
+extension IdeviceGateway: DeviceGatewayAPI {
     func start(pairingFileContent: String) async throws {
         try await withFFIDispatch {
             try self.syncStart(pairingFileContent: pairingFileContent)
@@ -2152,9 +2152,11 @@ extension IdeviceGateway {
         }
     }
 
-    func performHeartbeat(interval: UInt64, newInterval: UnsafeMutablePointer<UInt64>) async throws {
+    func performHeartbeat(interval: UInt64) async throws -> UInt64 {
         try await withFFIDispatch {
-            try self.syncPerformHeartbeat(interval: interval, newInterval: newInterval)
+            var newInterval: UInt64 = 0
+            try self.syncPerformHeartbeat(interval: interval, newInterval: &newInterval)
+            return newInterval > 0 ? newInterval : 1000
         }
     }
 
@@ -2180,10 +2182,10 @@ extension IdeviceGateway {
         hostName: String,
         hostModel: String,
         outPath: String,
-        onReady: @escaping (String, UInt16, [String: String]) -> Void,
-        onPin: @escaping (String) -> Void
-    ) async throws -> PairedDevice {
-        try await withFFIDispatch {
+        onReady: @escaping @Sendable (String, UInt16, [String: String]) -> Void,
+        onPin: @escaping @Sendable (String) -> Void
+    ) async throws -> WirelessPairPairedDevice {
+        let paired = try await withFFIDispatch {
             try self.syncStartWirelessPair(
                 hostName: hostName,
                 hostModel: hostModel,
@@ -2192,6 +2194,12 @@ extension IdeviceGateway {
                 onPin: onPin
             )
         }
+        return WirelessPairPairedDevice(
+            name: paired.name,
+            model: paired.model,
+            udid: paired.udid,
+            pairingFilePath: paired.pairingFilePath
+        )
     }
 
     func afcListDirectory(bundleId: String, path: String) async throws -> [String] {

@@ -35,7 +35,7 @@ final internal class WirelessPairService: WirelessPairAPI {
             
             let outcome: Result<WirelessPairPairedDevice, Swift.Error>
             do {
-                let device = try await IdeviceGateway.shared.startWirelessPair(
+                let pairedDevice = try await Minimuxer.gateway.startWirelessPair(
                     hostName: hostName,
                     hostModel: hostModel,
                     outPath: outPath,
@@ -55,13 +55,6 @@ final internal class WirelessPairService: WirelessPairAPI {
                             self.onPinReceived?(pinString)
                         }
                     }
-                )
-                
-                let pairedDevice = WirelessPairPairedDevice(
-                    name: device.name,
-                    model: device.model,
-                    udid: device.udid,
-                    pairingFilePath: device.pairingFilePath
                 )
                 outcome = .success(pairedDevice)
             } catch {

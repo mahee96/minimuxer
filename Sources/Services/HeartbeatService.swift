@@ -77,7 +77,7 @@ final internal class HeartbeatService {
     }
 
     private static func heartbeatLoop() async {
-        while !MuxerService.shared.isListening {
+        while !UsbmuxdProxyServer.shared.isListening {
             logIfNeeded("Waiting for usbmuxd to be ready...", isVerbose: true)
             try? await Task.sleep(nanoseconds: MinimuxerConstants.heartbeatSleepNs)
         }
@@ -105,9 +105,7 @@ final internal class HeartbeatService {
             }
 
             do {
-                var newInterval: UInt64 = 0
-                try await IdeviceGateway.shared.performHeartbeat(interval: currentInterval, newInterval: &newInterval)
-                currentInterval = newInterval > 0 ? newInterval : 1000
+                currentInterval = try await Minimuxer.gateway.performHeartbeat(interval: currentInterval)
                 lastBeatSuccessful = true
                 lastErrorDescription = nil
             } catch {

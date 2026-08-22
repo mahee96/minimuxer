@@ -17,9 +17,10 @@ Sources/
 │   ├── DeviceEndpoint.swift         ← Active target device IP state
 │   ├── HeartbeatService.swift       ← Heartbeat keep-alive service
 │   ├── Mounter.swift                ← Developer Disk Image (DDI) mounter
-│   ├── MuxerService.swift           ← Usbmuxd fake server listener over TCP
 │   ├── NetworkIfaceScanner.swift    ← Network interface scanning & route reachability detection
 │   ├── NetworkObserverService.swift ← Network path monitoring (NWPathMonitor) & endpoint lifecycle
+│   ├── NetworkPing.swift            ← Non-blocking TCP port probing for device reachability
+│   ├── UsbmuxdProxyServer.swift     ← Usbmuxd proxy server listener over TCP
 │   └── WirelessPairService.swift    ← Wireless pairing service & PIN verification
 └── Types/
     ├── PairingProtocol.swift        ├── Protocol types (.lockdown, .rppairing)

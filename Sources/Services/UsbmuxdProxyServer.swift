@@ -1,16 +1,17 @@
 //
-//  MuxerService.swift
+//  UsbmuxdProxyServer.swift
 //  Minimuxer
 //
 //  Original Rust Implementation by @jkcoxson
 //  Swift Port created by Magesh K on 02/03/26.
+//  Copyright © 2026 SideStore. All rights reserved.
 //
 
 import Foundation
 import Network
 
-final internal class MuxerService {
-    static let shared = MuxerService()
+final internal class UsbmuxdProxyServer {
+    static let shared = UsbmuxdProxyServer()
 
     private var maxBufferLen: Int { MinimuxerConstants.usbmuxMaxPacketBufferLength }
     private var headerLen: Int { MinimuxerConstants.usbmuxHeaderLen }
@@ -20,7 +21,7 @@ final internal class MuxerService {
 
     private var deviceUDID: String?
     private var listener: NWListener?
-    private let queue = DispatchQueue(label: "minimuxer.MuxerService", qos: .userInitiated)
+    private let queue = DispatchQueue(label: "minimuxer.UsbmuxdProxyServer", qos: .userInitiated)
 
     // Stable device state
     private var currentDeviceIp: String?
@@ -42,7 +43,7 @@ final internal class MuxerService {
     @discardableResult
     func start(udid: String) async throws -> Bool {
         guard !started else {
-            verboseLog("[minimuxer] Already started MuxerService, skipping")
+            verboseLog("[minimuxer] Already started UsbmuxdProxyServer, skipping")
             return false
         }
         deviceUDID = udid
@@ -63,7 +64,7 @@ final internal class MuxerService {
                 guard let self = self else { return }
                 switch state {
                     case .ready:
-                        verboseLog("[minimuxer] MuxerService (NWListener) bound successfully to \(MinimuxerConstants.usbmuxdHost):\(MinimuxerConstants.usbmuxdPort)")
+                        verboseLog("[minimuxer] UsbmuxdProxyServer (NWListener) bound successfully to \(MinimuxerConstants.usbmuxdHost):\(MinimuxerConstants.usbmuxdPort)")
                         self.isListening = true
                         self.started = true
                         if !hasResponded {
@@ -71,12 +72,12 @@ final internal class MuxerService {
                             continuation.resume(returning: true)
                         }
                     case .failed(let error):
-                        debugLog("[minimuxer] MuxerService listener failed with error: \(error)")
+                        debugLog("[minimuxer] UsbmuxdProxyServer listener failed with error: \(error)")
                         self.isListening = false
                         self.started = false
                         if !hasResponded {
                             hasResponded = true
-                            continuation.resume(throwing: MinimuxerError.connect("MuxerService failed to bind: \(error.localizedDescription)"))
+                            continuation.resume(throwing: MinimuxerError.connect("UsbmuxdProxyServer failed to bind: \(error.localizedDescription)"))
                         }
                     case .cancelled:
                         self.isListening = false
@@ -163,14 +164,13 @@ final internal class MuxerService {
 
             connection.send(content: responseData, completion: .contentProcessed({ error in
                 if let error = error {
-                    debugLog("[minimuxer] MuxerService send error: \(error)")
+                    debugLog("[minimuxer] UsbmuxdProxyServer send error: \(error)")
                 }
             }))
         } catch {}
     }
 
-    // MARK: - Packet Handling
-
+    // Packet Handling
     // Responds to the only usbmuxd protocol message("ListDevices") that
     // idevice requires to establish lockdown session when using lockdown based pairing file
     // (lockdown requires UDID to start session, so our server responds with data read from pair file)

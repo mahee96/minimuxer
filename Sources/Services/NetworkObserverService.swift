@@ -116,17 +116,17 @@ final internal class NetworkObserverService: NetworkObserverAPI, @unchecked Send
                     if let peer = effectiveIp {
                         verboseLog("[minimuxer] [net] update device IP with effective tunnel peer: '\(effectivePeer)'")
                         await DeviceEndpoint.shared.update(peer)
-                        MuxerService.shared.notifyDeviceAttached(tunnelPeerIp: peer)
+                        UsbmuxdProxyServer.shared.notifyDeviceAttached(tunnelPeerIp: peer)
                     } else {
                         verboseLog("[minimuxer] [net] peer not available for \(info.name)")
                         await DeviceEndpoint.shared.clear()
-                        MuxerService.shared.notifyDeviceDetached()
+                        UsbmuxdProxyServer.shared.notifyDeviceDetached()
                     }
 
                 } else {
                     verboseLog("[minimuxer] [net] no local VPN interface detected")
                     await DeviceEndpoint.shared.clear()
-                    MuxerService.shared.notifyDeviceDetached()
+                    UsbmuxdProxyServer.shared.notifyDeviceDetached()
                 }
             
             case .remoteServer:
@@ -140,15 +140,15 @@ final internal class NetworkObserverService: NetworkObserverAPI, @unchecked Send
                     """)
                     if isReachable {
                         await DeviceEndpoint.shared.update(remoteIp)
-                        MuxerService.shared.notifyDeviceAttached(tunnelPeerIp: remoteIp)
+                        UsbmuxdProxyServer.shared.notifyDeviceAttached(tunnelPeerIp: remoteIp)
                     } else {
                         await DeviceEndpoint.shared.clear()
-                        MuxerService.shared.notifyDeviceDetached()
+                        UsbmuxdProxyServer.shared.notifyDeviceDetached()
                     }
                 } else {
                     verboseLog("[minimuxer] [net] remote server endpoint unreachable")
                     await DeviceEndpoint.shared.clear()
-                    MuxerService.shared.notifyDeviceDetached()
+                    UsbmuxdProxyServer.shared.notifyDeviceDetached()
                 }
             }
     }

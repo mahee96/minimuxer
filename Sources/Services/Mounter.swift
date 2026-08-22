@@ -12,7 +12,7 @@ import ZIPFoundation
 final internal class Mounter {
     static let shared = Mounter()
 
-    private var isRPPairing: Bool { IdeviceGateway.shared.isRPPairing }
+    private var isRPPairing: Bool { Minimuxer.gateway.isRPPairing }
 
     // NOTE: mounter doesn't cache the mount status nor the minimuxer.
     //       reason is that the actual device state responded by idevice should be truthiness
@@ -25,7 +25,7 @@ final internal class Mounter {
 
         // Prerequisite: usbmuxd must be up (RP pairing connects via RSD, skips muxer)
         if !isRPPairing {
-            guard MuxerService.shared.isListening else {
+            guard UsbmuxdProxyServer.shared.isListening else {
                 debugLog("[minimuxer] mounter: usbmuxd not ready!")
                 throw MinimuxerError.noConnection("Usbmuxd fake server is not listening")
             }
@@ -38,7 +38,7 @@ final internal class Mounter {
         }
 
         let isDDIMounted = try await runIdevice("isDDIMounted") {
-            try await IdeviceGateway.shared.isDDIMounted()
+            try await Minimuxer.gateway.isDDIMounted()
         }
         if isDDIMounted {
             verboseLog("[minimuxer] mounter: DeveloperDiskImage is already mounted. Bypassing mount.")
@@ -50,7 +50,7 @@ final internal class Mounter {
         var versionStr: String? = nil
         if !isRPPairing {
             guard let v = try await runIdevice("getLockdownValue(ProductVersion)", body: {
-                try await IdeviceGateway.shared.getLockdownValue(key: "ProductVersion")
+                try await Minimuxer.gateway.getLockdownValue(key: "ProductVersion")
             }) else {
                 debugLog("[minimuxer] mounter: could not get device version")
                 throw MinimuxerError.noDevice("ProductVersion not found in lockdown")
@@ -128,7 +128,7 @@ final internal class Mounter {
             let (dmgData, sigData) = try loadPre17Image(iosVersion: iosVersion, dmgDocsPath: dmgDocsPath)
             verboseLog("[minimuxer] Uploading and mounting image (dmg=\(dmgData.count) bytes, sig=\(sigData.count) bytes)...")
             try await runIdevice("mountDeveloperImage") {
-                try await IdeviceGateway.shared.mountDeveloperImage(image: dmgData, signature: sigData)
+                try await Minimuxer.gateway.mountDeveloperImage(image: dmgData, signature: sigData)
             }
             verboseLog("[minimuxer] Successfully mounted the image")
         } else {
@@ -142,7 +142,7 @@ final internal class Mounter {
                 "manifest=\(manifestData.count) bytes)"
             )
             try await runIdevice("mountPersonalizedDdi") {
-                try await IdeviceGateway.shared.mountPersonalizedDdi(image: imageData, trustcache: trustcacheData, manifest: manifestData)
+                try await Minimuxer.gateway.mountPersonalizedDdi(image: imageData, trustcache: trustcacheData, manifest: manifestData)
             }
             verboseLog("[minimuxer] DDI mounted successfully")
         }

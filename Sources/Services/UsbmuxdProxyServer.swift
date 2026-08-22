@@ -221,6 +221,11 @@ final internal class UsbmuxdProxyServer {
                     ]
                 ]
                 return ["DeviceList": [payload]]
+            case "Listen":
+                return ["MessageType": "Result", "Number": 0]
+            case "ReadBUID":
+                let buid = (Minimuxer.gateway.pairingDataDict?["SystemBUID"] as? String) ?? "00000000-0000-0000-0000-000000000000"
+                return ["BUID": buid]
             case "ReadPairRecord":
                 guard let pairingData = Minimuxer.gateway.pairingFileData else {
                     throw MinimuxerError.invalidPairing(protocol: .lockdown, reason: "No pairing file data available for ReadPairRecord")

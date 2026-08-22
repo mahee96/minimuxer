@@ -32,8 +32,8 @@ internal final class LibimobiledeviceGatewayError: DeviceGatewayError {
 
 
 
-public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
-    public static let shared = LibimobiledeviceGateway()
+package final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
+    package static let shared = LibimobiledeviceGateway()
 
     public private(set) var isRPPairing: Bool = false
     public private(set) var pairingFileType: PairingProtocol = .unknown
@@ -56,7 +56,7 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
     private var isInitialized = false
     private var deviceEndpointIp: String? = nil
 
-    public init() {}
+    package init() {}
 
     deinit {
         cleanup()

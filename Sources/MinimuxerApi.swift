@@ -9,9 +9,10 @@
 import Foundation
 import Combine
 import Network
-internal import IdeviceGateway
-internal import MinimuxerCommon
+public import MinimuxerCommon
 public import DeviceGatewayAPI
+package import IdeviceGateway
+package import LibimobiledeviceGateway
 
 public enum MinimuxerComponent: String {
     case heartbeat
@@ -113,7 +114,8 @@ public enum Minimuxer {
     public static let network: any NetworkObserverAPI = NetworkObserverService()
     public static let wirelessPair: any WirelessPairAPI = WirelessPairService()
     public static let emproxy: any EMProxyAPI = EMProxyImpl()
-    public static var gateway: any DeviceGatewayAPI = IdeviceGateway.shared
+//    public static var gateway: any DeviceGatewayAPI = IdeviceGateway.shared
+    public static var gateway: any DeviceGatewayAPI = LibimobiledeviceGateway.shared
 }
 
 public protocol EMProxyAPI: AnyObject, Sendable {
@@ -191,7 +193,7 @@ public enum LocalInterfaceType: String, Hashable, Sendable, CaseIterable, Compar
             case Prefix("awdl"):    self = .airdrop
             case Prefix("llw"):     self = .lowLatencyWLAN
             case Prefix("bridge"),
-                Prefix("ap"):      self = .hotspotBridge
+                 Prefix("ap"):      self = .hotspotBridge
             case Prefix("lo"):      self = .loopback
             case Prefix("pktap"):   self = .packetCapture
             default:                self = .other
@@ -265,3 +267,6 @@ public extension WirelessPairAPI {
         )
     }
 }
+
+public typealias MinimuxerConstants = MinimuxerCommon.MinimuxerConstants
+

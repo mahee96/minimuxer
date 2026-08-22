@@ -13,7 +13,7 @@ import Foundation
  immediately suspending the Swift task to prevent thread pool starvation.
  */
 @inline(__always)
-public func withFFIDispatch<T: Sendable>(
+package func withFFIDispatch<T: Sendable>(
     on queue: DispatchQueue = .global(),
     _ body: @escaping @Sendable () throws -> T
 ) async throws -> T {
@@ -34,7 +34,7 @@ public func withFFIDispatch<T: Sendable>(
 // then it is of .userInitiated priority by default, but our rust tokio threads are at .background priority
 //
 @inline(__always)
-public func matchingPriority<T: Sendable>(
+package func matchingPriority<T: Sendable>(
     priority: TaskPriority = .medium,
     _ body: @escaping @Sendable () async throws -> T
 ) async throws -> T {

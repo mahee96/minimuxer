@@ -33,8 +33,8 @@ extension String {
     }
 }
 
-public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
-    public static let shared = IdeviceGateway()
+package final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
+    package static let shared = IdeviceGateway()
     var lastError: Error? = nil
 
     private func getRustPlistString(_ node: plist_t) -> String? {
@@ -123,7 +123,7 @@ public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
     }
     public private(set) var pairingDataDict: [String: Any]? = nil
 
-    public init() {}
+    package init() {}
 
     deinit {
         cleanup()

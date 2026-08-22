@@ -11,7 +11,7 @@ import IDevice
 import DeviceGatewayAPI
 internal import MinimuxerCommon
 
-internal final class IdeviceGatewayError: DeviceGatewayError {
+internal final class IdeviceGatewayError: DeviceGatewayError, @unchecked Sendable {
     override var errorDescription: String? {
         switch code {
         case .connectionFailed:

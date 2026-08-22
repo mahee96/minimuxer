@@ -8,10 +8,11 @@
 
 import Foundation
 import libimobiledevice
+import OpenSSL
 import DeviceGatewayAPI
 internal import MinimuxerCommon
 
-internal final class LibimobiledeviceGatewayError: DeviceGatewayError {
+internal final class LibimobiledeviceGatewayError: DeviceGatewayError, @unchecked Sendable {
     override var errorDescription: String? {
         switch code {
         case .connectionFailed:
@@ -30,7 +31,30 @@ internal final class LibimobiledeviceGatewayError: DeviceGatewayError {
     }
 }
 
+private enum OpenSSLInitResult: String, CustomStringConvertible {
+    case success = "SUCCESS (1)"
+    case failure = "FAILED (0)"
 
+    init(code: Int32) {
+        self = (code == 1) ? .success : .failure
+    }
+
+    var description: String {
+        return rawValue
+    }
+}
+
+private func getOpenSSLErrors() -> [String] {
+    var errors: [String] = []
+    while true {
+        let errCode = ERR_get_error()
+        guard errCode != 0 else { break }
+        var buf = [CChar](repeating: 0, count: 256)
+        ERR_error_string_n(errCode, &buf, buf.count)
+        errors.append(String(cString: buf))
+    }
+    return errors
+}
 
 public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
     public static let shared = LibimobiledeviceGateway()
@@ -56,7 +80,25 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
     private var isInitialized = false
     private var deviceEndpointIp: String? = nil
 
-    private init() {}
+    private init() {
+        let sslOpts = UInt64(OPENSSL_INIT_LOAD_SSL_STRINGS | OPENSSL_INIT_LOAD_CRYPTO_STRINGS | OPENSSL_INIT_ADD_ALL_CIPHERS | OPENSSL_INIT_ADD_ALL_DIGESTS)
+        let sslRes = OpenSSLInitResult(code: OPENSSL_init_ssl(sslOpts, nil))
+        let sslErrs = getOpenSSLErrors()
+        debugLog("[LibimobiledeviceGateway] OPENSSL_init_ssl: \(sslRes)\(sslErrs.isEmpty ? "" : " (errors: \(sslErrs.joined(separator: ", ")))")")
+
+        let cryptoOpts = UInt64(OPENSSL_INIT_LOAD_CRYPTO_STRINGS | OPENSSL_INIT_ADD_ALL_CIPHERS | OPENSSL_INIT_ADD_ALL_DIGESTS)
+        let cryptoRes = OpenSSLInitResult(code: OPENSSL_init_crypto(cryptoOpts, nil))
+        let cryptoErrs = getOpenSSLErrors()
+        debugLog("[LibimobiledeviceGateway] OPENSSL_init_crypto: \(cryptoRes)\(cryptoErrs.isEmpty ? "" : " (errors: \(cryptoErrs.joined(separator: ", ")))")")
+
+        let defaultProv = OSSL_PROVIDER_load(nil, "default")
+        let defaultErrs = getOpenSSLErrors()
+        debugLog("[LibimobiledeviceGateway] OSSL_PROVIDER_load('default'): \(String(describing: defaultProv))\(defaultErrs.isEmpty ? "" : " (errors: \(defaultErrs.joined(separator: ", ")))")")
+
+        let baseProv = OSSL_PROVIDER_load(nil, "base")
+        let baseErrs = getOpenSSLErrors()
+        debugLog("[LibimobiledeviceGateway] OSSL_PROVIDER_load('base'): \(String(describing: baseProv))\(baseErrs.isEmpty ? "" : " (errors: \(baseErrs.joined(separator: ", ")))")")
+    }
 
     deinit {
         cleanup()

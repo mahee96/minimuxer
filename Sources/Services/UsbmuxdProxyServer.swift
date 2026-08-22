@@ -221,6 +221,11 @@ final internal class UsbmuxdProxyServer {
                     ]
                 ]
                 return ["DeviceList": [payload]]
+            case "ReadPairRecord":
+                guard let pairingData = Minimuxer.gateway.pairingFileData else {
+                    throw MinimuxerError.invalidPairing(protocol: .lockdown, reason: "No pairing file data available for ReadPairRecord")
+                }
+                return ["PairRecordData": pairingData]
             default:
                 debugLog("[minimuxer] WARN: unknown message type: \(messageType)")
                 throw MinimuxerError.connect("Unsupported usbmuxd message type: \(messageType)")

@@ -112,7 +112,7 @@ package final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayA
     private func withLockdown<T>(_ body: (idevice_t, lockdownd_client_t) throws -> T) throws -> T {
         try withDevice { device in
             var client: lockdownd_client_t? = nil
-            let err = lockdownd_client_new_with_handshake(device, &client, "SideStore")
+            let err = lockdownd_client_new_with_handshake(device, &client, nil)
             guard err == LOCKDOWN_E_SUCCESS, let client = client else {
                 throw LibimobiledeviceGatewayError(.connectionFailed, reason: "lockdownd_client_new_with_handshake failed with code \(err.rawValue)")
             }

@@ -8,39 +8,35 @@
 
 import Foundation
 import libimobiledevice
+import DeviceGatewayAPI
 
-internal enum LibimobiledeviceGatewayError: LocalizedError {
-    case invalidPairingFile(reason: String)
-    case connectionFailed(String)
-    case serviceError(String)
-    case noConnection
-    case notInitialized
-    case unsupportedOperation(String)
-
-    var errorDescription: String? {
-        switch self {
-        case .invalidPairingFile(let reason):
-            return "The pairing file is invalid: \(reason)"
-        case .connectionFailed(let reason):
+internal final class LibimobiledeviceGatewayError: DeviceGatewayError {
+    override var errorDescription: String? {
+        switch code {
+        case .connectionFailed:
             return "Failed to connect to device via libimobiledevice: \(reason)"
-        case .serviceError(let reason):
+        case .serviceError:
             return "libimobiledevice service operation failed: \(reason)"
         case .noConnection:
             return "No connection to the device via libimobiledevice."
         case .notInitialized:
             return "LibimobiledeviceGateway not initialized. start() should be called first."
-        case .unsupportedOperation(let op):
-            return "Operation '\(op)' is not supported by libimobiledevice gateway."
+        case .unsupportedOperation:
+            return "Operation '\(reason)' is not supported by libimobiledevice gateway."
+        default:
+            return super.errorDescription
         }
     }
 }
 
-final internal class LibimobiledeviceGateway: @unchecked Sendable {
-    static let shared = LibimobiledeviceGateway()
 
-    private(set) var isRPPairing: Bool = false
-    private(set) var pairingFileType: PairingProtocol = .unknown
-    private(set) var pairingFileData: Data? = nil {
+
+public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
+    public static let shared = LibimobiledeviceGateway()
+
+    public private(set) var isRPPairing: Bool = false
+    public private(set) var pairingFileType: PairingProtocol = .unknown
+    public private(set) var pairingFileData: Data? = nil {
         didSet {
             var pairingDict: [String: Any]? = nil
             if let pairingFileData {
@@ -53,13 +49,13 @@ final internal class LibimobiledeviceGateway: @unchecked Sendable {
             self.pairingDataDict = pairingDict
         }
     }
-    private(set) var pairingDataDict: [String: Any]? = nil
+    public private(set) var pairingDataDict: [String: Any]? = nil
 
     private var cachedUDID: String? = nil
     private var isInitialized = false
     private var deviceEndpointIp: String? = nil
 
-    private init() {}
+    public init() {}
 
     deinit {
         cleanup()
@@ -74,23 +70,24 @@ final internal class LibimobiledeviceGateway: @unchecked Sendable {
         self.pairingFileType = .unknown
     }
 
-    func getPairingFileType() -> PairingProtocol {
+    public func getPairingFileType() -> PairingProtocol {
         return pairingFileType
     }
 
-    func setDeviceEndpointIp(_ ip: String?) {
+    public func setDeviceEndpointIp(_ ip: String?) {
         debugLog("[LibimobiledeviceGateway] setDeviceEndpointIp(\(ip ?? "nil")) called")
         self.deviceEndpointIp = ip
     }
 
-    func setLogging(_ enabled: Bool) {
+    public func setLogging(_ enabled: Bool) {
+        DeviceGatewayLogging.setLogging(enabled)
         debugLog("[LibimobiledeviceGateway] setLogging(\(enabled)) called")
         idevice_set_debug_level(enabled ? 1 : 0)
     }
 
     private func verifyInitialized() throws {
         guard isInitialized, cachedUDID != nil else {
-            throw LibimobiledeviceGatewayError.notInitialized
+            throw LibimobiledeviceGatewayError(.notInitialized)
         }
     }
 
@@ -98,13 +95,13 @@ final internal class LibimobiledeviceGateway: @unchecked Sendable {
     private func withDevice<T>(_ body: (idevice_t) throws -> T) throws -> T {
         try verifyInitialized()
         guard let udid = self.cachedUDID else {
-            throw LibimobiledeviceGatewayError.notInitialized
+            throw LibimobiledeviceGatewayError(.notInitialized)
         }
         var device: idevice_t? = nil
         let opts = idevice_options(rawValue: IDEVICE_LOOKUP_USBMUX.rawValue | IDEVICE_LOOKUP_NETWORK.rawValue)
         let err = idevice_new_with_options(&device, udid, opts)
         guard err == IDEVICE_E_SUCCESS, let device = device else {
-            throw LibimobiledeviceGatewayError.connectionFailed("idevice_new_with_options failed with code \(err.rawValue)")
+            throw LibimobiledeviceGatewayError(.connectionFailed, reason: "idevice_new_with_options failed with code \(err.rawValue)")
         }
         defer { idevice_free(device) }
         return try body(device)
@@ -116,7 +113,7 @@ final internal class LibimobiledeviceGateway: @unchecked Sendable {
             var client: lockdownd_client_t? = nil
             let err = lockdownd_client_new_with_handshake(device, &client, "SideStore")
             guard err == LOCKDOWN_E_SUCCESS, let client = client else {
-                throw LibimobiledeviceGatewayError.connectionFailed("lockdownd_client_new_with_handshake failed with code \(err.rawValue)")
+                throw LibimobiledeviceGatewayError(.connectionFailed, reason: "lockdownd_client_new_with_handshake failed with code \(err.rawValue)")
             }
             defer { lockdownd_client_free(client) }
             return try body(device, client)
@@ -134,14 +131,14 @@ final internal class LibimobiledeviceGateway: @unchecked Sendable {
             var serviceDescriptor: lockdownd_service_descriptor_t? = nil
             let sErr = lockdownd_start_service(lockdown, serviceIdentifier, &serviceDescriptor)
             guard sErr == LOCKDOWN_E_SUCCESS, let serviceDescriptor = serviceDescriptor else {
-                throw LibimobiledeviceGatewayError.serviceError("Failed to start lockdown service '\(serviceIdentifier)': code \(sErr.rawValue)")
+                throw LibimobiledeviceGatewayError(.serviceError, reason: "Failed to start lockdown service '\(serviceIdentifier)': code \(sErr.rawValue)")
             }
             defer { lockdownd_service_descriptor_free(serviceDescriptor) }
 
             var client: Client? = nil
             let cErr = create(device, serviceDescriptor, &client)
             guard cErr.rawValue == 0, let client = client else {
-                throw LibimobiledeviceGatewayError.serviceError("Failed to create client for '\(serviceIdentifier)': code \(cErr.rawValue)")
+                throw LibimobiledeviceGatewayError(.serviceError, reason: "Failed to create client for '\(serviceIdentifier)': code \(cErr.rawValue)")
             }
             defer { _ = cleanup(client) }
             return try body(client)
@@ -153,11 +150,11 @@ final internal class LibimobiledeviceGateway: @unchecked Sendable {
         cleanup()
 
         guard let data = pairingFileContent.data(using: .utf8) else {
-            throw LibimobiledeviceGatewayError.invalidPairingFile(reason: "UTF-8 encoding failed")
+            throw LibimobiledeviceGatewayError(.invalidPairingFile, reason: "UTF-8 encoding failed")
         }
 
         guard let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any] else {
-            throw LibimobiledeviceGatewayError.invalidPairingFile(reason: "Could not parse plist")
+            throw LibimobiledeviceGatewayError(.invalidPairingFile, reason: "Could not parse plist")
         }
 
         let requiredLockdownKeys = [
@@ -167,11 +164,11 @@ final internal class LibimobiledeviceGateway: @unchecked Sendable {
         ]
         let missing = requiredLockdownKeys.filter { plist[$0] == nil }
         guard missing.isEmpty else {
-            throw LibimobiledeviceGatewayError.invalidPairingFile(reason: "Missing Lockdown attributes: \(missing.joined(separator: ", "))")
+            throw LibimobiledeviceGatewayError(.invalidPairingFile, reason: "Missing Lockdown attributes: \(missing.joined(separator: ", "))")
         }
 
         guard let udid = plist["UDID"] as? String, !udid.isEmpty else {
-            throw LibimobiledeviceGatewayError.invalidPairingFile(reason: "Missing UDID in pairing file")
+            throw LibimobiledeviceGatewayError(.invalidPairingFile, reason: "Missing UDID in pairing file")
         }
 
         self.pairingFileData = data
@@ -234,7 +231,7 @@ final internal class LibimobiledeviceGateway: @unchecked Sendable {
         ) { mounter in
             try signature.withUnsafeBytes { sigBuf in
                 guard let sigPtr = sigBuf.baseAddress?.assumingMemoryBound(to: UInt8.self) else {
-                    throw LibimobiledeviceGatewayError.serviceError("Invalid signature buffer")
+                    throw LibimobiledeviceGatewayError(.serviceError, reason: "Invalid signature buffer")
                 }
                 var resultPlist: plist_t? = nil
                 let res = mobile_image_mounter_mount_image(
@@ -249,7 +246,7 @@ final internal class LibimobiledeviceGateway: @unchecked Sendable {
                     plist_free(resultPlist)
                 }
                 if res != MOBILE_IMAGE_MOUNTER_E_SUCCESS {
-                    throw LibimobiledeviceGatewayError.serviceError("mobile_image_mounter_mount_image failed with code \(res.rawValue)")
+                    throw LibimobiledeviceGatewayError(.serviceError, reason: "mobile_image_mounter_mount_image failed with code \(res.rawValue)")
                 }
             }
         }
@@ -297,7 +294,7 @@ final internal class LibimobiledeviceGateway: @unchecked Sendable {
             plist_free(resultPlist)
         }
         if res != MOBILE_IMAGE_MOUNTER_E_SUCCESS {
-            throw LibimobiledeviceGatewayError.serviceError("mobile_image_mounter_mount_image_with_options failed with code \(res.rawValue)")
+            throw LibimobiledeviceGatewayError(.serviceError, reason: "mobile_image_mounter_mount_image_with_options failed with code \(res.rawValue)")
         }
     }
 
@@ -309,14 +306,14 @@ final internal class LibimobiledeviceGateway: @unchecked Sendable {
         ) { misagent in
             try profile.withUnsafeBytes { profBuf in
                 guard let profPtr = profBuf.baseAddress?.assumingMemoryBound(to: CChar.self) else {
-                    throw LibimobiledeviceGatewayError.serviceError("Invalid profile buffer")
+                    throw LibimobiledeviceGatewayError(.serviceError, reason: "Invalid profile buffer")
                 }
                 let plistProfile = plist_new_data(profPtr, UInt64(profile.count))
                 defer { if let p = plistProfile { plist_free(p) } }
 
                 let res = misagent_install(misagent, plistProfile)
                 if res != MISAGENT_E_SUCCESS {
-                    throw LibimobiledeviceGatewayError.serviceError("misagent_install failed with code \(res.rawValue)")
+                    throw LibimobiledeviceGatewayError(.serviceError, reason: "misagent_install failed with code \(res.rawValue)")
                 }
             }
         }
@@ -330,7 +327,7 @@ final internal class LibimobiledeviceGateway: @unchecked Sendable {
         ) { misagent in
             let res = misagent_remove(misagent, id)
             if res != MISAGENT_E_SUCCESS {
-                throw LibimobiledeviceGatewayError.serviceError("misagent_remove failed with code \(res.rawValue)")
+                throw LibimobiledeviceGatewayError(.serviceError, reason: "misagent_remove failed with code \(res.rawValue)")
             }
         }
     }
@@ -344,7 +341,7 @@ final internal class LibimobiledeviceGateway: @unchecked Sendable {
             var profilesPlist: plist_t? = nil
             let res = misagent_copy_all(misagent, &profilesPlist)
             if res != MISAGENT_E_SUCCESS {
-                throw LibimobiledeviceGatewayError.serviceError("misagent_copy_all failed with code \(res.rawValue)")
+                throw LibimobiledeviceGatewayError(.serviceError, reason: "misagent_copy_all failed with code \(res.rawValue)")
             }
             defer { if let p = profilesPlist { plist_free(p) } }
 
@@ -368,7 +365,7 @@ final internal class LibimobiledeviceGateway: @unchecked Sendable {
         ) { instproxy in
             let res = instproxy_uninstall(instproxy, bundleId, nil, nil, nil)
             if res != INSTPROXY_E_SUCCESS {
-                throw LibimobiledeviceGatewayError.serviceError("instproxy_uninstall failed with code \(res.rawValue)")
+                throw LibimobiledeviceGatewayError(.serviceError, reason: "instproxy_uninstall failed with code \(res.rawValue)")
             }
         }
     }
@@ -383,18 +380,18 @@ final internal class LibimobiledeviceGateway: @unchecked Sendable {
             var handle: UInt64 = 0
             let openRes = afc_file_open(afc, remotePath, AFC_FOPEN_RW, &handle)
             guard openRes == AFC_E_SUCCESS, handle != 0 else {
-                throw LibimobiledeviceGatewayError.serviceError("afc_file_open failed with code \(openRes.rawValue)")
+                throw LibimobiledeviceGatewayError(.serviceError, reason: "afc_file_open failed with code \(openRes.rawValue)")
             }
             defer { _ = afc_file_close(afc, handle) }
 
             try ipaBytes.withUnsafeBytes { rawBuf in
                 guard let baseAddr = rawBuf.baseAddress?.assumingMemoryBound(to: CChar.self) else {
-                    throw LibimobiledeviceGatewayError.serviceError("Invalid IPA buffer")
+                    throw LibimobiledeviceGatewayError(.serviceError, reason: "Invalid IPA buffer")
                 }
                 var bytesWritten: UInt32 = 0
                 let writeRes = afc_file_write(afc, handle, baseAddr, UInt32(ipaBytes.count), &bytesWritten)
                 if writeRes != AFC_E_SUCCESS {
-                    throw LibimobiledeviceGatewayError.serviceError("afc_file_write failed with code \(writeRes.rawValue)")
+                    throw LibimobiledeviceGatewayError(.serviceError, reason: "afc_file_write failed with code \(writeRes.rawValue)")
                 }
             }
         }
@@ -409,7 +406,7 @@ final internal class LibimobiledeviceGateway: @unchecked Sendable {
             let remotePath = "PublicStaging/\(bundleId).ipa"
             let res = instproxy_install(instproxy, remotePath, nil, nil, nil)
             if res != INSTPROXY_E_SUCCESS {
-                throw LibimobiledeviceGatewayError.serviceError("instproxy_install failed with code \(res.rawValue)")
+                throw LibimobiledeviceGatewayError(.serviceError, reason: "instproxy_install failed with code \(res.rawValue)")
             }
         }
     }
@@ -422,7 +419,7 @@ final internal class LibimobiledeviceGateway: @unchecked Sendable {
         ) { ha in
             let res = house_arrest_send_command(ha, "VendContainer", identifier)
             if res != HOUSE_ARREST_E_SUCCESS {
-                throw LibimobiledeviceGatewayError.serviceError("house_arrest_send_command failed with code \(res.rawValue)")
+                throw LibimobiledeviceGatewayError(.serviceError, reason: "house_arrest_send_command failed with code \(res.rawValue)")
             }
             var resultDict: plist_t? = nil
             let gRes = house_arrest_get_result(ha, &resultDict)
@@ -430,7 +427,7 @@ final internal class LibimobiledeviceGateway: @unchecked Sendable {
                 plist_free(resultDict)
             }
             if gRes != HOUSE_ARREST_E_SUCCESS {
-                throw LibimobiledeviceGatewayError.serviceError("house_arrest_get_result failed with code \(gRes.rawValue)")
+                throw LibimobiledeviceGatewayError(.serviceError, reason: "house_arrest_get_result failed with code \(gRes.rawValue)")
             }
         }
     }
@@ -467,7 +464,7 @@ final internal class LibimobiledeviceGateway: @unchecked Sendable {
 
             let sRes = heartbeat_send(hb, plist)
             if sRes != HEARTBEAT_E_SUCCESS {
-                throw LibimobiledeviceGatewayError.serviceError("heartbeat_send failed with code \(sRes.rawValue)")
+                throw LibimobiledeviceGatewayError(.serviceError, reason: "heartbeat_send failed with code \(sRes.rawValue)")
             }
 
             var respPlist: plist_t? = nil
@@ -482,7 +479,7 @@ final internal class LibimobiledeviceGateway: @unchecked Sendable {
                 }
             }
             if rRes != HEARTBEAT_E_SUCCESS {
-                throw LibimobiledeviceGatewayError.serviceError("heartbeat_receive_with_timeout failed with code \(rRes.rawValue)")
+                throw LibimobiledeviceGatewayError(.serviceError, reason: "heartbeat_receive_with_timeout failed with code \(rRes.rawValue)")
             }
             newInterval = interval
         }
@@ -497,7 +494,7 @@ final internal class LibimobiledeviceGateway: @unchecked Sendable {
             var dirList: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>? = nil
             let res = afc_read_directory(afc, path, &dirList)
             if res != AFC_E_SUCCESS {
-                throw LibimobiledeviceGatewayError.serviceError("afc_read_directory failed with code \(res.rawValue)")
+                throw LibimobiledeviceGatewayError(.serviceError, reason: "afc_read_directory failed with code \(res.rawValue)")
             }
             defer {
                 if let dirList = dirList {
@@ -526,7 +523,7 @@ final internal class LibimobiledeviceGateway: @unchecked Sendable {
             var handle: UInt64 = 0
             let openRes = afc_file_open(afc, path, AFC_FOPEN_RDONLY, &handle)
             guard openRes == AFC_E_SUCCESS, handle != 0 else {
-                throw LibimobiledeviceGatewayError.serviceError("afc_file_open failed with code \(openRes.rawValue)")
+                throw LibimobiledeviceGatewayError(.serviceError, reason: "afc_file_open failed with code \(openRes.rawValue)")
             }
             defer { _ = afc_file_close(afc, handle) }
 
@@ -541,7 +538,7 @@ final internal class LibimobiledeviceGateway: @unchecked Sendable {
                     return afc_file_read(afc, handle, ptr, chunkSize, &bytesRead)
                 }
                 if readRes != AFC_E_SUCCESS {
-                    throw LibimobiledeviceGatewayError.serviceError("afc_file_read failed with code \(readRes.rawValue)")
+                    throw LibimobiledeviceGatewayError(.serviceError, reason: "afc_file_read failed with code \(readRes.rawValue)")
                 }
                 if bytesRead == 0 { break }
                 buffer.append(temp, count: Int(bytesRead))
@@ -559,7 +556,7 @@ final internal class LibimobiledeviceGateway: @unchecked Sendable {
             var infoList: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>? = nil
             let res = afc_get_file_info(afc, path, &infoList)
             if res != AFC_E_SUCCESS {
-                throw LibimobiledeviceGatewayError.serviceError("afc_get_file_info failed with code \(res.rawValue)")
+                throw LibimobiledeviceGatewayError(.serviceError, reason: "afc_get_file_info failed with code \(res.rawValue)")
             }
             defer {
                 if let infoList = infoList {
@@ -589,74 +586,74 @@ final internal class LibimobiledeviceGateway: @unchecked Sendable {
 }
 
 // Async FFI Dispatcher Extensions
-extension LibimobiledeviceGateway: DeviceGatewayAPI {
-    func start(pairingFileContent: String) async throws {
+extension LibimobiledeviceGateway {
+    public func start(pairingFileContent: String) async throws {
         try await withFFIDispatch {
             try self.syncStart(pairingFileContent: pairingFileContent)
         }
     }
 
-    func fetchUDID() async throws -> String? {
+    public func fetchUDID() async throws -> String? {
         try await withFFIDispatch {
             try self.syncFetchUDID()
         }
     }
 
-    func getLockdownValue(key: String) async throws -> String? {
+    public func getLockdownValue(key: String) async throws -> String? {
         try await withFFIDispatch {
             try self.syncGetLockdownValue(key: key)
         }
     }
 
-    func installProvisioningProfile(profile: Data) async throws {
+    public func installProvisioningProfile(profile: Data) async throws {
         try await withFFIDispatch {
             try self.syncInstallProvisioningProfile(profile: profile)
         }
     }
 
-    func removeProvisioningProfile(id: String) async throws {
+    public func removeProvisioningProfile(id: String) async throws {
         try await withFFIDispatch {
             try self.syncRemoveProvisioningProfile(id: id)
         }
     }
 
-    func removeApp(bundleId: String) async throws {
+    public func removeApp(bundleId: String) async throws {
         try await withFFIDispatch {
             try self.syncRemoveApp(bundleId: bundleId)
         }
     }
 
-    func yeetAppAfc(bundleId: String, ipaBytes: Data) async throws {
+    public func yeetAppAfc(bundleId: String, ipaBytes: Data) async throws {
         try await withFFIDispatch {
             try self.syncYeetAppAfc(bundleId: bundleId, ipaBytes: ipaBytes)
         }
     }
 
-    func installIpa(bundleId: String) async throws {
+    public func installIpa(bundleId: String) async throws {
         try await withFFIDispatch {
             try self.syncInstallIpa(bundleId: bundleId)
         }
     }
 
-    func debugApp(appId: String) async throws {
+    public func debugApp(appId: String) async throws {
         try await withFFIDispatch {
             try self.syncDebugApp(appId: appId)
         }
     }
 
-    func debugProcess(pid: UInt32) async throws {
+    public func debugProcess(pid: UInt32) async throws {
         try await withFFIDispatch {
             try self.syncDebugProcess(pid: pid)
         }
     }
 
-    func dumpProfiles(docsPath: String) async throws -> String {
+    public func dumpProfiles(docsPath: String) async throws -> String {
         try await withFFIDispatch {
             try self.syncDumpProfiles(docsPath: docsPath)
         }
     }
 
-    func performHeartbeat(interval: UInt64) async throws -> UInt64 {
+    public func performHeartbeat(interval: UInt64) async throws -> UInt64 {
         try await withFFIDispatch {
             var newInterval: UInt64 = 0
             try self.syncPerformHeartbeat(interval: interval, newInterval: &newInterval)
@@ -664,53 +661,53 @@ extension LibimobiledeviceGateway: DeviceGatewayAPI {
         }
     }
 
-    func mountPersonalizedDdi(image: Data, trustcache: Data, manifest: Data) async throws {
+    public func mountPersonalizedDdi(image: Data, trustcache: Data, manifest: Data) async throws {
         try await withFFIDispatch {
             try self.syncMountPersonalizedDdi(image: image, trustcache: trustcache, manifest: manifest)
         }
     }
 
-    func isDDIMounted() async throws -> Bool {
+    public func isDDIMounted() async throws -> Bool {
         try await withFFIDispatch {
             try self.syncIsDDIMounted()
         }
     }
 
-    func mountDeveloperImage(image: Data, signature: Data) async throws {
+    public func mountDeveloperImage(image: Data, signature: Data) async throws {
         try await withFFIDispatch {
             try self.syncMountDeveloperImage(image: image, signature: signature)
         }
     }
 
-    func startWirelessPair(
+    public func startWirelessPair(
         hostName: String,
         hostModel: String,
         outPath: String,
         onReady: @escaping @Sendable (String, UInt16, [String: String]) -> Void,
         onPin: @escaping @Sendable (String) -> Void
     ) async throws -> WirelessPairPairedDevice {
-        throw LibimobiledeviceGatewayError.unsupportedOperation("startWirelessPair (RemotePairing is not supported on pure Lockdown gateway)")
+        throw LibimobiledeviceGatewayError(.unsupportedOperation, reason: "startWirelessPair (RemotePairing is not supported on pure Lockdown gateway)")
     }
 
-    func afcListDirectory(bundleId: String, path: String) async throws -> [String] {
+    public func afcListDirectory(bundleId: String, path: String) async throws -> [String] {
         try await withFFIDispatch {
             try self.syncAfcListDirectory(bundleId: bundleId, path: path)
         }
     }
 
-    func afcReadFile(bundleId: String, path: String) async throws -> Data {
+    public func afcReadFile(bundleId: String, path: String) async throws -> Data {
         try await withFFIDispatch {
             try self.syncAfcReadFile(bundleId: bundleId, path: path)
         }
     }
 
-    func afcGetFileInfo(bundleId: String, path: String) async throws -> (isDirectory: Bool, fileSize: Int64) {
+    public func afcGetFileInfo(bundleId: String, path: String) async throws -> (isDirectory: Bool, fileSize: Int64) {
         try await withFFIDispatch {
             try self.syncAfcGetFileInfo(bundleId: bundleId, path: path)
         }
     }
 
-    func wipeContainer(identifier: String) async throws {
+    public func wipeContainer(identifier: String) async throws {
         try await withFFIDispatch {
             try self.syncWipeContainer(identifier: identifier)
         }

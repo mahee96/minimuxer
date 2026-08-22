@@ -8,6 +8,7 @@
 
 import Foundation
 import Combine
+import DeviceGatewayAPI
 
 private enum MinimuxerStatus{
     case started, inprogress, stopped
@@ -32,7 +33,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
     
     var isrppairing: Bool { Minimuxer.gateway.isRPPairing }
     
-    var isLoggingEnabled = true
+    var isLoggingEnabled: Bool { MinimuxerLogging.isLoggingEnabled }
     
     var isPairingFileLoaded: Bool {
         return getPairingFileType() != .unknown
@@ -84,10 +85,10 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         }
 
         // check connection status first
-        if !(Minimuxer.network.isWifiSatisfied /* ||
-                Minimuxer.network.isWiredSatisfied ||
-                Minimuxer.network.isUsbSatisfied   ||
-                Minimuxer.network.isBridgeSatisfied */
+        if !(Minimuxer.network.isWifiSatisfied   /* ||
+             Minimuxer.network.isWiredSatisfied     ||
+             Minimuxer.network.isUsbSatisfied       ||
+             Minimuxer.network.isBridgeSatisfied */
         ){
             debugLog("[minimuxer] minimuxer not ready: no network connection")
             return .failure(.noConnection("No wifi interface satisfied"))
@@ -206,10 +207,10 @@ final internal class MinimuxerImpl: MinimuxerAPI {
     private func runIdeviceCheckingVPN<T>(_ context: String, fallback: T, action: () async throws -> T) async throws(MinimuxerError) -> T {
         do {
             return try await action()
-        } catch let err as IdeviceGatewayError {
-            if case .connectionFailed(let reason) = err,
-               reason.lowercased().contains("broken pipe") || reason.lowercased().contains("brokenpipe") {
-                throw MinimuxerError.noVPN("VPN tunnel connection severed \(context). Cause: \(reason)")
+        } catch let err as DeviceGatewayError {
+            if err.code == .connectionFailed,
+               err.reason.lowercased().contains("broken pipe") || err.reason.lowercased().contains("brokenpipe") {
+                throw MinimuxerError.noVPN("VPN tunnel connection severed \(context). Cause: \(err.reason)")
             }
             return fallback
         } catch {
@@ -218,7 +219,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
     }
 
     func setLogging(_ enabled: Bool) {
-        self.isLoggingEnabled = enabled
+        MinimuxerLogging.setLogging(enabled)
         Minimuxer.gateway.setLogging(enabled)
     }
     
@@ -457,37 +458,6 @@ final internal class MinimuxerImpl: MinimuxerAPI {
     func afcGetFileInfo(bundleId: String, path: String) async throws -> (isDirectory: Bool, fileSize: Int64) {
         try await matchingPriority {
             try await Minimuxer.gateway.afcGetFileInfo(bundleId: bundleId, path: path)
-        }
-    }
-}
-
-private func getTag(level: String) -> String {
-    let formatter = DateFormatter()
-    formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSS"
-    formatter.locale = Locale(identifier: "en_US_POSIX")
-    let timestamp = formatter.string(from: Date())
-    return "\(timestamp) \(level): "
-}
-
-@inline(__always)
-func debugLog(_ text: @autoclosure () -> String) {
-    let message = text()
-    if !message.isEmpty && message.allSatisfy({ $0 == "\n" || $0 == "\r" }) {
-        print(message, terminator: "")
-    } else {
-        print("\(getTag(level: "[D]"))\(message)")
-    }
-}
-
-
-@inline(__always)
-func verboseLog(_ text: @autoclosure () -> String) {
-    if Minimuxer.shared.isLoggingEnabled {
-        let message = text()
-        if !message.isEmpty && message.allSatisfy({ $0 == "\n" || $0 == "\r" }) {
-            print(message, terminator: "")
-        } else {
-            print("\(getTag(level: "[V]"))\(message)")
         }
     }
 }

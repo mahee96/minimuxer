@@ -45,24 +45,53 @@ let package = Package(
 //         ),
         .binaryTarget(
             name: "libimobiledevice",
-            url: "https://github.com/SideStore/libimobiledevice-xcframework/releases/download/1.4.0-ss-22ed647/libimobiledevice.xcframework.zip",
-            checksum: "0c5faa6fae3ec2effe51e9f4e1d3817cc615fb956a0cfcac36933ebcc66e7759"
+            url: "https://github.com/SideStore/libimobiledevice-xcframework/releases/download/1.4.0-ss-ab5f627/libimobiledevice.xcframework.zip",
+            checksum: "8a34a3420eb97e25cdb5b3ed1c518fdebda399e7cdedf43d5a901442f3aef5fb"
         ),
 //        .binaryTarget(
 //            name: "libimobiledevice",
 //            path: "../../local/libimobiledevice-xcframework/libs/libimobiledevice.xcframework"
 //        ),
 
-        // MARK: Main SPM target
+        // Main SPM targets
+        .target(
+            name: "DeviceGatewayAPI",
+            path: "Sources/DeviceGateway",
+            sources: [
+                "DeviceGatewayAPI.swift",
+                "DeviceGatewayError.swift",
+                "DeviceGatewayLogging.swift",
+                "PairingProtocol.swift",
+                "../Common/FFIDispatcher.swift"
+            ]
+        ),
+        .target(
+            name: "IdeviceGateway",
+            dependencies: [
+                "DeviceGatewayAPI",
+                "IDevice"
+            ],
+            path: "Sources/DeviceGateway/idevice"
+        ),
+        .target(
+            name: "LibimobiledeviceGateway",
+            dependencies: [
+                "DeviceGatewayAPI",
+                "libimobiledevice"
+            ],
+            path: "Sources/DeviceGateway/libimobiledevice"
+        ),
         .target(
             name: "Minimuxer",
             dependencies: [
-                "IDevice",
+                "DeviceGatewayAPI",
+                "IdeviceGateway",
+                "LibimobiledeviceGateway",
                 "EMProxy",
-                "libimobiledevice",
                 .product(name: "ZIPFoundation", package: "ZIPFoundation")
             ],
-            path: "Sources"
+            path: "Sources",
+            exclude: ["DeviceGateway"]
         ),
         .testTarget(
             name: "MinimuxerTests",

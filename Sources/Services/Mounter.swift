@@ -8,6 +8,7 @@
 
 import Foundation
 import ZIPFoundation
+import DeviceGatewayAPI
 
 final internal class Mounter {
     static let shared = Mounter()
@@ -72,12 +73,12 @@ final internal class Mounter {
                 } else {
                     throw error
                 }
-            } catch let error as IdeviceGatewayError {
-                switch error {
-                case .connectionFailed(let reason)
-                    where reason.lowercased().contains("broken pipe") || reason.lowercased().contains("brokenpipe"):
+            } catch let error as DeviceGatewayError {
+                switch error.code {
+                case .connectionFailed
+                    where error.reason.lowercased().contains("broken pipe") || error.reason.lowercased().contains("brokenpipe"):
                     // VPN tunnel was severed — translate immediately, no retry useful
-                    throw MinimuxerError.noVPN("VPN tunnel severed during mount. Cause: \(reason)")
+                    throw MinimuxerError.noVPN("VPN tunnel severed during mount. Cause: \(error.reason)")
                 case .connectionFailed, .noConnection:
                     lastError = error
                     verboseLog("[minimuxer] mounter: attempt \(attempt)/\(maxRetries) — connection failed, retrying...")

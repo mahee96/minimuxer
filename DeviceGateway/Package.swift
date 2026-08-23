@@ -2,7 +2,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "MinimuxerDeviceGateway",
+    name: "MinimuxerGateway",
     platforms: [
         .iOS(.v14),
         .macOS(.v11)

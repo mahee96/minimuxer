@@ -95,6 +95,7 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
     private var cachedUDID: String? = nil
     private var isInitialized = false
     private var deviceEndpointIp: String? = nil
+    private var remotePairingPort: UInt16 = MinimuxerConstants.remotePairingPort
     private var rpIdentity: rppairing_identity_t? = nil
     private var activeTunnel: rppairing_tunnel_t? = nil
     private var activeTunnelInfo: rppairing_tunnel_info_t? = nil
@@ -144,6 +145,13 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
         self.deviceEndpointIp = ip
     }
 
+    public func setRemotePairingPort(_ port: UInt16) {
+        debugLog("[LibimobiledeviceGateway] setRemotePairingPort(\(port)) called")
+        guard self.remotePairingPort != port else { return }
+        self.remotePairingPort = port
+        cleanupRPTunnel()
+    }
+
     public func setLogging(_ enabled: Bool) {
         DeviceGatewayLogging.setLogging(enabled)
         debugLog("[LibimobiledeviceGateway] setLogging(\(enabled)) called")
@@ -171,7 +179,7 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
             throw LibimobiledeviceGatewayError(.notInitialized, reason: "RPPairing identity not loaded")
         }
         let host = try requireDeviceEndpointIp()
-        let port = MinimuxerConstants.remotePairingPort
+        let port = self.remotePairingPort
         var client: rppairing_client_t? = nil
         let err = rppairing_client_new(host, port, MinimuxerConstants.appName, &client)
         guard err == RPPAIRING_E_SUCCESS, let client = client else {

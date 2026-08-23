@@ -82,7 +82,7 @@ final internal class WirelessPairService: WirelessPairAPI {
         stopAdvertising()
         let service = NetService(
             domain: MinimuxerConstants.defaultAdDomain,
-            type: MinimuxerConstants.remotepairingServiceType,
+            type: MinimuxerConstants.remotePairingPairableHostServiceType,
             name: serviceID,
             port: Int32(port)
         )

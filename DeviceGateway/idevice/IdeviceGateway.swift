@@ -76,6 +76,7 @@ public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
     private var adapter: OpaquePointer? = nil
     private var handshake: OpaquePointer? = nil
     private var deviceEndpointIp: String? = nil
+    private var remotePairingPort: UInt16 = MinimuxerConstants.remotePairingPort
     private var isInitialized = false
 
     public private(set) var isRPPairing: Bool = false
@@ -83,6 +84,13 @@ public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
     
     public func getPairingFileType() -> PairingProtocol {
         return pairingFileType
+    }
+
+    public func setRemotePairingPort(_ port: UInt16) {
+        debugLog("[IdeviceGateway] setRemotePairingPort(\(port)) called")
+        guard self.remotePairingPort != port else { return }
+        self.remotePairingPort = port
+        invalidateConnection()
     }
 
     static func validatePairingFile(from plist: [String: Any]?) throws -> PairingProtocol {
@@ -265,7 +273,7 @@ public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
         // Standard RPPairing socket address
         var addr = sockaddr_in()
         addr.sin_family = sa_family_t(AF_INET)
-        addr.sin_port = MinimuxerConstants.remotePairingPort.bigEndian
+        addr.sin_port = remotePairingPort.bigEndian
         addr.sin_addr.s_addr = inet_addr(deviceEndpointIp)
 
         let hostname = MinimuxerConstants.appName

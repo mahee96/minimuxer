@@ -130,6 +130,7 @@ public final class Minimuxer: MinimuxerFacade, @unchecked Sendable {
     public let gateway: any DeviceGatewayAPI
 
     private static var currentBackend: GatewayBackend = .idevice
+    private static var currentRemotePairingPort: UInt16 = MinimuxerConstants.remotePairingPort
     private static var cachedInstance: Minimuxer?
     private static let lock = NSLock()
 
@@ -147,24 +148,30 @@ public final class Minimuxer: MinimuxerFacade, @unchecked Sendable {
         self.core = core
     }
 
-    public static func shared() -> Minimuxer {
+    public static func shared(
+        backend: GatewayBackend? = nil,
+        remotePairingPort: UInt16? = nil
+    ) -> Minimuxer {
         lock.lock()
         defer { lock.unlock() }
 
-        if let cached = cachedInstance {
+        let resolvedBackend = backend ?? currentBackend
+        let resolvedPort = remotePairingPort ?? currentRemotePairingPort
+
+        currentBackend = resolvedBackend
+        currentRemotePairingPort = resolvedPort
+
+        switch resolvedBackend {
+        case .libimobiledevice:
+            LibimobiledeviceGateway.shared.setRemotePairingPort(resolvedPort)
+        case .idevice:
+            IdeviceGateway.shared.setRemotePairingPort(resolvedPort)
+        }
+
+        if let cached = cachedInstance, currentBackend == resolvedBackend {
             return cached
         }
-        return createInstance(backend: currentBackend)
-    }
-
-    public static func shared(backend: GatewayBackend) -> Minimuxer {
-        lock.lock()
-        defer { lock.unlock() }
-
-        if let cached = cachedInstance, currentBackend == backend {
-            return cached
-        }
-        return createInstance(backend: backend)
+        return createInstance(backend: resolvedBackend)
     }
 
     private static func createInstance(backend: GatewayBackend) -> Minimuxer {

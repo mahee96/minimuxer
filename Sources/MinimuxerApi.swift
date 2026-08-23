@@ -109,13 +109,74 @@ public extension MinimuxerAPI {
     }
 }
 
-public enum Minimuxer {
-    public static let shared: any MinimuxerAPI = MinimuxerImpl()
-    public static let network: any NetworkObserverAPI = NetworkObserverService()
-    public static let wirelessPair: any WirelessPairAPI = WirelessPairService()
-    public static let emproxy: any EMProxyAPI = EMProxyImpl()
-//    public static var gateway: any DeviceGatewayAPI = IdeviceGateway.shared
-    public static var gateway: any DeviceGatewayAPI = LibimobiledeviceGateway.shared
+public enum GatewayBackend: String, Sendable {
+    case libimobiledevice
+    case idevice
+}
+
+public final class Minimuxer: @unchecked Sendable {
+    public let core: any MinimuxerAPI
+    public let network: any NetworkObserverAPI
+    public let wirelessPair: any WirelessPairAPI
+    public let emproxy: any EMProxyAPI
+    public let gateway: any DeviceGatewayAPI
+
+    private static var lastBackend: GatewayBackend?
+    private static var cachedInstance: Minimuxer?
+    private static let lock = NSLock()
+
+    private init(
+        gateway: any DeviceGatewayAPI,
+        network: any NetworkObserverAPI,
+        emproxy: any EMProxyAPI,
+        wirelessPair: any WirelessPairAPI,
+        core: any MinimuxerAPI
+    ) {
+        self.gateway = gateway
+        self.network = network
+        self.emproxy = emproxy
+        self.wirelessPair = wirelessPair
+        self.core = core
+    }
+
+    public static func shared(backend: GatewayBackend = .libimobiledevice) -> Minimuxer {
+        lock.lock()
+        defer { lock.unlock() }
+
+        if let cached = cachedInstance, lastBackend == backend {
+            return cached
+        }
+
+        let gateway: any DeviceGatewayAPI
+        switch backend {
+        case .libimobiledevice:
+            gateway = LibimobiledeviceGateway.shared
+        case .idevice:
+            gateway = IdeviceGateway.shared
+        }
+
+        let emproxy = EMProxyImpl()
+        let network = NetworkObserverService()
+        let wirelessPair = WirelessPairService(gateway: gateway)
+        let impl = MinimuxerImpl(
+            gateway: gateway,
+            network: network,
+            emproxy: emproxy,
+            wirelessPair: wirelessPair
+        )
+
+        let instance = Minimuxer(
+            gateway: gateway,
+            network: network,
+            emproxy: emproxy,
+            wirelessPair: wirelessPair,
+            core: impl
+        )
+
+        cachedInstance = instance
+        lastBackend = backend
+        return instance
+    }
 }
 
 public protocol EMProxyAPI: AnyObject, Sendable {

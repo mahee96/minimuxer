@@ -7,38 +7,48 @@
 ## Architecture
 
 ```
-Sources/
-├── MinimuxerApi.swift               ← Public API contracts (Minimuxer, NetworkObserver, WirelessPair)
-├── MinimuxerImpl.swift              ← Core Minimuxer API implementation
-├── IdeviceGateway.swift             ← Gateway layer communicating with IDevice C/FFI library
-├── MinimuxerConstants.swift         ← Constants & default configurations
-├── MinimuxerError.swift             ← Public error definitions
-├── Services/
-│   ├── DeviceEndpoint.swift         ← Active target device IP state
-│   ├── HeartbeatService.swift       ← Heartbeat keep-alive service
-│   ├── Mounter.swift                ← Developer Disk Image (DDI) mounter
-│   ├── NetworkIfaceScanner.swift    ← Network interface scanning & route reachability detection
-│   ├── NetworkObserverService.swift ← Network path monitoring (NWPathMonitor) & endpoint lifecycle
-│   ├── NetworkPing.swift            ← Non-blocking TCP port probing for device reachability
-│   ├── UsbmuxdProxyServer.swift     ← Usbmuxd proxy server listener over TCP
-│   └── WirelessPairService.swift    ← Wireless pairing service & PIN verification
-└── Types/
-    ├── PairingProtocol.swift        ├── Protocol types (.lockdown, .rppairing)
-    └── RawPacket.swift              └── Low-level packet parsing
+├── Common/                          ← MinimuxerCommon package
+│   ├── FFIDispatcher.swift          ← Serial GCD dispatch queue utility for FFI calls
+│   ├── MinimuxerConstants.swift     ← Constants & default configurations
+│   └── NetworkUtils.swift           ← TCP socket probing & device reachability checks
+├── DeviceGateway/                   ← DeviceGateway package (libimobiledevice / idevice)
+│   ├── DeviceGatewayAPI.swift       ← Gateway protocol definitions
+│   ├── idevice/                     ← Idevice backend implementation
+│   └── libimobiledevice/            ← Libimobiledevice backend implementation
+└── Sources/                         ← Main Minimuxer package
+    ├── MinimuxerApi.swift           ← Public API contracts & Minimuxer composition root
+    ├── MinimuxerImpl.swift          ← Core Minimuxer API implementation
+    ├── EMProxyImpl.swift            ← EMProxy wrapper implementation
+    ├── MinimuxerError.swift         ← Public error definitions
+    ├── Services/
+    │   ├── DeviceConnectionManager.swift ← Route discovery & connection reachability
+    │   ├── DeviceEndpoint.swift     ← Active target device IP state
+    │   ├── HeartbeatService.swift   ← Heartbeat keep-alive service
+    │   ├── Mounter.swift            ← Developer Disk Image (DDI) mounter
+    │   ├── NetworkIfaceScanner.swift← Network interface scanner
+    │   ├── NetworkObserverService.swift ← Network path monitoring (NWPathMonitor) & endpoint lifecycle
+    │   ├── UsbmuxdProxyServer.swift ← Usbmuxd proxy server listener over TCP
+    │   └── WirelessPairService.swift← Wireless pairing service & PIN verification
+    └── Types/
+        └── RawPacket.swift          ← Low-level packet parsing
 ```
 
 ## Dependencies
 
-- **IDevice**: Pre-built `idevice-xcframework` binary target providing lower-level C/FFI bindings for iOS device communication.
+- **DeviceGateway**: Pluggable device gateway backend (`libimobiledevice` and `idevice` C/FFI bindings).
+- **EMProxy**: Pre-built `EMProxy.xcframework` for WireGuard loopback server and handshake handling.
 - **ZIPFoundation**: Used for extracting DDI disk images and IPA application bundles.
 
 ## Key APIs & Connection Modes
 
 ### Public APIs (`Minimuxer`)
 
-- `Minimuxer.shared`: Primary API for app installation, uninstallation, DDI mounting, profile management, and AFC file operations.
-- `Minimuxer.network`: Handles network path monitoring, interface scanning, and endpoint attachment/detachment.
-- `Minimuxer.wirelessPair`: Manages wireless pairing flow and PIN verification (iOS 27+).
+- `Minimuxer.shared(backend:)`: Memoized singleton factory returning an instance with:
+  - `.core`: Primary API for app installation, uninstallation, DDI mounting, profile management, and AFC file operations.
+  - `.network`: Handles network path monitoring, interface scanning, and endpoint attachment/detachment.
+  - `.wirelessPair`: Manages wireless pairing flow and PIN verification (iOS 27+).
+  - `.emproxy`: Controls EMProxy WireGuard loopback server and handshake client.
+  - `.gateway`: Active device gateway backend (`libimobiledevice` or `idevice`).
 
 ### Connection Modes
 

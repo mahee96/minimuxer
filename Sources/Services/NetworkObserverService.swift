@@ -11,7 +11,7 @@ import Combine
 
 final internal class NetworkObserverService: NetworkObserverAPI, @unchecked Sendable {
 
-    let minimuxer: any MinimuxerAPI
+    var onNetworkChanged: (() async -> Void)?
 
     public let pathSubject = PassthroughSubject<NWPath, Never>()
     public var pathPublisher: AnyPublisher<NWPath, Never> {
@@ -22,9 +22,7 @@ final internal class NetworkObserverService: NetworkObserverAPI, @unchecked Send
     private let queue = DispatchQueue(label: "net.monitor")
     private let state = State()
 
-    init(minimuxer: any MinimuxerAPI) {
-        self.minimuxer = minimuxer
-    }
+    init() {}
     
     private actor State {
         var started = false
@@ -75,11 +73,7 @@ final internal class NetworkObserverService: NetworkObserverAPI, @unchecked Send
         
         // Always re-evaluate and publish network change events as is
         debugLog("[minimuxer] [net] dispatching status update to subscribers")
-        let readyResult = await self.minimuxer.isReady()
-        if let impl = self.minimuxer as? MinimuxerImpl {
-            debugLog("[minimuxer] [net] publishing status update to subscribers")
-            impl.statusSubject.send(readyResult)
-        }
+        await onNetworkChanged?()
     }
     
     func refreshEndpoint() async {

@@ -36,6 +36,15 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         self.network = network
         self.emproxy = emproxy
         self.wirelessPair = wirelessPair
+
+        if let netService = network as? NetworkObserverService {
+            netService.onNetworkChanged = { [weak self] in
+                guard let self = self else { return }
+                let readyResult = await self.isReady()
+                debugLog("[minimuxer] [net] publishing status update to subscribers")
+                self.statusSubject.send(readyResult)
+            }
+        }
     }
 
     private actor State {
@@ -354,9 +363,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
     }
   
     func testDeviceConnection(ifaddr: String?) -> Bool {
-        guard let ip = ifaddr, !ip.isEmpty else { return false }
-        return NetworkPing.testTCP(ip: ip, port: MinimuxerConstants.remotePairingPort)
-            || NetworkPing.testTCP(ip: ip, port: MinimuxerConstants.lockdowndPort)
+        NetworkUtils.testDeviceConnection(ifaddr: ifaddr)
     }
 
     private func ensureDDIMounted() async throws {

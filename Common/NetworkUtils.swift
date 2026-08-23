@@ -1,16 +1,16 @@
 //
-//  NetworkPing.swift
-//  Minimuxer
+//  NetworkUtils.swift
+//  MinimuxerCommon
 //
-//  Created by Magesh K on 22/08/26.
+//  Created by Magesh K on 23/08/26.
 //  Copyright © 2026 SideStore. All rights reserved.
 //
 
 import Foundation
 
-final internal class NetworkPing {
+public enum NetworkUtils {
     /// Probes whether a TCP port is open on IPv4 or IPv6 with a millisecond timeout.
-    static func testTCP(ip: String, port: UInt16, timeoutMs: Int = 100) -> Bool {
+    public static func testTCP(ip: String, port: UInt16, timeoutMs: Int = 100) -> Bool {
         guard !ip.isEmpty else { return false }
 
         let isIPv6 = ip.contains(":")
@@ -48,17 +48,22 @@ final internal class NetworkPing {
         var pfd = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
         let result = poll(&pfd, 1, Int32(timeoutMs))
 
-        // Ensure connected and no error flags (POLLERR / POLLHUP / POLLNVAL)
         let hasOutput = (pfd.revents & Int16(POLLOUT)) != 0
         let hasError = (pfd.revents & (Int16(POLLERR) | Int16(POLLHUP) | Int16(POLLNVAL))) != 0
 
         if result > 0 && hasOutput && !hasError {
-            // Verify socket error code directly
             var socketError: Int32 = 0
             var errorLen = socklen_t(MemoryLayout<Int32>.size)
             getsockopt(fd, SOL_SOCKET, SO_ERROR, &socketError, &errorLen)
             return socketError == 0
         }
         return false
+    }
+
+    /// Verifies device reachability across remotePairingPort and lockdowndPort
+    public static func testDeviceConnection(ifaddr: String?) -> Bool {
+        guard let ip = ifaddr, !ip.isEmpty else { return false }
+        return testTCP(ip: ip, port: MinimuxerConstants.remotePairingPort)
+            || testTCP(ip: ip, port: MinimuxerConstants.lockdowndPort)
     }
 }

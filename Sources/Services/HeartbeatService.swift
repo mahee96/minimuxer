@@ -12,11 +12,9 @@ internal import DeviceGatewayAPI
 
 final internal class HeartbeatService {
     let gateway: any DeviceGatewayAPI
-    let minimuxer: any MinimuxerAPI
     
-    init(gateway: any DeviceGatewayAPI, minimuxer: any MinimuxerAPI) {
+    init(gateway: any DeviceGatewayAPI) {
         self.gateway = gateway
-        self.minimuxer = minimuxer
     }
     
     private actor MutableState {
@@ -105,7 +103,7 @@ final internal class HeartbeatService {
             }
             
             // verify tunnel/device reachability first
-            if !self.minimuxer.testDeviceConnection(ifaddr: tunnelPeerIp) {
+            if !NetworkUtils.testDeviceConnection(ifaddr: tunnelPeerIp) {
                 logIfNeeded("device IP not reachable, waiting...", isVerbose: true)
                 lastBeatSuccessful = false
                 try? await Task.sleep(nanoseconds: MinimuxerConstants.heartbeatSleepNs)

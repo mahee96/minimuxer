@@ -169,13 +169,29 @@ public final class Minimuxer: @unchecked Sendable {
         }
 
         let emproxy = EMProxyImpl()
-        let network = NetworkObserverService()
+        let endpoint = DeviceEndpoint(gateway: gateway)
+        let proxyServer = UsbmuxdProxyServer(gateway: gateway)
+        let connectionManager = DeviceConnectionManager()
+        let network = NetworkObserverService(
+            connectionManager: connectionManager,
+            endpoint: endpoint,
+            proxyServer: proxyServer
+        )
+
+        let mounter = Mounter(gateway: gateway, proxyServer: proxyServer, endpoint: endpoint)
+        let heartbeat = HeartbeatService(gateway: gateway, proxyServer: proxyServer, endpoint: endpoint)
         let wirelessPair = WirelessPairService(gateway: gateway)
+
         let impl = MinimuxerImpl(
             gateway: gateway,
             network: network,
             emproxy: emproxy,
-            wirelessPair: wirelessPair
+            wirelessPair: wirelessPair,
+            mounter: mounter,
+            proxyServer: proxyServer,
+            endpoint: endpoint,
+            connectionManager: connectionManager,
+            heartbeat: heartbeat
         )
 
         let instance = Minimuxer(

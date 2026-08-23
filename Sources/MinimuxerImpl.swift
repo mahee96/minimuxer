@@ -25,17 +25,32 @@ final internal class MinimuxerImpl: MinimuxerAPI {
     let network: any NetworkObserverAPI
     let emproxy: any EMProxyAPI
     let wirelessPair: any WirelessPairAPI
+    let mounter: Mounter
+    let proxyServer: UsbmuxdProxyServer
+    let endpoint: DeviceEndpoint
+    let connectionManager: DeviceConnectionManager
+    let heartbeat: HeartbeatService
 
     init(
         gateway: any DeviceGatewayAPI,
         network: any NetworkObserverAPI,
         emproxy: any EMProxyAPI,
-        wirelessPair: any WirelessPairAPI
+        wirelessPair: any WirelessPairAPI,
+        mounter: Mounter,
+        proxyServer: UsbmuxdProxyServer,
+        endpoint: DeviceEndpoint,
+        connectionManager: DeviceConnectionManager,
+        heartbeat: HeartbeatService
     ) {
         self.gateway = gateway
         self.network = network
         self.emproxy = emproxy
         self.wirelessPair = wirelessPair
+        self.mounter = mounter
+        self.proxyServer = proxyServer
+        self.endpoint = endpoint
+        self.connectionManager = connectionManager
+        self.heartbeat = heartbeat
 
         if let netService = network as? NetworkObserverService {
             netService.onNetworkChanged = { [weak self] in
@@ -76,11 +91,12 @@ final internal class MinimuxerImpl: MinimuxerAPI {
     }
     
     func getConnectionMode() async -> DeviceConnectionMode {
-        await DeviceConnectionManager.shared.getPreferredConnectionMode()
+        await self.connectionManager.getPreferredConnectionMode()
     }
     
     func bindConnectionConfig(_ binding: ConnectionConfigBinding) async {
-        await DeviceConnectionManager.shared.bindConnectionConfig(binding)
+        await self.connectionManager.bindConnectionConfig(binding)
+        await self.network.refreshEndpoint()
     }
     
     @discardableResult
@@ -90,7 +106,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
             try await isDDIMounted()
         }
         guard ddiMounted else {
-            let msg = isrppairing ? "dmg=\(ddiMounted) started=\(UsbmuxdProxyServer.shared.isListening)" : "DeveloperDiskImage is not mounted"
+            let msg = isrppairing ? "dmg=\(ddiMounted) started=\(self.proxyServer.isListening)" : "DeveloperDiskImage is not mounted"
             if isrppairing {
                 verboseLog("minimuxer not ready (\(activeProtocol)): \(msg)")
             }
@@ -158,7 +174,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         // then check if device is ready
         let deviceIp: String
         do {
-            deviceIp = try await DeviceEndpoint.shared.ip()
+            deviceIp = try await self.endpoint.ip()
         } catch {
             switch connectionMode {
             case .localVPN:
@@ -200,14 +216,14 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         verboseLog(
             "minimuxer status (.\(activeProtocol)): " +
             "deviceUDID=\(deviceUDID ?? "nil") " +
-            "started=\(UsbmuxdProxyServer.shared.isListening) "
+            "started=\(self.proxyServer.isListening) "
         )
         guard deviceUDID != nil else {
             return .failure(.invalidPairing(protocol: activeProtocol, reason: ".\(activeProtocol) UDID not found"))
         }
 
         if !isrppairing {
-            guard UsbmuxdProxyServer.shared.isListening else {
+            guard self.proxyServer.isListening else {
                 return .failure(.muxerNotListening("Usbmuxd fake server is not listening"))
             }
         }
@@ -281,8 +297,8 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         }
 
         // restart muxer
-        await UsbmuxdProxyServer.shared.stop()
-        try await UsbmuxdProxyServer.shared.start(udid: deviceUDID)
+        await self.proxyServer.stop()
+        try await self.proxyServer.start(udid: deviceUDID)
     }
     
     
@@ -329,7 +345,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
             return task
         }
         _ = await oldTask?.result       // await cancelled mount task completion
-        await UsbmuxdProxyServer.shared.stop()
+        await self.proxyServer.stop()
         // mark ready!
         await state.with {
             $0.status = .stopped
@@ -376,7 +392,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
             throw MinimuxerError.mount(protocol: activeProtocol, reason: "DDI mount path not set")
         }
         verboseLog("[minimuxer] DDI not mounted, mounting now before launching debug session...")
-        try await Mounter.shared.mount(docsPath: mountPath)
+        try await self.mounter.mount(docsPath: mountPath)
     }
 
     
@@ -391,8 +407,9 @@ final internal class MinimuxerImpl: MinimuxerAPI {
             return task
         }
         _ = await oldTask?.result           // await cancelled mount task completion
+        let mounter = self.mounter
         let task = Task.detached(priority: .medium) {
-            try await Mounter.shared.mount(docsPath: docsPath)
+            try await mounter.mount(docsPath: docsPath)
         }
         await state.with {
             $0.mountTask = task

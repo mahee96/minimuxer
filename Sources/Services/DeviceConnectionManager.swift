@@ -10,9 +10,6 @@ import Foundation
 internal import MinimuxerCommon
 
 actor DeviceConnectionManager {
-
-    let network: any NetworkObserverAPI
-
     private var interfacesCache: Set<NetInfo> = []
     private var connectionConfigCache: ConnectionConfigBinding?
     private var lastConnectionMode: DeviceConnectionMode? = nil
@@ -30,11 +27,7 @@ actor DeviceConnectionManager {
     var remoteServerIp: String?
     var isRemoteServerIpReachable = false
 
-    init(network: any NetworkObserverAPI) {
-        self.network = network
-    }
-
-    func bindConnectionConfig(_ binding: ConnectionConfigBinding) async {
+    func bindConnectionConfig(_ binding: ConnectionConfigBinding) {
         connectionConfigCache = binding
         // ensure started if not started already
         let connectionMode = binding.getConnectionMode()
@@ -45,7 +38,6 @@ actor DeviceConnectionManager {
           • remoteServerIp: \(binding.getRemoteServerIp()) 
         
         """)
-        await self.network.refreshEndpoint()
     }
     
     func getPreferredConnectionMode() -> DeviceConnectionMode {

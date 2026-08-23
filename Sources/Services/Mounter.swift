@@ -13,10 +13,14 @@ internal import MinimuxerCommon
 
 final internal class Mounter {
     let gateway: any DeviceGatewayAPI
+    let proxyServer: UsbmuxdProxyServer
+    let endpoint: DeviceEndpoint
     private var isRPPairing: Bool { self.gateway.isRPPairing }
 
-    init(gateway: any DeviceGatewayAPI) {
+    init(gateway: any DeviceGatewayAPI, proxyServer: UsbmuxdProxyServer, endpoint: DeviceEndpoint) {
         self.gateway = gateway
+        self.proxyServer = proxyServer
+        self.endpoint = endpoint
     }
 
     // NOTE: mounter doesn't cache the mount status nor the minimuxer.
@@ -30,14 +34,14 @@ final internal class Mounter {
 
         // Prerequisite: usbmuxd must be up (RP pairing connects via RSD, skips muxer)
         if !isRPPairing {
-            guard UsbmuxdProxyServer.shared.isListening else {
+            guard self.proxyServer.isListening else {
                 debugLog("[minimuxer] mounter: usbmuxd not ready!")
                 throw MinimuxerError.noConnection("Usbmuxd fake server is not listening")
             }
         }
 
         // Prerequisite: device must be reachable
-        guard (try? await DeviceEndpoint.shared.ip()) != nil else {
+        guard (try? await self.endpoint.ip()) != nil else {
             debugLog("[minimuxer] mounter: device IP not available")
             throw MinimuxerError.noDevice("Reachable device IP not found")
         }

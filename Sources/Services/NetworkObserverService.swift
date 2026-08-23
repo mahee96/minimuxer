@@ -18,11 +18,23 @@ final internal class NetworkObserverService: NetworkObserverAPI, @unchecked Send
         pathSubject.eraseToAnyPublisher()
     }
 
+    let connectionManager: DeviceConnectionManager
+    let endpoint: DeviceEndpoint
+    let proxyServer: UsbmuxdProxyServer
+
     private let monitor = NWPathMonitor()
     private let queue = DispatchQueue(label: "net.monitor")
     private let state = State()
 
-    init() {}
+    init(
+        connectionManager: DeviceConnectionManager,
+        endpoint: DeviceEndpoint,
+        proxyServer: UsbmuxdProxyServer
+    ) {
+        self.connectionManager = connectionManager
+        self.endpoint = endpoint
+        self.proxyServer = proxyServer
+    }
     
     private actor State {
         var started = false
@@ -77,14 +89,15 @@ final internal class NetworkObserverService: NetworkObserverAPI, @unchecked Send
     }
     
     func refreshEndpoint() async {
+        let manager = self.connectionManager
         verboseLog("[minimuxer] [net] refreshing interfaces list and peers")
-        let ifacesChanged = await DeviceConnectionManager.shared.refresh()
+        let ifacesChanged = await manager.refresh()
         
         guard ifacesChanged else {
             return
         }
         
-        let connectionMode = await DeviceConnectionManager.shared.getPreferredConnectionMode()
+        let connectionMode = await manager.getPreferredConnectionMode()
         switch connectionMode {
             case .notConfigured:
                 debugLog("[minimuxer] [net] connection mode not configured. skipping endpoint update...")
@@ -92,7 +105,7 @@ final internal class NetworkObserverService: NetworkObserverAPI, @unchecked Send
                 
             case .localVPN:
                 verboseLog("[minimuxer] [net] retrive the first uTun vpn interface info")
-                if let info = await DeviceConnectionManager.shared.vpnIface {
+                if let info = await manager.vpnIface {
                     verboseLog("""
                     [minimuxer] [net] vpn interface detected
                       • name: \(info.name)
@@ -104,7 +117,6 @@ final internal class NetworkObserverService: NetworkObserverAPI, @unchecked Send
                     
                     """)
 
-                    let manager = DeviceConnectionManager.shared
                     let overrideIp = await manager.overridePeerIp
                     let isOverridden = !(overrideIp ?? "").isEmpty
 
@@ -115,22 +127,21 @@ final internal class NetworkObserverService: NetworkObserverAPI, @unchecked Send
 
                     if let peer = effectiveIp {
                         verboseLog("[minimuxer] [net] update device IP with effective tunnel peer: '\(effectivePeer)'")
-                        await DeviceEndpoint.shared.update(peer)
-                        UsbmuxdProxyServer.shared.notifyDeviceAttached(tunnelPeerIp: peer)
+                        await self.endpoint.update(peer)
+                        self.proxyServer.notifyDeviceAttached(tunnelPeerIp: peer)
                     } else {
                         verboseLog("[minimuxer] [net] peer not available for \(info.name)")
-                        await DeviceEndpoint.shared.clear()
-                        UsbmuxdProxyServer.shared.notifyDeviceDetached()
+                        await self.endpoint.clear()
+                        self.proxyServer.notifyDeviceDetached()
                     }
 
                 } else {
                     verboseLog("[minimuxer] [net] no local VPN interface detected")
-                    await DeviceEndpoint.shared.clear()
-                    UsbmuxdProxyServer.shared.notifyDeviceDetached()
+                    await self.endpoint.clear()
+                    self.proxyServer.notifyDeviceDetached()
                 }
             
             case .remoteServer:
-                let manager = DeviceConnectionManager.shared
                 let isReachable = await manager.isRemoteServerIpReachable
                 if let remoteIp = await manager.remoteServerIp {
                     verboseLog("""
@@ -139,16 +150,16 @@ final internal class NetworkObserverService: NetworkObserverAPI, @unchecked Send
                     
                     """)
                     if isReachable {
-                        await DeviceEndpoint.shared.update(remoteIp)
-                        UsbmuxdProxyServer.shared.notifyDeviceAttached(tunnelPeerIp: remoteIp)
+                        await self.endpoint.update(remoteIp)
+                        self.proxyServer.notifyDeviceAttached(tunnelPeerIp: remoteIp)
                     } else {
-                        await DeviceEndpoint.shared.clear()
-                        UsbmuxdProxyServer.shared.notifyDeviceDetached()
+                        await self.endpoint.clear()
+                        self.proxyServer.notifyDeviceDetached()
                     }
                 } else {
                     verboseLog("[minimuxer] [net] remote server endpoint unreachable")
-                    await DeviceEndpoint.shared.clear()
-                    UsbmuxdProxyServer.shared.notifyDeviceDetached()
+                    await self.endpoint.clear()
+                    self.proxyServer.notifyDeviceDetached()
                 }
             }
     }

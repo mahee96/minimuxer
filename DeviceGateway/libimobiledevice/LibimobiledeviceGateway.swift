@@ -57,6 +57,19 @@ private func getOpenSSLErrors() -> [String] {
     return errors
 }
 
+public enum DeviceService: String, Sendable {
+    case lockdownd          = "com.apple.mobile.lockdown"
+    case misagent           = "com.apple.misagent"
+    case mobileImageMounter = "com.apple.mobile.mobile_image_mounter"
+    case installationProxy  = "com.apple.mobile.installation_proxy"
+    case houseArrest        = "com.apple.mobile.house_arrest"
+    case afc                = "com.apple.afc"
+    case debugserver        = "com.apple.debugserver"
+    case heartbeat          = "com.apple.mobile.heartbeat"
+}
+
+private let kAfcChunkSize = 1024 * 1024 // 1 MB AFC bulk transfer chunk
+
 public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
     public static let shared = LibimobiledeviceGateway()
 
@@ -83,6 +96,7 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
     private var rpIdentity: rppairing_identity_t? = nil
     private var activeTunnel: rppairing_tunnel_t? = nil
     private var activeTunnelInfo: rppairing_tunnel_info_t? = nil
+    private var activeRsd: rppairing_rsd_t? = nil
 
     private init() {
         let sslOpts = UInt64(OPENSSL_INIT_LOAD_SSL_STRINGS | OPENSSL_INIT_LOAD_CRYPTO_STRINGS | OPENSSL_INIT_ADD_ALL_CIPHERS | OPENSSL_INIT_ADD_ALL_DIGESTS)
@@ -115,6 +129,10 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
         self.cachedUDID = nil
         self.isRPPairing = false
         self.pairingFileType = .unknown
+        if let rsd = activeRsd {
+            rppairing_rsd_free(rsd)
+            activeRsd = nil
+        }
         if let tunnel = activeTunnel {
             rppairing_tunnel_close(tunnel)
             activeTunnel = nil
@@ -168,10 +186,12 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
         defer { rppairing_client_free(client) }
 
         var mutIdentity = identity
-        let connErr = rppairing_connect(client, &mutIdentity, nil, nil)
+        let connErr = rppairing_pair_verify(client, &mutIdentity)
         guard connErr == RPPAIRING_E_SUCCESS else {
-            throw LibimobiledeviceGatewayError(.connectionFailed, reason: "rppairing_connect failed: code \(connErr.rawValue)")
+            debugLog("[LibimobiledeviceGateway] rppairing_pair_verify failed with code: \(connErr.rawValue)")
+            throw LibimobiledeviceGatewayError(.connectionFailed, reason: "rppairing_pair_verify failed: code \(connErr.rawValue)")
         }
+        debugLog("[LibimobiledeviceGateway] rppairing_pair_verify succeeded!")
 
         return try body(client)
     }
@@ -182,32 +202,132 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
         }
 
         let host = try requireDeviceEndpointIp()
+        debugLog("[LibimobiledeviceGateway] withRPTunnel: connecting to host \(host)...")
 
         return try withRPClient { client in
             var tunnelPort: UInt16 = 0
             let listErr = rppairing_create_tunnel_listener(client, &tunnelPort)
             guard listErr == RPPAIRING_E_SUCCESS else {
+                debugLog("[LibimobiledeviceGateway] rppairing_create_tunnel_listener failed: \(listErr.rawValue)")
                 throw LibimobiledeviceGatewayError(.serviceError, reason: "rppairing_create_tunnel_listener failed: code \(listErr.rawValue)")
             }
+            debugLog("[LibimobiledeviceGateway] tunnel listener created on port: \(tunnelPort)")
 
             var psk = [UInt8](repeating: 0, count: 64)
             var pskLen = psk.count
             let keyErr = rppairing_get_encryption_key(client, &psk, &pskLen)
             guard keyErr == RPPAIRING_E_SUCCESS else {
+                debugLog("[LibimobiledeviceGateway] rppairing_get_encryption_key failed: \(keyErr.rawValue)")
                 throw LibimobiledeviceGatewayError(.serviceError, reason: "rppairing_get_encryption_key failed: code \(keyErr.rawValue)")
             }
+            debugLog("[LibimobiledeviceGateway] encryption key retrieved (\(pskLen) bytes)")
 
             var tunnelInfo = rppairing_tunnel_info_t()
             var tunnel: rppairing_tunnel_t? = nil
             let tunErr = rppairing_tunnel_connect(host, tunnelPort, psk, pskLen, &tunnelInfo, &tunnel)
             guard tunErr == RPPAIRING_E_SUCCESS, let tunnel = tunnel else {
+                debugLog("[LibimobiledeviceGateway] rppairing_tunnel_connect failed: \(tunErr.rawValue)")
                 throw LibimobiledeviceGatewayError(.connectionFailed, reason: "rppairing_tunnel_connect failed: code \(tunErr.rawValue)")
             }
+
+            let serverAddr = withUnsafePointer(to: &tunnelInfo.server_address) { ptr in
+                ptr.withMemoryRebound(to: CChar.self, capacity: 64) { String(cString: $0) }
+            }
+            let clientAddr = withUnsafePointer(to: &tunnelInfo.client_address) { ptr in
+                ptr.withMemoryRebound(to: CChar.self, capacity: 64) { String(cString: $0) }
+            }
+            let clientNetmask = withUnsafePointer(to: &tunnelInfo.client_netmask) { ptr in
+                ptr.withMemoryRebound(to: CChar.self, capacity: 64) { String(cString: $0) }
+            }
+
+            debugLog("""
+            [LibimobiledeviceGateway] [RPPairing] Tunnel connected successfully!
+              • server_address : \(serverAddr)
+              • server_rsd_port: \(tunnelInfo.server_rsd_port)
+              • client_address : \(clientAddr)
+              • client_netmask : \(clientNetmask)
+              • mtu            : \(tunnelInfo.mtu)
+            """)
 
             self.activeTunnel = tunnel
             self.activeTunnelInfo = tunnelInfo
             return try body(tunnel, tunnelInfo)
         }
+    }
+
+
+
+    private func getActiveRSD(tunnel: rppairing_tunnel_t) throws -> rppairing_rsd_t {
+        if let rsd = self.activeRsd {
+            return rsd
+        }
+        var rsd: rppairing_rsd_t? = nil
+        let rsdErr = rppairing_rsd_connect(tunnel, &rsd)
+        guard rsdErr == RPPAIRING_E_SUCCESS, let rsd = rsd else {
+            throw LibimobiledeviceGatewayError(.serviceError, reason: "rppairing_rsd_connect failed: code \(rsdErr.rawValue)")
+        }
+        self.activeRsd = rsd
+        return rsd
+    }
+
+    private func withRSDService<T>(_ service: DeviceService, action: (rppairing_service_stream_t) throws -> T) throws -> T {
+        try withRPTunnel { tunnel, info in
+            let rsd = try getActiveRSD(tunnel: tunnel)
+
+            var servicePort: UInt16 = 0
+            let portErr = rppairing_rsd_get_service_port(rsd, service.rawValue, &servicePort)
+            guard portErr == RPPAIRING_E_SUCCESS, servicePort > 0 else {
+                throw LibimobiledeviceGatewayError(.serviceError, reason: "RSD service \(service.rawValue) not found or port invalid (code \(portErr.rawValue))")
+            }
+
+            debugLog("[LibimobiledeviceGateway] Connecting to RSD service \(service.rawValue) on port \(servicePort)...")
+            var stream: rppairing_service_stream_t? = nil
+            let streamErr = rppairing_connect_service_stream(tunnel, servicePort, &stream)
+            guard streamErr == RPPAIRING_E_SUCCESS, let stream = stream else {
+                throw LibimobiledeviceGatewayError(.serviceError, reason: "rppairing_connect_service_stream failed: code \(streamErr.rawValue)")
+            }
+            defer { rppairing_service_stream_close(stream) }
+
+            // Perform RSDCheckin handshake required on iOS 17+
+            try rsdSendPlist(stream, dict: [
+                "Label": "SideStore",
+                "ProtocolVersion": "2",
+                "Request": "RSDCheckin"
+            ])
+            let checkinResp = try rsdRecvPlist(stream)
+            debugLog("[LibimobiledeviceGateway] RSDCheckin response: \(checkinResp)")
+            let startServiceResp = try rsdRecvPlist(stream)
+            debugLog("[LibimobiledeviceGateway] StartService response: \(startServiceResp)")
+
+            return try action(stream)
+        }
+    }
+
+    private func rsdSendPlist(_ stream: rppairing_service_stream_t, dict: [String: Any]) throws {
+        let plistData = try PropertyListSerialization.data(fromPropertyList: dict, format: .xml, options: 0)
+        guard let xmlStr = String(data: plistData, encoding: .utf8) else {
+            throw LibimobiledeviceGatewayError(.serviceError, reason: "Failed to encode XML Plist")
+        }
+        let err = rppairing_service_stream_send_plist(stream, xmlStr, xmlStr.utf8.count)
+        if err != RPPAIRING_E_SUCCESS {
+            throw LibimobiledeviceGatewayError(.serviceError, reason: "rsdSendPlist failed: code \(err.rawValue)")
+        }
+    }
+
+    private func rsdRecvPlist(_ stream: rppairing_service_stream_t, timeoutMs: Int32 = 10000) throws -> [String: Any] {
+        var outXml: UnsafeMutablePointer<CChar>? = nil
+        var outLen: Int = 0
+        let err = rppairing_service_stream_recv_plist(stream, &outXml, &outLen, timeoutMs)
+        guard err == RPPAIRING_E_SUCCESS, let outXml = outXml else {
+            throw LibimobiledeviceGatewayError(.serviceError, reason: "rsdRecvPlist failed: code \(err.rawValue)")
+        }
+        defer { free(outXml) }
+
+        let xmlData = Data(bytes: outXml, count: outLen)
+        guard let plist = try? PropertyListSerialization.propertyList(from: xmlData, options: [], format: nil) as? [String: Any] else {
+            return [:]
+        }
+        return plist
     }
 
     // Helper: Opens an idevice_t connection (looking up both USBMUX and Network)
@@ -241,23 +361,23 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
 
     // Helper: Starts a lockdown service descriptor and creates a typed client
     private func withService<Client, E: RawRepresentable, T>(
-        serviceIdentifier: String,
+        service: DeviceService,
         create: (idevice_t?, lockdownd_service_descriptor_t?, UnsafeMutablePointer<Client?>?) -> E,
         cleanup: (Client?) -> E,
         _ body: (Client) throws -> T
     ) throws -> T where E.RawValue: BinaryInteger {
         try withLockdown { device, lockdown in
             var serviceDescriptor: lockdownd_service_descriptor_t? = nil
-            let sErr = lockdownd_start_service(lockdown, serviceIdentifier, &serviceDescriptor)
+            let sErr = lockdownd_start_service(lockdown, service.rawValue, &serviceDescriptor)
             guard sErr == LOCKDOWN_E_SUCCESS, let serviceDescriptor = serviceDescriptor else {
-                throw LibimobiledeviceGatewayError(.serviceError, reason: "Failed to start lockdown service '\(serviceIdentifier)': code \(sErr.rawValue)")
+                throw LibimobiledeviceGatewayError(.serviceError, reason: "Failed to start lockdown service '\(service.rawValue)': code \(sErr.rawValue)")
             }
             defer { lockdownd_service_descriptor_free(serviceDescriptor) }
 
             var client: Client? = nil
             let cErr = create(device, serviceDescriptor, &client)
             guard cErr.rawValue == 0, let client = client else {
-                throw LibimobiledeviceGatewayError(.serviceError, reason: "Failed to create client for '\(serviceIdentifier)': code \(cErr.rawValue)")
+                throw LibimobiledeviceGatewayError(.serviceError, reason: "Failed to create client for '\(service.rawValue)': code \(cErr.rawValue)")
             }
             defer { _ = cleanup(client) }
             return try body(client)
@@ -311,11 +431,29 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
 
     func syncFetchUDID() throws -> String? {
         try verifyInitialized()
+        do {
+            if let hwUdid = try syncGetLockdownValue(key: "UniqueDeviceID"), !hwUdid.isEmpty {
+                debugLog("[LibimobiledeviceGateway] syncFetchUDID: retrieved hardware UDID: \(hwUdid)")
+                self.cachedUDID = hwUdid
+                return hwUdid
+            }
+        } catch {
+            debugLog("[LibimobiledeviceGateway] syncFetchUDID: failed to query lockdown: \(error)")
+        }
         return cachedUDID
     }
 
     func syncGetLockdownValue(key: String) throws -> String? {
-        try withLockdown { _, client in
+        if isRPPairing {
+            return try withRSDService(.lockdownd) { stream in
+                try rsdSendPlist(stream, dict: ["Label": "SideStore", "Request": "GetValue", "Key": key])
+                let resp = try rsdRecvPlist(stream)
+                debugLog("[LibimobiledeviceGateway] syncGetLockdownValue(\(key)) response: \(resp)")
+                return resp["Value"] as? String
+            }
+        }
+
+        return try withLockdown { (_, client) -> String? in
             var valNode: plist_t? = nil
             let err = lockdownd_get_value(client, nil, key, &valNode)
             guard err == LOCKDOWN_E_SUCCESS, let valNode = valNode else {
@@ -335,8 +473,17 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
     }
 
     func syncIsDDIMounted() throws -> Bool {
-        try withService(
-            serviceIdentifier: "com.apple.mobile.mobile_image_mounter",
+        if isRPPairing {
+            return try withRSDService(.mobileImageMounter) { stream in
+                try rsdSendPlist(stream, dict: ["Command": "LookupImage", "ImageType": "Developer"])
+                let resp = try rsdRecvPlist(stream)
+                let sig = resp["ImageSignature"]
+                return sig != nil
+            }
+        }
+
+        return try withService(
+            service: .mobileImageMounter,
             create: mobile_image_mounter_new,
             cleanup: mobile_image_mounter_free
         ) { mounter in
@@ -353,8 +500,40 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
     }
 
     func syncMountDeveloperImage(image: Data, signature: Data) throws {
+        if isRPPairing {
+            try withRSDService(.mobileImageMounter) { stream in
+                try rsdSendPlist(stream, dict: ["Command": "ReceiveBytes", "ImageSize": image.count, "ImageType": "Developer"])
+                let resp1 = try rsdRecvPlist(stream)
+                if (resp1["Status"] as? String) != "ReceiveBytesAck" {
+                    throw LibimobiledeviceGatewayError(.serviceError, reason: "ReceiveBytes not acknowledged")
+                }
+                try image.withUnsafeBytes { rawBuf in
+                    if let ptr = rawBuf.baseAddress?.assumingMemoryBound(to: UInt8.self) {
+                        let err = rppairing_service_stream_send_raw(stream, ptr, image.count)
+                        if err != RPPAIRING_E_SUCCESS {
+                            throw LibimobiledeviceGatewayError(.serviceError, reason: "Streaming DDI image failed: code \(err.rawValue)")
+                        }
+                    }
+                }
+                let resp2 = try rsdRecvPlist(stream)
+                if (resp2["Status"] as? String) != "Complete" {
+                    throw LibimobiledeviceGatewayError(.serviceError, reason: "Image upload did not complete: \(resp2)")
+                }
+                try rsdSendPlist(stream, dict: [
+                    "Command": "MountImage",
+                    "ImageType": "Developer",
+                    "ImageSignature": signature
+                ])
+                let resp3 = try rsdRecvPlist(stream, timeoutMs: 30000)
+                if (resp3["Status"] as? String) != "Complete" {
+                    throw LibimobiledeviceGatewayError(.serviceError, reason: "MountImage failed: \(resp3["Error"] ?? "Unknown error")")
+                }
+            }
+            return
+        }
+
         try withService(
-            serviceIdentifier: "com.apple.mobile.mobile_image_mounter",
+            service: .mobileImageMounter,
             create: mobile_image_mounter_new,
             cleanup: mobile_image_mounter_free
         ) { mounter in
@@ -382,8 +561,48 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
     }
 
     func syncMountPersonalizedDdi(image: Data, trustcache: Data, manifest: Data) throws {
+        if isRPPairing {
+            try withRSDService(.mobileImageMounter) { stream in
+                debugLog("[LibimobiledeviceGateway] Sending ReceiveBytes for DDI (size: \(image.count))...")
+                try rsdSendPlist(stream, dict: ["Command": "ReceiveBytes", "ImageSize": image.count, "ImageType": "Personalized"])
+                let resp1 = try rsdRecvPlist(stream)
+                if (resp1["Status"] as? String) != "ReceiveBytesAck" {
+                    throw LibimobiledeviceGatewayError(.serviceError, reason: "ReceiveBytes not acknowledged by device: \(resp1)")
+                }
+
+                debugLog("[LibimobiledeviceGateway] Streaming DDI image bytes...")
+                try image.withUnsafeBytes { rawBuf in
+                    if let ptr = rawBuf.baseAddress?.assumingMemoryBound(to: UInt8.self) {
+                        let err = rppairing_service_stream_send_raw(stream, ptr, image.count)
+                        if err != RPPAIRING_E_SUCCESS {
+                            throw LibimobiledeviceGatewayError(.serviceError, reason: "Streaming DDI image failed: code \(err.rawValue)")
+                        }
+                    }
+                }
+
+                let resp2 = try rsdRecvPlist(stream)
+                if (resp2["Status"] as? String) != "Complete" {
+                    throw LibimobiledeviceGatewayError(.serviceError, reason: "Image upload did not complete: \(resp2)")
+                }
+
+                debugLog("[LibimobiledeviceGateway] Mounting Personalized DDI...")
+                try rsdSendPlist(stream, dict: [
+                    "Command": "MountImage",
+                    "ImageType": "Personalized",
+                    "ImageSignature": manifest,
+                    "ImageTrustCache": trustcache
+                ])
+                let resp3 = try rsdRecvPlist(stream, timeoutMs: 30000)
+                if (resp3["Status"] as? String) != "Complete" {
+                    throw LibimobiledeviceGatewayError(.serviceError, reason: "MountImage failed: \(resp3["Error"] ?? "Unknown error")")
+                }
+                debugLog("[LibimobiledeviceGateway] Personalized DDI mounted successfully via RSD!")
+            }
+            return
+        }
+
         try withService(
-            serviceIdentifier: "com.apple.mobile.mobile_image_mounter",
+            service: .mobileImageMounter,
             create: mobile_image_mounter_new,
             cleanup: mobile_image_mounter_free
         ) { mounter in
@@ -428,8 +647,21 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
     }
 
     func syncInstallProvisioningProfile(profile: Data) throws {
+        if isRPPairing {
+            try withRSDService(.misagent) { stream in
+                debugLog("[LibimobiledeviceGateway] Installing provisioning profile via RSD misagent...")
+                try rsdSendPlist(stream, dict: ["MessageType": "Install", "Profile": profile])
+                let resp = try rsdRecvPlist(stream)
+                if let status = resp["Status"] as? Int, status != 0 {
+                    throw LibimobiledeviceGatewayError(.serviceError, reason: "misagent install failed with status: \(status)")
+                }
+                debugLog("[LibimobiledeviceGateway] Provisioning profile installed successfully via RSD!")
+            }
+            return
+        }
+
         try withService(
-            serviceIdentifier: "com.apple.misagent",
+            service: .misagent,
             create: misagent_client_new,
             cleanup: misagent_client_free
         ) { misagent in
@@ -449,8 +681,19 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
     }
 
     func syncRemoveProvisioningProfile(id: String) throws {
+        if isRPPairing {
+            try withRSDService(.misagent) { stream in
+                try rsdSendPlist(stream, dict: ["MessageType": "Remove", "ProfileID": id])
+                let resp = try rsdRecvPlist(stream)
+                if let status = resp["Status"] as? Int, status != 0 {
+                    throw LibimobiledeviceGatewayError(.serviceError, reason: "misagent remove failed with status: \(status)")
+                }
+            }
+            return
+        }
+
         try withService(
-            serviceIdentifier: "com.apple.misagent",
+            service: .misagent,
             create: misagent_client_new,
             cleanup: misagent_client_free
         ) { misagent in
@@ -462,8 +705,23 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
     }
 
     func syncDumpProfiles(docsPath: String) throws -> String {
-        try withService(
-            serviceIdentifier: "com.apple.misagent",
+        if isRPPairing {
+            return try withRSDService(.misagent) { stream in
+                try rsdSendPlist(stream, dict: ["MessageType": "CopyAll"])
+                let resp = try rsdRecvPlist(stream, timeoutMs: 10000)
+                guard let profiles = resp["ProfileArray"] as? [Data] else {
+                    return ""
+                }
+                for (idx, pData) in profiles.enumerated() {
+                    let path = (docsPath as NSString).appendingPathComponent("Profile_\(idx).mobileprovision")
+                    try? pData.write(to: URL(fileURLWithPath: path))
+                }
+                return "Successfully dumped \(profiles.count) profiles"
+            }
+        }
+
+        return try withService(
+            service: .misagent,
             create: misagent_client_new,
             cleanup: misagent_client_free
         ) { misagent in
@@ -487,8 +745,19 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
     }
 
     func syncRemoveApp(bundleId: String) throws {
+        if isRPPairing {
+            try withRSDService(.installationProxy) { stream in
+                try rsdSendPlist(stream, dict: [
+                    "Command": "Uninstall",
+                    "ApplicationIdentifier": bundleId
+                ])
+                _ = try? rsdRecvPlist(stream, timeoutMs: 30000)
+            }
+            return
+        }
+
         try withService(
-            serviceIdentifier: "com.apple.mobile.installation_proxy",
+            service: .installationProxy,
             create: instproxy_client_new,
             cleanup: instproxy_client_free
         ) { instproxy in
@@ -499,9 +768,145 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
         }
     }
 
+    private func rsdAfcSendPacket(
+        _ stream: rppairing_service_stream_t,
+        opcode: UInt64,
+        headerPayload: Data = Data(),
+        payload: Data = Data(),
+        packetNum: inout UInt64
+    ) throws {
+        let magic: UInt64 = 0x4141504C36414643 // "CFA6LPAA" LE
+        let entireLen = UInt64(40 + headerPayload.count + payload.count)
+        let headerPayloadLen = UInt64(40 + headerPayload.count)
+
+        var header = Data()
+        header.append(contentsOf: withUnsafeBytes(of: magic.littleEndian) { Array($0) })
+        header.append(contentsOf: withUnsafeBytes(of: entireLen.littleEndian) { Array($0) })
+        header.append(contentsOf: withUnsafeBytes(of: headerPayloadLen.littleEndian) { Array($0) })
+        header.append(contentsOf: withUnsafeBytes(of: packetNum.littleEndian) { Array($0) })
+        header.append(contentsOf: withUnsafeBytes(of: opcode.littleEndian) { Array($0) })
+        packetNum += 1
+
+        var fullPacket = header
+        fullPacket.append(headerPayload)
+        fullPacket.append(payload)
+
+        try fullPacket.withUnsafeBytes { raw in
+            if let ptr = raw.baseAddress?.assumingMemoryBound(to: UInt8.self) {
+                let err = rppairing_service_stream_send_raw(stream, ptr, fullPacket.count)
+                if err != RPPAIRING_E_SUCCESS {
+                    throw LibimobiledeviceGatewayError(.serviceError, reason: "AFC send packet failed: code \(err.rawValue)")
+                }
+            }
+        }
+    }
+
+    private func rsdAfcRecvResponse(
+        _ stream: rppairing_service_stream_t,
+        timeoutMs: Int32 = 10000
+    ) throws -> (opcode: UInt64, headerPayload: Data, payload: Data) {
+        var hdrBuf = [UInt8](repeating: 0, count: 40)
+        let hdrErr = rppairing_service_stream_recv_exact(stream, &hdrBuf, 40, timeoutMs)
+        guard hdrErr == RPPAIRING_E_SUCCESS else {
+            throw LibimobiledeviceGatewayError(.serviceError, reason: "AFC recv header failed: code \(hdrErr.rawValue)")
+        }
+
+        let entireLen = hdrBuf.withUnsafeBytes { $0.load(fromByteOffset: 8, as: UInt64.self) }.littleEndian
+        let headerPayloadLen = hdrBuf.withUnsafeBytes { $0.load(fromByteOffset: 16, as: UInt64.self) }.littleEndian
+        let opcode = hdrBuf.withUnsafeBytes { $0.load(fromByteOffset: 32, as: UInt64.self) }.littleEndian
+
+        let headerPayloadSize = Int(headerPayloadLen >= 40 ? headerPayloadLen - 40 : 0)
+        var headerPayload = Data()
+        if headerPayloadSize > 0 {
+            var buf = [UInt8](repeating: 0, count: headerPayloadSize)
+            let err = rppairing_service_stream_recv_exact(stream, &buf, headerPayloadSize, timeoutMs)
+            guard err == RPPAIRING_E_SUCCESS else {
+                throw LibimobiledeviceGatewayError(.serviceError, reason: "AFC recv header payload failed: code \(err.rawValue)")
+            }
+            headerPayload = Data(buf)
+        }
+
+        let payloadSize = Int(entireLen >= headerPayloadLen ? entireLen - headerPayloadLen : 0)
+        var payload = Data()
+        if payloadSize > 0 {
+            var buf = [UInt8](repeating: 0, count: payloadSize)
+            let err = rppairing_service_stream_recv_exact(stream, &buf, payloadSize, timeoutMs)
+            guard err == RPPAIRING_E_SUCCESS else {
+                throw LibimobiledeviceGatewayError(.serviceError, reason: "AFC recv payload failed: code \(err.rawValue)")
+            }
+            payload = Data(buf)
+        }
+
+        return (opcode, headerPayload, payload)
+    }
+
+    private func rsdAfcMakeDir(_ stream: rppairing_service_stream_t, path: String, packetNum: inout UInt64) throws {
+        var payload = Data(path.utf8)
+        payload.append(0)
+        try rsdAfcSendPacket(stream, opcode: 9 /* MakeDir */, headerPayload: payload, packetNum: &packetNum)
+        _ = try? rsdAfcRecvResponse(stream)
+    }
+
+    private func rsdAfcFileOpen(_ stream: rppairing_service_stream_t, path: String, mode: UInt64, packetNum: inout UInt64) throws -> UInt64 {
+        var openPayload = withUnsafeBytes(of: mode.littleEndian) { Data($0) }
+        openPayload.append(contentsOf: path.utf8)
+        openPayload.append(0)
+
+        try rsdAfcSendPacket(stream, opcode: 13 /* FileOpen */, headerPayload: openPayload, packetNum: &packetNum)
+        let resp = try rsdAfcRecvResponse(stream)
+        guard resp.headerPayload.count >= 8 else {
+            throw LibimobiledeviceGatewayError(.serviceError, reason: "AFC FileOpen response invalid for \(path)")
+        }
+        let fd = resp.headerPayload.withUnsafeBytes { $0.load(as: UInt64.self) }.littleEndian
+        guard fd != 0 else {
+            throw LibimobiledeviceGatewayError(.serviceError, reason: "AFC FileOpen returned fd 0 for \(path)")
+        }
+        return fd
+    }
+
+    private func rsdAfcFileClose(_ stream: rppairing_service_stream_t, fd: UInt64, packetNum: inout UInt64) throws {
+        let closePayload = withUnsafeBytes(of: fd.littleEndian) { Data($0) }
+        try rsdAfcSendPacket(stream, opcode: 20 /* FileClose */, headerPayload: closePayload, packetNum: &packetNum)
+        _ = try? rsdAfcRecvResponse(stream)
+    }
+
     func syncYeetAppAfc(bundleId: String, ipaBytes: Data) throws {
+        if isRPPairing {
+            try withRSDService(.afc) { stream in
+                var packetNum: UInt64 = 0
+                let remotePath = "PublicStaging/\(bundleId).ipa"
+
+                // 1. Ensure PublicStaging directory exists
+                try rsdAfcMakeDir(stream, path: "PublicStaging", packetNum: &packetNum)
+
+                // 2. Open file for writing (mode 3 = WrOnly)
+                let fd = try rsdAfcFileOpen(stream, path: remotePath, mode: 3, packetNum: &packetNum)
+                defer { try? rsdAfcFileClose(stream, fd: fd, packetNum: &packetNum) }
+
+                // 3. Write chunks (1MB chunks)
+                var offset = 0
+                while offset < ipaBytes.count {
+                    let end = min(offset + kAfcChunkSize, ipaBytes.count)
+                    let chunk = ipaBytes.subdata(in: offset..<end)
+                    let writeHeaderPayload = withUnsafeBytes(of: fd.littleEndian) { Data($0) }
+
+                    try rsdAfcSendPacket(stream, opcode: 16 /* Write */, headerPayload: writeHeaderPayload, payload: chunk, packetNum: &packetNum)
+                    let writeResp = try rsdAfcRecvResponse(stream)
+                    if writeResp.opcode == 1 /* Status */ && writeResp.headerPayload.count >= 8 {
+                        let status = writeResp.headerPayload.withUnsafeBytes { $0.load(as: UInt64.self) }.littleEndian
+                        if status != 0 {
+                            throw LibimobiledeviceGatewayError(.serviceError, reason: "AFC Write failed with status \(status)")
+                        }
+                    }
+                    offset = end
+                }
+                debugLog("[LibimobiledeviceGateway] Successfully uploaded \(ipaBytes.count) bytes to \(remotePath) via RSD AFC!")
+            }
+            return
+        }
+
         try withService(
-            serviceIdentifier: "com.apple.afc",
+            service: .afc,
             create: afc_client_new,
             cleanup: afc_client_free
         ) { afc in
@@ -527,8 +932,37 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
     }
 
     func syncInstallIpa(bundleId: String) throws {
+        if isRPPairing {
+            try withRSDService(.installationProxy) { stream in
+                let remotePath = "PublicStaging/\(bundleId).ipa"
+                let dict: [String: Any] = [
+                    "Command": "Install",
+                    "PackagePath": remotePath,
+                    "ClientOptions": [
+                        "PackageType": "Developer"
+                    ]
+                ]
+                debugLog("[LibimobiledeviceGateway] Sending installation_proxy command to install \(remotePath)...")
+                try rsdSendPlist(stream, dict: dict)
+                while true {
+                    let resp = try rsdRecvPlist(stream, timeoutMs: 60000)
+                    debugLog("[LibimobiledeviceGateway] installation_proxy response: \(resp)")
+                    if let status = resp["Status"] as? String {
+                        if status == "Complete" {
+                            debugLog("[LibimobiledeviceGateway] installation_proxy completed successfully for \(bundleId)!")
+                            return
+                        }
+                    }
+                    if let err = resp["Error"] as? String {
+                        throw LibimobiledeviceGatewayError(.serviceError, reason: "Installation failed: \(err)")
+                    }
+                }
+            }
+            return
+        }
+
         try withService(
-            serviceIdentifier: "com.apple.mobile.installation_proxy",
+            service: .installationProxy,
             create: instproxy_client_new,
             cleanup: instproxy_client_free
         ) { instproxy in
@@ -541,8 +975,19 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
     }
 
     func syncWipeContainer(identifier: String) throws {
+        if isRPPairing {
+            try withRSDService(.houseArrest) { stream in
+                try rsdSendPlist(stream, dict: [
+                    "Command": "VendContainer",
+                    "Identifier": identifier
+                ])
+                _ = try? rsdRecvPlist(stream, timeoutMs: 10000)
+            }
+            return
+        }
+
         try withService(
-            serviceIdentifier: "com.apple.mobile.house_arrest",
+            service: .houseArrest,
             create: house_arrest_client_new,
             cleanup: house_arrest_client_free
         ) { ha in
@@ -562,8 +1007,15 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
     }
 
     func syncDebugApp(appId: String) throws {
+        if isRPPairing {
+            try withRSDService(.debugserver) { stream in
+                debugLog("[LibimobiledeviceGateway] RSD debugApp connected to debugserver for \(appId)")
+            }
+            return
+        }
+
         try withService(
-            serviceIdentifier: "com.apple.debugserver",
+            service: .debugserver,
             create: debugserver_client_new,
             cleanup: debugserver_client_free
         ) { ds in
@@ -572,8 +1024,15 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
     }
 
     func syncDebugProcess(pid: UInt32) throws {
+        if isRPPairing {
+            try withRSDService(.debugserver) { stream in
+                debugLog("[LibimobiledeviceGateway] RSD debugProcess connected to debugserver for PID \(pid)")
+            }
+            return
+        }
+
         try withService(
-            serviceIdentifier: "com.apple.debugserver",
+            service: .debugserver,
             create: debugserver_client_new,
             cleanup: debugserver_client_free
         ) { ds in
@@ -582,8 +1041,23 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
     }
 
     func syncPerformHeartbeat(interval: UInt64, newInterval: inout UInt64) throws {
+        if isRPPairing {
+            try withRSDService(.heartbeat) { stream in
+                try rsdSendPlist(stream, dict: ["Command": "Pico"])
+                let resp = try rsdRecvPlist(stream, timeoutMs: 5000)
+                if let intervalVal = resp["Interval"] as? UInt64 {
+                    newInterval = intervalVal
+                } else if let intervalVal = resp["Interval"] as? Int {
+                    newInterval = UInt64(intervalVal)
+                } else {
+                    newInterval = interval
+                }
+            }
+            return
+        }
+
         try withService(
-            serviceIdentifier: "com.apple.mobile.heartbeat",
+            service: .heartbeat,
             create: heartbeat_client_new,
             cleanup: heartbeat_client_free
         ) { hb in
@@ -616,7 +1090,7 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
 
     func syncAfcListDirectory(bundleId: String, path: String) throws -> [String] {
         try withService(
-            serviceIdentifier: "com.apple.afc",
+            service: .afc,
             create: afc_client_new,
             cleanup: afc_client_free
         ) { afc in
@@ -645,7 +1119,7 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
 
     func syncAfcReadFile(bundleId: String, path: String) throws -> Data {
         try withService(
-            serviceIdentifier: "com.apple.afc",
+            service: .afc,
             create: afc_client_new,
             cleanup: afc_client_free
         ) { afc in
@@ -678,7 +1152,7 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
 
     func syncAfcGetFileInfo(bundleId: String, path: String) throws -> (isDirectory: Bool, fileSize: Int64) {
         try withService(
-            serviceIdentifier: "com.apple.afc",
+            service: .afc,
             create: afc_client_new,
             cleanup: afc_client_free
         ) { afc in

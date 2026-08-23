@@ -26,6 +26,7 @@ let package = Package(
     dependencies: [
         .package(path: "../Common"),
         .package(url: "https://github.com/mahee96/RemotePairingKit.git", branch: "main")
+//        .package(path: "../../../../local/RemotePairingKit")
     ],
     targets: [
 //        .binaryTarget(
@@ -93,5 +94,6 @@ let package = Package(
                 .linkedFramework("OpenSSL")
             ]
         )
-    ]
+    ],
+    cxxLanguageStandard: .cxx17
 )

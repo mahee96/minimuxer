@@ -265,7 +265,7 @@ public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
         // Standard RPPairing socket address
         var addr = sockaddr_in()
         addr.sin_family = sa_family_t(AF_INET)
-        addr.sin_port = MinimuxerConstants.rsdPort.bigEndian
+        addr.sin_port = MinimuxerConstants.remotePairingPort.bigEndian
         addr.sin_addr.s_addr = inet_addr(deviceEndpointIp)
 
         let hostname = MinimuxerConstants.appName

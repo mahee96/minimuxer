@@ -9,6 +9,7 @@
 import Foundation
 import libimobiledevice
 import OpenSSL
+import RPPairing
 import DeviceGatewayAPI
 internal import MinimuxerCommon
 
@@ -79,6 +80,9 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
     private var cachedUDID: String? = nil
     private var isInitialized = false
     private var deviceEndpointIp: String? = nil
+    private var rpIdentity: rppairing_identity_t? = nil
+    private var activeTunnel: rppairing_tunnel_t? = nil
+    private var activeTunnelInfo: rppairing_tunnel_info_t? = nil
 
     private init() {
         let sslOpts = UInt64(OPENSSL_INIT_LOAD_SSL_STRINGS | OPENSSL_INIT_LOAD_CRYPTO_STRINGS | OPENSSL_INIT_ADD_ALL_CIPHERS | OPENSSL_INIT_ADD_ALL_DIGESTS)
@@ -111,6 +115,12 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
         self.cachedUDID = nil
         self.isRPPairing = false
         self.pairingFileType = .unknown
+        if let tunnel = activeTunnel {
+            rppairing_tunnel_close(tunnel)
+            activeTunnel = nil
+        }
+        activeTunnelInfo = nil
+        rpIdentity = nil
     }
 
     public func getPairingFileType() -> PairingProtocol {
@@ -126,11 +136,77 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
         DeviceGatewayLogging.setLogging(enabled)
         debugLog("[LibimobiledeviceGateway] setLogging(\(enabled)) called")
         idevice_set_debug_level(enabled ? 1 : 0)
+        rppairing_set_debug_level(enabled ? 1 : 0)
     }
 
     private func verifyInitialized() throws {
         guard isInitialized, cachedUDID != nil else {
             throw LibimobiledeviceGatewayError(.notInitialized)
+        }
+    }
+
+    private func requireDeviceEndpointIp() throws -> String {
+        guard let ip = self.deviceEndpointIp, !ip.isEmpty else {
+            debugLog("[LibimobiledeviceGateway] operation failed because deviceEndpointIp is nil or empty")
+            throw LibimobiledeviceGatewayError(.deviceEndpointIpNotAvailable, reason: "Device endpoint IP has not been configured")
+        }
+        return ip
+    }
+
+    private func withRPClient<T>(_ body: (rppairing_client_t) throws -> T) throws -> T {
+        try verifyInitialized()
+        guard let identity = rpIdentity else {
+            throw LibimobiledeviceGatewayError(.notInitialized, reason: "RPPairing identity not loaded")
+        }
+        let host = try requireDeviceEndpointIp()
+        let port = MinimuxerConstants.remotePairingPort
+        var client: rppairing_client_t? = nil
+        let err = rppairing_client_new(host, port, MinimuxerConstants.appName, &client)
+        guard err == RPPAIRING_E_SUCCESS, let client = client else {
+            throw LibimobiledeviceGatewayError(.connectionFailed, reason: "rppairing_client_new failed to connect to \(host):\(port): code \(err.rawValue)")
+        }
+        defer { rppairing_client_free(client) }
+
+        var mutIdentity = identity
+        let connErr = rppairing_connect(client, &mutIdentity, nil, nil)
+        guard connErr == RPPAIRING_E_SUCCESS else {
+            throw LibimobiledeviceGatewayError(.connectionFailed, reason: "rppairing_connect failed: code \(connErr.rawValue)")
+        }
+
+        return try body(client)
+    }
+
+    private func withRPTunnel<T>(_ body: (rppairing_tunnel_t, rppairing_tunnel_info_t) throws -> T) throws -> T {
+        if let tunnel = activeTunnel, let info = activeTunnelInfo {
+            return try body(tunnel, info)
+        }
+
+        let host = try requireDeviceEndpointIp()
+
+        return try withRPClient { client in
+            var tunnelPort: UInt16 = 0
+            let listErr = rppairing_create_tunnel_listener(client, &tunnelPort)
+            guard listErr == RPPAIRING_E_SUCCESS else {
+                throw LibimobiledeviceGatewayError(.serviceError, reason: "rppairing_create_tunnel_listener failed: code \(listErr.rawValue)")
+            }
+
+            var psk = [UInt8](repeating: 0, count: 64)
+            var pskLen = psk.count
+            let keyErr = rppairing_get_encryption_key(client, &psk, &pskLen)
+            guard keyErr == RPPAIRING_E_SUCCESS else {
+                throw LibimobiledeviceGatewayError(.serviceError, reason: "rppairing_get_encryption_key failed: code \(keyErr.rawValue)")
+            }
+
+            var tunnelInfo = rppairing_tunnel_info_t()
+            var tunnel: rppairing_tunnel_t? = nil
+            let tunErr = rppairing_tunnel_connect(host, tunnelPort, psk, pskLen, &tunnelInfo, &tunnel)
+            guard tunErr == RPPAIRING_E_SUCCESS, let tunnel = tunnel else {
+                throw LibimobiledeviceGatewayError(.connectionFailed, reason: "rppairing_tunnel_connect failed: code \(tunErr.rawValue)")
+            }
+
+            self.activeTunnel = tunnel
+            self.activeTunnelInfo = tunnelInfo
+            return try body(tunnel, tunnelInfo)
         }
     }
 
@@ -204,6 +280,17 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
         self.pairingFileData = data
         self.pairingFileType = pairingType
         self.isRPPairing = (pairingType == .rppairing)
+
+        if pairingType == .rppairing {
+            var identity = rppairing_identity_t()
+            let err = pairingFileContent.withCString { cStr in
+                rppairing_identity_from_plist(cStr, pairingFileContent.utf8.count, &identity)
+            }
+            guard err == RPPAIRING_E_SUCCESS else {
+                throw LibimobiledeviceGatewayError(.invalidPairingFile, reason: "rppairing_identity_from_plist failed with code \(err.rawValue)")
+            }
+            self.rpIdentity = identity
+        }
 
         let udid: String?
         if pairingType == .rppairing {

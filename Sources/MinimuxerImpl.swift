@@ -338,7 +338,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
   
     func testDeviceConnection(ifaddr: String?) -> Bool {
         guard let ip = ifaddr, !ip.isEmpty else { return false }
-        return NetworkPing.testTCP(ip: ip, port: MinimuxerConstants.rsdPort)
+        return NetworkPing.testTCP(ip: ip, port: MinimuxerConstants.remotePairingPort)
             || NetworkPing.testTCP(ip: ip, port: MinimuxerConstants.lockdowndPort)
     }
 

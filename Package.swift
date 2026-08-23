@@ -4,13 +4,12 @@ import PackageDescription
 let package = Package(
     name: "Minimuxer",
     platforms: [
-        .iOS(.v13),
+        .iOS(.v14),
         .macOS(.v11)
     ],
     products: [
         .library(
             name: "Minimuxer",
-            type: .dynamic,
             targets: ["Minimuxer"]
         )
     ],

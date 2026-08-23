@@ -4,7 +4,7 @@ import PackageDescription
 let package = Package(
     name: "MinimuxerDeviceGateway",
     platforms: [
-        .iOS(.v13),
+        .iOS(.v14),
         .macOS(.v11)
     ],
     products: [
@@ -24,7 +24,8 @@ let package = Package(
         )
     ],
     dependencies: [
-        .package(path: "../Common")
+        .package(path: "../Common"),
+        .package(url: "https://github.com/mahee96/RemotePairingKit.git", branch: "main")
     ],
     targets: [
 //        .binaryTarget(
@@ -43,13 +44,13 @@ let package = Package(
 //        ),
         .binaryTarget(
             name: "libimobiledevice",
-            url: "https://github.com/SideStore/libimobiledevice-xcframework/releases/download/1.4.0-ss-ab5f627/libimobiledevice.xcframework.zip",
-            checksum: "8a34a3420eb97e25cdb5b3ed1c518fdebda399e7cdedf43d5a901442f3aef5fb"
+            url: "https://github.com/SideStore/libimobiledevice-xcframework/releases/download/1.4.0-ss-413b33a/libimobiledevice.xcframework.zip",
+            checksum: "235a56081d49f66972196c08ef1aa3e5034dae86618d158d16c4f4d3d0eb8582"
         ),
-//        .binaryTarget(
-//            name: "libimobiledevice",
-//            path: "../../local/libimobiledevice-xcframework/libs/libimobiledevice.xcframework"
-//        ),
+//         .binaryTarget(
+//             name: "libimobiledevice",
+//             path: "../../../../local/libimobiledevice-xcframework/libs/libimobiledevice.xcframework"
+//         ),
 
         // Base API Target
         .target(
@@ -84,11 +85,12 @@ let package = Package(
             dependencies: [
                 "DeviceGatewayAPI",
                 .product(name: "MinimuxerCommon", package: "Common"),
-                "libimobiledevice"
+                "libimobiledevice",
+                .product(name: "RPPairing", package: "RemotePairingKit")
             ],
             path: "libimobiledevice",
             linkerSettings: [
-                .unsafeFlags(["-undefined", "dynamic_lookup"])
+                .linkedFramework("OpenSSL")
             ]
         )
     ]

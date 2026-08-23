@@ -10,7 +10,7 @@ import Foundation
 
 public enum MinimuxerConstants {
     public static let lockdowndPort: UInt16 = 62078     // lockdown daemon port
-    public static let rsdPort: UInt16 = 49152
+    public static let remotePairingPort: UInt16 = 49152 // RemotePairing daemon port
     
     public static let appName = "minimuxer"
 

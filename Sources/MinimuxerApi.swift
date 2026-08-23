@@ -109,7 +109,7 @@ public extension MinimuxerAPI {
     }
 }
 
-public enum GatewayBackend: String, Sendable {
+public enum GatewayBackend: String, Sendable, CaseIterable {
     case libimobiledevice
     case idevice
 }
@@ -121,7 +121,7 @@ public final class Minimuxer: @unchecked Sendable {
     public let emproxy: any EMProxyAPI
     public let gateway: any DeviceGatewayAPI
 
-    private static var lastBackend: GatewayBackend?
+    private static var currentBackend: GatewayBackend = .idevice
     private static var cachedInstance: Minimuxer?
     private static let lock = NSLock()
 
@@ -139,14 +139,27 @@ public final class Minimuxer: @unchecked Sendable {
         self.core = core
     }
 
-    public static func shared(backend: GatewayBackend = .libimobiledevice) -> Minimuxer {
+    public static func shared() -> Minimuxer {
         lock.lock()
         defer { lock.unlock() }
 
-        if let cached = cachedInstance, lastBackend == backend {
+        if let cached = cachedInstance {
             return cached
         }
+        return createInstance(backend: currentBackend)
+    }
 
+    public static func shared(backend: GatewayBackend) -> Minimuxer {
+        lock.lock()
+        defer { lock.unlock() }
+
+        if let cached = cachedInstance, currentBackend == backend {
+            return cached
+        }
+        return createInstance(backend: backend)
+    }
+
+    private static func createInstance(backend: GatewayBackend) -> Minimuxer {
         let gateway: any DeviceGatewayAPI
         switch backend {
         case .libimobiledevice:
@@ -174,7 +187,7 @@ public final class Minimuxer: @unchecked Sendable {
         )
 
         cachedInstance = instance
-        lastBackend = backend
+        currentBackend = backend
         return instance
     }
 }

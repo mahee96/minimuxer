@@ -59,7 +59,8 @@ private func getOpenSSLErrors() -> [String] {
 
 public enum DeviceService: String, Sendable {
     case lockdownd          = "com.apple.mobile.lockdown"
-    case misagent           = "com.apple.misagent"
+    // case misagent        = "com.apple.misagent"
+    case misagent           = "com.apple.mobile.MCInstall.shim.remote"
     case mobileImageMounter = "com.apple.mobile.mobile_image_mounter"
     case installationProxy  = "com.apple.mobile.installation_proxy"
     case houseArrest        = "com.apple.mobile.house_arrest"
@@ -69,6 +70,7 @@ public enum DeviceService: String, Sendable {
 }
 
 private let kAfcChunkSize = 1024 * 1024 // 1 MB AFC bulk transfer chunk
+private let kDefaultTimeoutMs: Int32 = 120000
 
 public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
     public static let shared = LibimobiledeviceGateway()
@@ -202,13 +204,10 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
 
     private func withRPTunnel<T>(_ body: (rppairing_tunnel_t, rppairing_tunnel_info_t) throws -> T) throws -> T {
         if let tunnel = activeTunnel, let info = activeTunnelInfo {
-            do {
-                return try body(tunnel, info)
-            } catch {
-                debugLog("[LibimobiledeviceGateway] Cached tunnel operation failed: \(error). Invalidating and reconnecting fresh tunnel...")
-                cleanupRPTunnel()
-            }
+            return try body(tunnel, info)
         }
+
+        cleanupRPTunnel()
 
         let host = try requireDeviceEndpointIp()
         debugLog("[LibimobiledeviceGateway] withRPTunnel: connecting fresh tunnel to host \(host)...")
@@ -279,7 +278,7 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
         return rsd
     }
 
-    private func executeRSDService<T>(_ service: DeviceService, action: (rppairing_service_stream_t) throws -> T) throws -> T {
+    private func withRSDService<T>(_ service: DeviceService, action: (rppairing_service_stream_t) throws -> T) throws -> T {
         try withRPTunnel { tunnel, info in
             let rsd = try getActiveRSD(tunnel: tunnel)
 
@@ -312,16 +311,6 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
         }
     }
 
-    private func withRSDService<T>(_ service: DeviceService, action: (rppairing_service_stream_t) throws -> T) throws -> T {
-        do {
-            return try executeRSDService(service, action: action)
-        } catch {
-            debugLog("[LibimobiledeviceGateway] RSD service \(service.rawValue) failed: \(error). Retrying with fresh tunnel...")
-            cleanupRPTunnel()
-            return try executeRSDService(service, action: action)
-        }
-    }
-
     private func rsdSendPlist(_ stream: rppairing_service_stream_t, dict: [String: Any]) throws {
         let plistData = try PropertyListSerialization.data(fromPropertyList: dict, format: .xml, options: 0)
         guard let xmlStr = String(data: plistData, encoding: .utf8) else {
@@ -333,7 +322,7 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
         }
     }
 
-    private func rsdRecvPlist(_ stream: rppairing_service_stream_t, timeoutMs: Int32 = 10000) throws -> [String: Any] {
+    private func rsdRecvPlist(_ stream: rppairing_service_stream_t, timeoutMs: Int32 = kDefaultTimeoutMs) throws -> [String: Any] {
         var outXml: UnsafeMutablePointer<CChar>? = nil
         var outLen: Int = 0
         let err = rppairing_service_stream_recv_plist(stream, &outXml, &outLen, timeoutMs)
@@ -822,7 +811,7 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
 
     private func rsdAfcRecvResponse(
         _ stream: rppairing_service_stream_t,
-        timeoutMs: Int32 = 10000
+        timeoutMs: Int32 = kDefaultTimeoutMs
     ) throws -> (opcode: UInt64, headerPayload: Data, payload: Data) {
         var hdrBuf = [UInt8](repeating: 0, count: 40)
         let hdrErr = rppairing_service_stream_recv_exact(stream, &hdrBuf, 40, timeoutMs)
@@ -895,20 +884,23 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
                 var packetNum: UInt64 = 0
                 let remotePath = "PublicStaging/\(bundleId).ipa"
 
-                // 1. Ensure PublicStaging directory exists
+                debugLog("[LibimobiledeviceGateway] syncYeetAppAfc: Ensuring PublicStaging directory exists...")
                 try rsdAfcMakeDir(stream, path: "PublicStaging", packetNum: &packetNum)
 
-                // 2. Open file for writing (mode 3 = WrOnly)
+                debugLog("[LibimobiledeviceGateway] syncYeetAppAfc: Opening \(remotePath)...")
                 let fd = try rsdAfcFileOpen(stream, path: remotePath, mode: 3, packetNum: &packetNum)
                 defer { try? rsdAfcFileClose(stream, fd: fd, packetNum: &packetNum) }
 
-                // 3. Write chunks (1MB chunks)
+                debugLog("[LibimobiledeviceGateway] syncYeetAppAfc: Staging file opened (fd=\(fd)), uploading \(ipaBytes.count) bytes...")
                 var offset = 0
+                var chunkIdx = 0
+                let totalChunks = (ipaBytes.count + kAfcChunkSize - 1) / kAfcChunkSize
                 while offset < ipaBytes.count {
                     let end = min(offset + kAfcChunkSize, ipaBytes.count)
                     let chunk = ipaBytes.subdata(in: offset..<end)
                     let writeHeaderPayload = withUnsafeBytes(of: fd.littleEndian) { Data($0) }
 
+                    chunkIdx += 1
                     try rsdAfcSendPacket(stream, opcode: 16 /* Write */, headerPayload: writeHeaderPayload, payload: chunk, packetNum: &packetNum)
                     let writeResp = try rsdAfcRecvResponse(stream)
                     if writeResp.opcode == 1 /* Status */ && writeResp.headerPayload.count >= 8 {
@@ -918,6 +910,9 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
                         }
                     }
                     offset = end
+                    if chunkIdx % 5 == 0 || offset >= ipaBytes.count {
+                        debugLog("[LibimobiledeviceGateway] syncYeetAppAfc: Uploaded chunk \(chunkIdx)/\(totalChunks) (\(offset)/\(ipaBytes.count) bytes)")
+                    }
                 }
                 debugLog("[LibimobiledeviceGateway] Successfully uploaded \(ipaBytes.count) bytes to \(remotePath) via RSD AFC!")
             }
@@ -964,7 +959,7 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
                 debugLog("[LibimobiledeviceGateway] Sending installation_proxy command to install \(remotePath)...")
                 try rsdSendPlist(stream, dict: dict)
                 while true {
-                    let resp = try rsdRecvPlist(stream, timeoutMs: 60000)
+                    let resp = try rsdRecvPlist(stream)
                     debugLog("[LibimobiledeviceGateway] installation_proxy response: \(resp)")
                     if let status = resp["Status"] as? String {
                         if status == "Complete" {

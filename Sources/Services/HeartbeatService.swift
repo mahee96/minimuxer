@@ -11,8 +11,13 @@ internal import MinimuxerCommon
 internal import DeviceGatewayAPI
 
 final internal class HeartbeatService {
-    private static var gateway: any DeviceGatewayAPI { Minimuxer.gateway }
-    private static var minimuxer: any MinimuxerAPI { Minimuxer.shared }
+    let gateway: any DeviceGatewayAPI
+    let minimuxer: any MinimuxerAPI
+    
+    init(gateway: any DeviceGatewayAPI, minimuxer: any MinimuxerAPI) {
+        self.gateway = gateway
+        self.minimuxer = minimuxer
+    }
     
     private actor MutableState {
         var running = false

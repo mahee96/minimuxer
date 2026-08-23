@@ -21,10 +21,22 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         statusSubject.eraseToAnyPublisher()
     }
 
-    var gateway: any DeviceGatewayAPI { Minimuxer.gateway }
-    var network: any NetworkObserverAPI { Minimuxer.network }
-    var emproxy: any EMProxyAPI { Minimuxer.emproxy }
-    var wirelessPair: any WirelessPairAPI { Minimuxer.wirelessPair }
+    let gateway: any DeviceGatewayAPI
+    let network: any NetworkObserverAPI
+    let emproxy: any EMProxyAPI
+    let wirelessPair: any WirelessPairAPI
+
+    init(
+        gateway: any DeviceGatewayAPI,
+        network: any NetworkObserverAPI,
+        emproxy: any EMProxyAPI,
+        wirelessPair: any WirelessPairAPI
+    ) {
+        self.gateway = gateway
+        self.network = network
+        self.emproxy = emproxy
+        self.wirelessPair = wirelessPair
+    }
 
     private actor State {
         var status: MinimuxerStatus = .stopped

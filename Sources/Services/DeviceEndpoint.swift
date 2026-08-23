@@ -12,13 +12,13 @@ internal import DeviceGatewayAPI
 
 actor DeviceEndpoint {
 
-    static let shared = DeviceEndpoint()
-
-    private var gateway: any DeviceGatewayAPI { Minimuxer.gateway }
+    let gateway: any DeviceGatewayAPI
 
     private var ipAddr: String? = nil
 
-    private init() {}
+    init(gateway: any DeviceGatewayAPI) {
+        self.gateway = gateway
+    }
 
     func ip() throws -> String {
         guard let ip = ipAddr else { throw MinimuxerInternalError.deviceEndpointNotInitialized }

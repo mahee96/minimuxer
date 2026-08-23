@@ -10,10 +10,8 @@ import Foundation
 
 actor DeviceConnectionManager {
 
-    static let shared = DeviceConnectionManager()
-
-    private var network: any NetworkObserverAPI { Minimuxer.network }
-    private var minimuxer: any MinimuxerAPI { Minimuxer.shared }
+    let network: any NetworkObserverAPI
+    let minimuxer: any MinimuxerAPI
 
     private var interfacesCache: Set<NetInfo> = []
     private var connectionConfigCache: ConnectionConfigBinding?
@@ -32,7 +30,10 @@ actor DeviceConnectionManager {
     var remoteServerIp: String?
     var isRemoteServerIpReachable = false
 
-    private init() {}
+    init(network: any NetworkObserverAPI, minimuxer: any MinimuxerAPI) {
+        self.network = network
+        self.minimuxer = minimuxer
+    }
 
     func bindConnectionConfig(_ binding: ConnectionConfigBinding) async {
         connectionConfigCache = binding

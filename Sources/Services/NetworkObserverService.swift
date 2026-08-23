@@ -11,7 +11,7 @@ import Combine
 
 final internal class NetworkObserverService: NetworkObserverAPI, @unchecked Sendable {
 
-    private var minimuxer: any MinimuxerAPI { Minimuxer.shared }
+    let minimuxer: any MinimuxerAPI
 
     public let pathSubject = PassthroughSubject<NWPath, Never>()
     public var pathPublisher: AnyPublisher<NWPath, Never> {
@@ -21,6 +21,10 @@ final internal class NetworkObserverService: NetworkObserverAPI, @unchecked Send
     private let monitor = NWPathMonitor()
     private let queue = DispatchQueue(label: "net.monitor")
     private let state = State()
+
+    init(minimuxer: any MinimuxerAPI) {
+        self.minimuxer = minimuxer
+    }
     
     private actor State {
         var started = false

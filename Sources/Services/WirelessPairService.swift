@@ -13,7 +13,7 @@ internal import DeviceGatewayAPI
 // MARK: - Wireless Pair API
 
 final internal class WirelessPairService: WirelessPairAPI {
-    var gateway: any DeviceGatewayAPI { Minimuxer.gateway }
+    let gateway: any DeviceGatewayAPI
     
     private var netService: NetService?
     private var isPairing = false
@@ -21,7 +21,9 @@ final internal class WirelessPairService: WirelessPairAPI {
     var onPinReceived: ((String) -> Void)?
     var onReadyToPair: ((String, Int) -> Void)?
     
-    init() {}
+    init(gateway: any DeviceGatewayAPI) {
+        self.gateway = gateway
+    }
     
     func start(
         hostName: String = MinimuxerConstants.defaultHostName,

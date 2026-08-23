@@ -12,10 +12,12 @@ internal import DeviceGatewayAPI
 internal import MinimuxerCommon
 
 final internal class Mounter {
-    static let shared = Mounter()
-
-    private var gateway: any DeviceGatewayAPI { Minimuxer.gateway }
+    let gateway: any DeviceGatewayAPI
     private var isRPPairing: Bool { self.gateway.isRPPairing }
+
+    init(gateway: any DeviceGatewayAPI) {
+        self.gateway = gateway
+    }
 
     // NOTE: mounter doesn't cache the mount status nor the minimuxer.
     //       reason is that the actual device state responded by idevice should be truthiness

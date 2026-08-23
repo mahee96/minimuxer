@@ -129,15 +129,7 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
         self.cachedUDID = nil
         self.isRPPairing = false
         self.pairingFileType = .unknown
-        if let rsd = activeRsd {
-            rppairing_rsd_free(rsd)
-            activeRsd = nil
-        }
-        if let tunnel = activeTunnel {
-            rppairing_tunnel_close(tunnel)
-            activeTunnel = nil
-        }
-        activeTunnelInfo = nil
+        cleanupRPTunnel()
         rpIdentity = nil
     }
 
@@ -196,13 +188,30 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
         return try body(client)
     }
 
+    private func cleanupRPTunnel() {
+        if let rsd = self.activeRsd {
+            rppairing_rsd_free(rsd)
+            self.activeRsd = nil
+        }
+        if let tunnel = self.activeTunnel {
+            rppairing_tunnel_close(tunnel)
+            self.activeTunnel = nil
+        }
+        self.activeTunnelInfo = nil
+    }
+
     private func withRPTunnel<T>(_ body: (rppairing_tunnel_t, rppairing_tunnel_info_t) throws -> T) throws -> T {
         if let tunnel = activeTunnel, let info = activeTunnelInfo {
-            return try body(tunnel, info)
+            do {
+                return try body(tunnel, info)
+            } catch {
+                debugLog("[LibimobiledeviceGateway] Cached tunnel operation failed: \(error). Invalidating and reconnecting fresh tunnel...")
+                cleanupRPTunnel()
+            }
         }
 
         let host = try requireDeviceEndpointIp()
-        debugLog("[LibimobiledeviceGateway] withRPTunnel: connecting to host \(host)...")
+        debugLog("[LibimobiledeviceGateway] withRPTunnel: connecting fresh tunnel to host \(host)...")
 
         return try withRPClient { client in
             var tunnelPort: UInt16 = 0
@@ -270,7 +279,7 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
         return rsd
     }
 
-    private func withRSDService<T>(_ service: DeviceService, action: (rppairing_service_stream_t) throws -> T) throws -> T {
+    private func executeRSDService<T>(_ service: DeviceService, action: (rppairing_service_stream_t) throws -> T) throws -> T {
         try withRPTunnel { tunnel, info in
             let rsd = try getActiveRSD(tunnel: tunnel)
 
@@ -300,6 +309,16 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
             debugLog("[LibimobiledeviceGateway] StartService response: \(startServiceResp)")
 
             return try action(stream)
+        }
+    }
+
+    private func withRSDService<T>(_ service: DeviceService, action: (rppairing_service_stream_t) throws -> T) throws -> T {
+        do {
+            return try executeRSDService(service, action: action)
+        } catch {
+            debugLog("[LibimobiledeviceGateway] RSD service \(service.rawValue) failed: \(error). Retrying with fresh tunnel...")
+            cleanupRPTunnel()
+            return try executeRSDService(service, action: action)
         }
     }
 

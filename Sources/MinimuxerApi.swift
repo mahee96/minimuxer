@@ -109,12 +109,20 @@ public extension MinimuxerAPI {
     }
 }
 
+public protocol MinimuxerFacade: AnyObject, Sendable {
+    var core: any MinimuxerAPI { get }
+    var network: any NetworkObserverAPI { get }
+    var wirelessPair: any WirelessPairAPI { get }
+    var emproxy: any EMProxyAPI { get }
+    var gateway: any DeviceGatewayAPI { get }
+}
+
 public enum GatewayBackend: String, Sendable, CaseIterable {
     case libimobiledevice
     case idevice
 }
 
-public final class Minimuxer: @unchecked Sendable {
+public final class Minimuxer: MinimuxerFacade, @unchecked Sendable {
     public let core: any MinimuxerAPI
     public let network: any NetworkObserverAPI
     public let wirelessPair: any WirelessPairAPI

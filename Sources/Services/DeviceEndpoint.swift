@@ -8,10 +8,13 @@
 //
 
 import Foundation
+internal import DeviceGatewayAPI
 
 actor DeviceEndpoint {
 
     static let shared = DeviceEndpoint()
+
+    private var gateway: any DeviceGatewayAPI { Minimuxer.gateway }
 
     private var ipAddr: String? = nil
 
@@ -24,13 +27,13 @@ actor DeviceEndpoint {
 
     func update(_ newIP: String) {
         ipAddr = newIP
-        Minimuxer.gateway.setDeviceEndpointIp(newIP)
+        self.gateway.setDeviceEndpointIp(newIP)
         verboseLog("[minimuxer] device endpoint updated -> \(newIP)")
     }
 
     func clear() {
         ipAddr = nil
-        Minimuxer.gateway.setDeviceEndpointIp(nil)
+        self.gateway.setDeviceEndpointIp(nil)
         verboseLog("[minimuxer] device endpoint cleared -> nil")
     }
 

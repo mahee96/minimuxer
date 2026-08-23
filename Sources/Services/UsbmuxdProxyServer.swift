@@ -15,6 +15,8 @@ internal import MinimuxerCommon
 final internal class UsbmuxdProxyServer {
     static let shared = UsbmuxdProxyServer()
 
+    private var gateway: any DeviceGatewayAPI { Minimuxer.gateway }
+
     private var maxBufferLen: Int { MinimuxerConstants.usbmuxMaxPacketBufferLength }
     private var headerLen: Int { MinimuxerConstants.usbmuxHeaderLen }
 
@@ -224,10 +226,10 @@ final internal class UsbmuxdProxyServer {
             case "Listen":
                 return ["MessageType": "Result", "Number": 0]
             case "ReadBUID":
-                let buid = (Minimuxer.gateway.pairingDataDict?["SystemBUID"] as? String) ?? "00000000-0000-0000-0000-000000000000"
+                let buid = (self.gateway.pairingDataDict?["SystemBUID"] as? String) ?? "00000000-0000-0000-0000-000000000000"
                 return ["BUID": buid]
             case "ReadPairRecord":
-                guard let pairingData = Minimuxer.gateway.pairingFileData else {
+                guard let pairingData = self.gateway.pairingFileData else {
                     throw MinimuxerError.invalidPairing(protocol: .lockdown, reason: "No pairing file data available for ReadPairRecord")
                 }
                 return ["PairRecordData": pairingData]

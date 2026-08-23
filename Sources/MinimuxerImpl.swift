@@ -1,5 +1,5 @@
 //
-//  Minimuxer.swift
+//  self.swift
 //  Minimuxer
 //
 //  Created by Magesh K on 4/7/26.
@@ -21,6 +21,11 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         statusSubject.eraseToAnyPublisher()
     }
 
+    var gateway: any DeviceGatewayAPI { Minimuxer.gateway }
+    var network: any NetworkObserverAPI { Minimuxer.network }
+    var emproxy: any EMProxyAPI { Minimuxer.emproxy }
+    var wirelessPair: any WirelessPairAPI { Minimuxer.wirelessPair }
+
     private actor State {
         var status: MinimuxerStatus = .stopped
         var mountTask: Task<Bool, Error>? = nil
@@ -32,7 +37,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
     }
     private let state = State()
     
-    var isrppairing: Bool { Minimuxer.gateway.isRPPairing }
+    var isrppairing: Bool { self.gateway.isRPPairing }
     
     var isLoggingEnabled: Bool { MinimuxerLogging.isLoggingEnabled }
     
@@ -41,7 +46,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
     }
     
     func getPairingFileType() -> PairingProtocol {
-        return Minimuxer.gateway.getPairingFileType()
+        return self.gateway.getPairingFileType()
     }
 
 
@@ -86,10 +91,10 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         }
 
         // check connection status first
-        if !(Minimuxer.network.isWifiSatisfied   /* ||
-             Minimuxer.network.isWiredSatisfied     ||
-             Minimuxer.network.isUsbSatisfied       ||
-             Minimuxer.network.isBridgeSatisfied */
+        if !(self.network.isWifiSatisfied   /* ||
+             self.network.isWiredSatisfied     ||
+             self.network.isUsbSatisfied       ||
+             self.network.isBridgeSatisfied */
         ){
             debugLog("[minimuxer] minimuxer not ready: no network connection")
             return .failure(.noConnection("No wifi interface satisfied"))
@@ -97,7 +102,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
 
         // check connection mode
         let connectionMode = await getConnectionMode()
-        let net = Minimuxer.network
+        let net = self.network
 
         switch connectionMode {
             case .notConfigured:
@@ -221,7 +226,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
 
     func setLogging(_ enabled: Bool) {
         MinimuxerLogging.setLogging(enabled)
-        Minimuxer.gateway.setLogging(enabled)
+        self.gateway.setLogging(enabled)
     }
     
     func retargetUsbmuxdAddr() {
@@ -243,7 +248,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
     private func restartMuxerServer() async throws {
         guard !isrppairing else { return }
         // restartMuxerServer only applies to the lockdown protocol path
-        guard let pairingDict = Minimuxer.gateway.pairingDataDict else {
+        guard let pairingDict = self.gateway.pairingDataDict else {
             debugLog("[minimuxer] ERROR: Pairing DICT missing...ignoring restart MuxerServer")
             throw MinimuxerError.invalidPairing(protocol: .lockdown, reason: "Pairing dictionary is missing in gateway")
         }
@@ -266,7 +271,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         if DeviceConnectionMode.notConfigured == connectionMode {
             throw connectionNotConfiguredError()
         }
-        await Minimuxer.network.start()
+        await self.network.start()
 
         // actor serialization scope
         await state.with{
@@ -275,7 +280,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         }
         // let idevice initialize its state and set isRPPairing
         try await matchingPriority {
-            try await Minimuxer.gateway.start(pairingFileContent: pairingFile)
+            try await self.gateway.start(pairingFileContent: pairingFile)
         }
         // retarget usbmuxd to our fake usbmuxd server (over network)
         retargetUsbmuxdAddr()
@@ -322,13 +327,13 @@ final internal class MinimuxerImpl: MinimuxerAPI {
     func restart() async throws {
         verboseLog("[minimuxer] Restarting services...")
         let activeProtocol: PairingProtocol = isrppairing ? .rppairing : .lockdown
-        guard let pairingData = Minimuxer.gateway.pairingFileData,
+        guard let pairingData = self.gateway.pairingFileData,
               let pairingFile = String(data: pairingData, encoding: .utf8) else {
             debugLog("[minimuxer] restart: no existing pairing file — cannot restart")
             throw MinimuxerError.invalidPairing(protocol: activeProtocol, reason: "No existing pairing file found in gateway during restart")
         }
         try await restartWith(pairingFile: pairingFile, op: "restart")
-        await Minimuxer.network.refreshEndpoint()
+        await self.network.refreshEndpoint()
     }
 
     func reinitializePairingData(pairingFile: String) async throws {
@@ -343,7 +348,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
     }
 
     private func ensureDDIMounted() async throws {
-        let isMounted = (try? await Minimuxer.gateway.isDDIMounted()) ?? false
+        let isMounted = (try? await self.gateway.isDDIMounted()) ?? false
         if isMounted {
             return
         }
@@ -378,87 +383,87 @@ final internal class MinimuxerImpl: MinimuxerAPI {
 
     func isDDIMounted() async throws -> Bool {
         try await matchingPriority{
-            try await Minimuxer.gateway.isDDIMounted()
+            try await self.gateway.isDDIMounted()
         }
     }
 
     func fetchUDID() async throws -> String? {
         try await matchingPriority{
-            try await Minimuxer.gateway.fetchUDID()
+            try await self.gateway.fetchUDID()
         }
     }
 
     func yeetAppAfc(bundleId: String, ipaBytes: Data) async throws {
         try await matchingPriority{
-            try await Minimuxer.gateway.yeetAppAfc(bundleId: bundleId, ipaBytes: ipaBytes)
+            try await self.gateway.yeetAppAfc(bundleId: bundleId, ipaBytes: ipaBytes)
         }
     }
 
     func installIpa(bundleId: String) async throws {
         try await matchingPriority{
-            try await Minimuxer.gateway.installIpa(bundleId: bundleId)
+            try await self.gateway.installIpa(bundleId: bundleId)
         }
     }
 
     func removeApp(bundleId: String) async throws {
         try await matchingPriority{
-            try await Minimuxer.gateway.removeApp(bundleId: bundleId)
+            try await self.gateway.removeApp(bundleId: bundleId)
         }
     }
 
     func wipeContainer(identifier: String) async throws {
         try await matchingPriority{
-            try await Minimuxer.gateway.wipeContainer(identifier: identifier)
+            try await self.gateway.wipeContainer(identifier: identifier)
         }
     }
 
     func debugApp(appId: String) async throws {
         try await matchingPriority{
             try await self.ensureDDIMounted()
-            try await Minimuxer.gateway.debugApp(appId: appId)
+            try await self.gateway.debugApp(appId: appId)
         }
     }
 
     func attachDebugger(pid: UInt32) async throws {
         try await matchingPriority{
             try await self.ensureDDIMounted()
-            try await Minimuxer.gateway.debugProcess(pid: pid)
+            try await self.gateway.debugProcess(pid: pid)
         }
     }
 
     func installProvisioningProfile(profile: Data) async throws {
         try await matchingPriority{
-            try await Minimuxer.gateway.installProvisioningProfile(profile: profile)
+            try await self.gateway.installProvisioningProfile(profile: profile)
         }
     }
 
     func removeProvisioningProfile(id: String) async throws {
         try await matchingPriority{
-            try await Minimuxer.gateway.removeProvisioningProfile(id: id)
+            try await self.gateway.removeProvisioningProfile(id: id)
         }
     }
 
     func dumpProfiles(docsPath: String) async throws -> String {
         try await matchingPriority{
-            try await Minimuxer.gateway.dumpProfiles(docsPath: docsPath)
+            try await self.gateway.dumpProfiles(docsPath: docsPath)
         }
     }
 
     func afcListDirectory(bundleId: String, path: String) async throws -> [String] {
         try await matchingPriority {
-            try await Minimuxer.gateway.afcListDirectory(bundleId: bundleId, path: path)
+            try await self.gateway.afcListDirectory(bundleId: bundleId, path: path)
         }
     }
 
     func afcReadFile(bundleId: String, path: String) async throws -> Data {
         try await matchingPriority {
-            try await Minimuxer.gateway.afcReadFile(bundleId: bundleId, path: path)
+            try await self.gateway.afcReadFile(bundleId: bundleId, path: path)
         }
     }
 
     func afcGetFileInfo(bundleId: String, path: String) async throws -> (isDirectory: Bool, fileSize: Int64) {
         try await matchingPriority {
-            try await Minimuxer.gateway.afcGetFileInfo(bundleId: bundleId, path: path)
+            try await self.gateway.afcGetFileInfo(bundleId: bundleId, path: path)
         }
     }
 }

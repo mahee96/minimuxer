@@ -9,11 +9,11 @@
 import Foundation
 internal import MinimuxerCommon
 internal import DeviceGatewayAPI
-// import RustBridge
 
 // MARK: - Wireless Pair API
 
 final internal class WirelessPairService: WirelessPairAPI {
+    var gateway: any DeviceGatewayAPI { Minimuxer.gateway }
     
     private var netService: NetService?
     private var isPairing = false
@@ -37,7 +37,7 @@ final internal class WirelessPairService: WirelessPairAPI {
             
             let outcome: Result<WirelessPairPairedDevice, Swift.Error>
             do {
-                let pairedDevice = try await Minimuxer.gateway.startWirelessPair(
+                let pairedDevice = try await self.gateway.startWirelessPair(
                     hostName: hostName,
                     hostModel: hostModel,
                     outPath: outPath,

@@ -12,6 +12,9 @@ actor DeviceConnectionManager {
 
     static let shared = DeviceConnectionManager()
 
+    private var network: any NetworkObserverAPI { Minimuxer.network }
+    private var minimuxer: any MinimuxerAPI { Minimuxer.shared }
+
     private var interfacesCache: Set<NetInfo> = []
     private var connectionConfigCache: ConnectionConfigBinding?
     private var lastConnectionMode: DeviceConnectionMode? = nil
@@ -42,7 +45,7 @@ actor DeviceConnectionManager {
           • remoteServerIp: \(binding.getRemoteServerIp()) 
         
         """)
-        await Minimuxer.network.refreshEndpoint()
+        await self.network.refreshEndpoint()
     }
     
     func getPreferredConnectionMode() -> DeviceConnectionMode {
@@ -81,7 +84,7 @@ actor DeviceConnectionManager {
 
                 let rawOverrideIp = connectionConfigCache?.getOverrideTunnelPeerIp()
                 overridePeerIp = (rawOverrideIp?.isEmpty ?? true) ? nil : rawOverrideIp
-                isOverridePeerIpReachable = Minimuxer.shared.testDeviceConnection(ifaddr: overridePeerIp)
+                isOverridePeerIpReachable = self.minimuxer.testDeviceConnection(ifaddr: overridePeerIp)
             
                 let isOverrideIpUnchanged = lastOverrideIp == overridePeerIp
                 let isDerivedIpUnchanged = lastDerivedPeer == derivedPeerIp && lastDerivedPeerMask == derivedPeerSubnetMask
@@ -127,7 +130,7 @@ actor DeviceConnectionManager {
             case .remoteServer:
                 let rawServerIp = connectionConfigCache?.getRemoteServerIp()
                 let serverIp = (rawServerIp?.isEmpty ?? true) ? nil : rawServerIp
-                let reachable = Minimuxer.shared.testDeviceConnection(ifaddr: serverIp)
+                let reachable = self.minimuxer.testDeviceConnection(ifaddr: serverIp)
                 if self.lastConnectionMode == connectionMode && serverIp == remoteServerIp && reachable == isRemoteServerIpReachable {
                     debugLog("[minimuxer] [iface] no remote server state changes detected, skipping refresh")
                     return false
@@ -179,7 +182,7 @@ actor DeviceConnectionManager {
         for tunnel in tunnels {
             let candidates = resolveCandidatePeers(for: tunnel)
             for candidate in candidates {
-                if Minimuxer.shared.testDeviceConnection(ifaddr: candidate.ip) {
+                if self.minimuxer.testDeviceConnection(ifaddr: candidate.ip) {
                     return (tunnel, candidate, true)
                 }
             }

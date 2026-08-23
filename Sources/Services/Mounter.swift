@@ -14,7 +14,8 @@ internal import MinimuxerCommon
 final internal class Mounter {
     static let shared = Mounter()
 
-    private var isRPPairing: Bool { Minimuxer.gateway.isRPPairing }
+    private var gateway: any DeviceGatewayAPI { Minimuxer.gateway }
+    private var isRPPairing: Bool { self.gateway.isRPPairing }
 
     // NOTE: mounter doesn't cache the mount status nor the minimuxer.
     //       reason is that the actual device state responded by idevice should be truthiness
@@ -40,7 +41,7 @@ final internal class Mounter {
         }
 
         let isDDIMounted = try await runIdevice("isDDIMounted") {
-            try await Minimuxer.gateway.isDDIMounted()
+            try await self.gateway.isDDIMounted()
         }
         if isDDIMounted {
             verboseLog("[minimuxer] mounter: DeveloperDiskImage is already mounted. Bypassing mount.")
@@ -52,7 +53,7 @@ final internal class Mounter {
         var versionStr: String? = nil
         if !isRPPairing {
             guard let v = try await runIdevice("getLockdownValue(ProductVersion)", body: {
-                try await Minimuxer.gateway.getLockdownValue(key: "ProductVersion")
+                try await self.gateway.getLockdownValue(key: "ProductVersion")
             }) else {
                 debugLog("[minimuxer] mounter: could not get device version")
                 throw MinimuxerError.noDevice("ProductVersion not found in lockdown")
@@ -130,7 +131,7 @@ final internal class Mounter {
             let (dmgData, sigData) = try loadPre17Image(iosVersion: iosVersion, dmgDocsPath: dmgDocsPath)
             verboseLog("[minimuxer] Uploading and mounting image (dmg=\(dmgData.count) bytes, sig=\(sigData.count) bytes)...")
             try await runIdevice("mountDeveloperImage") {
-                try await Minimuxer.gateway.mountDeveloperImage(image: dmgData, signature: sigData)
+                try await self.gateway.mountDeveloperImage(image: dmgData, signature: sigData)
             }
             verboseLog("[minimuxer] Successfully mounted the image")
         } else {
@@ -144,7 +145,7 @@ final internal class Mounter {
                 "manifest=\(manifestData.count) bytes)"
             )
             try await runIdevice("mountPersonalizedDdi") {
-                try await Minimuxer.gateway.mountPersonalizedDdi(image: imageData, trustcache: trustcacheData, manifest: manifestData)
+                try await self.gateway.mountPersonalizedDdi(image: imageData, trustcache: trustcacheData, manifest: manifestData)
             }
             verboseLog("[minimuxer] DDI mounted successfully")
         }

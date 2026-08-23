@@ -11,6 +11,8 @@ import Combine
 
 final internal class NetworkObserverService: NetworkObserverAPI, @unchecked Sendable {
 
+    private var minimuxer: any MinimuxerAPI { Minimuxer.shared }
+
     public let pathSubject = PassthroughSubject<NWPath, Never>()
     public var pathPublisher: AnyPublisher<NWPath, Never> {
         pathSubject.eraseToAnyPublisher()
@@ -69,8 +71,8 @@ final internal class NetworkObserverService: NetworkObserverAPI, @unchecked Send
         
         // Always re-evaluate and publish network change events as is
         debugLog("[minimuxer] [net] dispatching status update to subscribers")
-        let readyResult = await Minimuxer.shared.isReady()
-        if let impl = Minimuxer.shared as? MinimuxerImpl {
+        let readyResult = await self.minimuxer.isReady()
+        if let impl = self.minimuxer as? MinimuxerImpl {
             debugLog("[minimuxer] [net] publishing status update to subscribers")
             impl.statusSubject.send(readyResult)
         }

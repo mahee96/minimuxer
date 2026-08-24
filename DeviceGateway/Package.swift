@@ -29,19 +29,14 @@ let package = Package(
 //        .package(path: "../../../../local/RemotePairingKit")
     ],
     targets: [
-//        .binaryTarget(
-//            name: "IDevice",
-//            url: "https://github.com/jkcoxson/idevice/releases/download/v0.1.64/idevice-xcframework-v0.1.64.zip",
-//            checksum: "b8250402a23c850f80b9be1d4add309aae6c935ee6a797b73616e4d8f170be5d"
-//        ),
          .binaryTarget(
              name: "IDevice",
-             url: "https://github.com/SideStore/idevice/releases/download/v0.1.65-ss-895f502/idevice-xcframework-v0.1.65-ss-895f502.zip",
-             checksum: "6dbc7589b5796a5ec1f622e3e7a5e7a999adb2a5b58c876faa63b26c513f1610"
+             url: "https://github.com/SideStore/idevice/releases/download/v0.1.65-ss-9b07ddb/idevice-xcframework-v0.1.65-ss-9b07ddb.zip",
+             checksum: "4e3edd49c5b3e8cae3cc2fc8178128665e48ad68b631cbdd4783b87d4f4719cc"
          ),
 //        .binaryTarget(
 //            name: "IDevice",
-//            path: "../../local/idevice/swift/bundle.zip"
+//            path: "../../../../local/idevice/swift/IDevice.xcframework"
 //        ),
         .binaryTarget(
             name: "libimobiledevice",

@@ -1945,7 +1945,7 @@ public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
         var handshake: OpaquePointer? = nil
         var err: UnsafeMutablePointer<IdeviceFfiError>? = nil
 
-        verboseLog("[IdeviceGateway] triggerWirelessPair() connecting to \(deviceEndpointIp):\(remotePairingPort)...")
+        verboseLog("[IdeviceGateway] triggerWirelessPair() connecting via tunnel_create_rppairing to \(deviceEndpointIp):\(remotePairingPort)...")
         try hostName.withCString { hostPtr in
             withUnsafePointer(to: &addr) { addrPtr in
                 addrPtr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPtr in
@@ -1972,7 +1972,7 @@ public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
 
         if let err = err {
             let msg = err.pointee.message != nil ? String(cString: err.pointee.message!) : "Pairing failed"
-            debugLog("[IdeviceGateway] triggerWirelessPair() tunnel_create_rppairing failed: \(msg)")
+            debugLog("[IdeviceGateway] triggerWirelessPair() pairing failed: \(msg)")
             defer { idevice_error_free(err) }
             throw IdeviceGatewayError(.serviceError, reason: msg)
         }

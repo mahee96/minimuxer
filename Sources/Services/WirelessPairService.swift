@@ -29,7 +29,7 @@ final internal class WirelessPairService: WirelessPairAPI {
         hostName: String = MinimuxerConstants.defaultHostName,
         hostModel: String = MinimuxerConstants.defaultHostModel,
         outPath: String,
-        completion: @escaping (Result<WirelessPairPairedDevice, Swift.Error>) -> Void
+        completion: @escaping (Result<PairedDeviceRecord, Swift.Error>) -> Void
     ) {
         guard !isPairing else { return }
         isPairing = true
@@ -37,7 +37,7 @@ final internal class WirelessPairService: WirelessPairAPI {
         Task.detached { [weak self] in
             guard let self = self else { return }
             
-            let outcome: Result<WirelessPairPairedDevice, Swift.Error>
+            let outcome: Result<PairedDeviceRecord, Swift.Error>
             do {
                 let pairedDevice = try await self.gateway.startWirelessPair(
                     hostName: hostName,
@@ -67,6 +67,43 @@ final internal class WirelessPairService: WirelessPairAPI {
             
             await MainActor.run {
                 self.stopAdvertising()
+                self.isPairing = false
+                completion(outcome)
+            }
+        }
+    }
+
+    func trigger(
+        hostName: String = MinimuxerConstants.defaultHostName,
+        hostModel: String = MinimuxerConstants.defaultHostModel,
+        outPath: String,
+        completion: @escaping (Result<PairedDeviceRecord, Swift.Error>) -> Void
+    ) {
+        guard !isPairing else { return }
+        isPairing = true
+        
+        Task.detached { [weak self] in
+            guard let self = self else { return }
+            
+            let outcome: Result<PairedDeviceRecord, Swift.Error>
+            do {
+                let pairedDevice = try await self.gateway.triggerWirelessPair(
+                    hostName: hostName,
+                    hostModel: hostModel,
+                    outPath: outPath,
+                    onPin: { [weak self] pinString in
+                        guard let self = self else { return }
+                        Task { @MainActor in
+                            self.onPinReceived?(pinString)
+                        }
+                    }
+                )
+                outcome = .success(pairedDevice)
+            } catch {
+                outcome = .failure(error)
+            }
+            
+            await MainActor.run {
                 self.isPairing = false
                 completion(outcome)
             }

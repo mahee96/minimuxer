@@ -1704,33 +1704,27 @@ public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
         let hostAltIrkHex: String
     }
 
-    private func syncStartWirelessPair(
-        hostName: String,
-        hostModel: String,
-        outPath: String,
-        onReady: @escaping (String, UInt16, [String: String]) -> Void,
-        onPin: @escaping (String) -> Void
-    ) throws -> PairedDevice {
-        debugLog("[IdeviceGateway] startWirelessPair() called, hostName: \(hostName), hostModel: \(hostModel), outPath: \(outPath)")
-        // 1. Generate pairing file to get the service ID
+    private func generatePairingFile(hostName: String) throws -> (OpaquePointer, String) {
         var rpf: OpaquePointer? = nil
-        verboseLog("[IdeviceGateway] startWirelessPair() generating pairing file")
+        verboseLog("[IdeviceGateway] generatePairingFile() generating pairing file")
         let genErr = rp_pairing_file_generate(hostName, &rpf)
         if let genErr = genErr {
-            debugLog("[IdeviceGateway] startWirelessPair() rp_pairing_file_generate failed")
+            debugLog("[IdeviceGateway] generatePairingFile() rp_pairing_file_generate failed")
             defer { idevice_error_free(genErr) }
             throw IdeviceGatewayError(.serviceError, reason: "Failed to generate pairing file")
         }
-        defer { rp_pairing_file_free(rpf) }
+        guard let rpf = rpf else {
+            throw IdeviceGatewayError(.serviceError, reason: "Generated pairing file is nil")
+        }
 
-        // 2. Serialize pairing file to bytes so we can parse it in Swift and extract the identifier
         var dataPtr: UnsafeMutablePointer<UInt8>? = nil
         var dataLen: UInt = 0
-        verboseLog("[IdeviceGateway] startWirelessPair() serializing pairing file to bytes")
+        verboseLog("[IdeviceGateway] generatePairingFile() serializing pairing file to bytes")
         let toBytesErr = rp_pairing_file_to_bytes(rpf, &dataPtr, &dataLen)
         if let toBytesErr = toBytesErr {
-            debugLog("[IdeviceGateway] startWirelessPair() rp_pairing_file_to_bytes failed")
+            debugLog("[IdeviceGateway] generatePairingFile() rp_pairing_file_to_bytes failed")
             defer { idevice_error_free(toBytesErr) }
+            rp_pairing_file_free(rpf)
             throw IdeviceGatewayError(.serviceError, reason: "Failed to serialize pairing file to bytes")
         }
 
@@ -1740,18 +1734,22 @@ public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
             idevice_data_free(dataPtr, dataLen)
             if let plist = try? PropertyListSerialization.propertyList(from: plistData, options: [], format: nil) as? [String: Any] {
                 identifier = plist["identifier"] as? String ?? ""
-                verboseLog("[IdeviceGateway] startWirelessPair() parsed identifier: \(identifier)")
+                verboseLog("[IdeviceGateway] generatePairingFile() parsed identifier: \(identifier)")
             }
         }
 
         if identifier.isEmpty {
-            debugLog("[IdeviceGateway] startWirelessPair() failed: parsed identifier is empty")
+            debugLog("[IdeviceGateway] generatePairingFile() failed: parsed identifier is empty")
+            rp_pairing_file_free(rpf)
             throw IdeviceGatewayError(.serviceError, reason: "Failed to parse identifier from pairing file")
         }
 
-        // 3. Find a free port
+        return (rpf, identifier)
+    }
+
+    private func findFreePort() -> UInt16 {
         var actualPort: UInt16 = 0
-        verboseLog("[IdeviceGateway] startWirelessPair() finding free port")
+        verboseLog("[IdeviceGateway] findFreePort() finding free port")
         let socketFd = socket(AF_INET, SOCK_STREAM, 0)
         if socketFd >= 0 {
             var addr = sockaddr_in()
@@ -1773,7 +1771,7 @@ public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
                 }
                 if nameRes == 0 {
                     actualPort = UInt16(bigEndian: addr.sin_port)
-                    verboseLog("[IdeviceGateway] startWirelessPair() bound to port: \(actualPort)")
+                    verboseLog("[IdeviceGateway] findFreePort() bound to port: \(actualPort)")
                 }
             }
             close(socketFd)
@@ -1781,10 +1779,75 @@ public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
 
         if actualPort == 0 {
             actualPort = 5555 // fallback
-            verboseLog("[IdeviceGateway] startWirelessPair() fallback to port: \(actualPort)")
+            verboseLog("[IdeviceGateway] findFreePort() fallback to port: \(actualPort)")
+        }
+        return actualPort
+    }
+
+    private func finalizeAndSavePairedDevice(
+        rpf: OpaquePointer,
+        hostName: String,
+        hostModel: String,
+        outPath: String,
+        fallbackUdid: String,
+        initialAltIrk: [UInt8]? = nil
+    ) throws -> PairedDevice {
+        verboseLog("[IdeviceGateway] finalizeAndSavePairedDevice() writing pairing file to: \(outPath)")
+        let writeErr = rp_pairing_file_write(rpf, outPath)
+        if let writeErr = writeErr {
+            debugLog("[IdeviceGateway] finalizeAndSavePairedDevice() rp_pairing_file_write failed")
+            defer { idevice_error_free(writeErr) }
+            throw IdeviceGatewayError(.serviceError, reason: "Failed to write pairing file to path")
         }
 
-        // 4. Invoke onReady callback
+        var pairedDataPtr: UnsafeMutablePointer<UInt8>? = nil
+        var pairedDataLen: UInt = 0
+        verboseLog("[IdeviceGateway] finalizeAndSavePairedDevice() serializing paired file to bytes")
+        let serializeErr = rp_pairing_file_to_bytes(rpf, &pairedDataPtr, &pairedDataLen)
+        if let serializeErr = serializeErr {
+            debugLog("[IdeviceGateway] finalizeAndSavePairedDevice() rp_pairing_file_to_bytes failed")
+            defer { idevice_error_free(serializeErr) }
+            throw IdeviceGatewayError(.serviceError, reason: "Failed to serialize paired file")
+        }
+
+        var altIrkHex = initialAltIrk?.map { String(format: "%02x", $0) }.joined() ?? ""
+        var pairedUdid = ""
+        if let pairedDataPtr = pairedDataPtr {
+            let plistData = Data(bytes: pairedDataPtr, count: Int(pairedDataLen))
+            idevice_data_free(pairedDataPtr, pairedDataLen)
+            if let plist = try? PropertyListSerialization.propertyList(from: plistData, options: [], format: nil) as? [String: Any] {
+                pairedUdid = plist["identifier"] as? String ?? ""
+                if let altIrkData = plist["alt_irk"] as? Data {
+                    altIrkHex = altIrkData.map { String(format: "%02x", $0) }.joined()
+                }
+                verboseLog("[IdeviceGateway] finalizeAndSavePairedDevice() parsed pairedUdid: \(pairedUdid), altIrkHex length: \(altIrkHex.count)")
+            }
+        }
+
+        debugLog("[IdeviceGateway] finalizeAndSavePairedDevice() pairing complete")
+        return PairedDevice(
+            name: hostName,
+            model: hostModel,
+            udid: pairedUdid.isEmpty ? fallbackUdid : pairedUdid,
+            pairingFilePath: outPath,
+            hostAltIrkHex: altIrkHex
+        )
+    }
+
+    private func syncStartWirelessPair(
+        hostName: String,
+        hostModel: String,
+        outPath: String,
+        onReady: @escaping (String, UInt16, [String: String]) -> Void,
+        onPin: @escaping (String) -> Void
+    ) throws -> PairedDevice {
+        debugLog("[IdeviceGateway] startWirelessPair() called, hostName: \(hostName), hostModel: \(hostModel), outPath: \(outPath)")
+        
+        let (rpf, identifier) = try generatePairingFile(hostName: hostName)
+        defer { rp_pairing_file_free(rpf) }
+
+        let actualPort = findFreePort()
+
         let txtRecords = [
             "txtvers": "1",
             "id": identifier,
@@ -1794,11 +1857,9 @@ public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
         verboseLog("[IdeviceGateway] startWirelessPair() invoking onReady")
         onReady(identifier, actualPort, txtRecords)
 
-        // 5. Accept device pairing connection (blocking)
         var pairedRpf: OpaquePointer? = nil
         var hostAltIrk = [UInt8](repeating: 0, count: 16)
 
-        // Wrap pin closure in convention(c) safe context block
         class PinContext {
             let callback: (String) -> Void
             init(_ callback: @escaping (String) -> Void) {
@@ -1838,46 +1899,94 @@ public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
         }
         defer { rp_pairing_file_free(pairedRpf) }
 
-        verboseLog("[IdeviceGateway] startWirelessPair() writing pairing file to: \(outPath)")
-        let writeErr = rp_pairing_file_write(pairedRpf, outPath)
-        if let writeErr = writeErr {
-            debugLog("[IdeviceGateway] startWirelessPair() rp_pairing_file_write failed")
-            defer { idevice_error_free(writeErr) }
-            throw IdeviceGatewayError(.serviceError, reason: "Failed to write pairing file to path")
+        return try finalizeAndSavePairedDevice(
+            rpf: pairedRpf,
+            hostName: hostName,
+            hostModel: hostModel,
+            outPath: outPath,
+            fallbackUdid: identifier,
+            initialAltIrk: hostAltIrk
+        )
+    }
+
+    private func syncTriggerWirelessPair(
+        hostName: String,
+        hostModel: String,
+        outPath: String,
+        onPin: @escaping (String) -> Void
+    ) throws -> PairedDevice {
+        debugLog("[IdeviceGateway] triggerWirelessPair() called, hostName: \(hostName), hostModel: \(hostModel), outPath: \(outPath)")
+        
+        let (rpf, identifier) = try generatePairingFile(hostName: hostName)
+        defer { rp_pairing_file_free(rpf) }
+
+        guard let deviceEndpointIp = deviceEndpointIp, !deviceEndpointIp.isEmpty else {
+            debugLog("[IdeviceGateway] triggerWirelessPair() failed because deviceEndpointIp is not available")
+            throw IdeviceGatewayError(.deviceEndpointIpNotAvailable)
         }
 
-        // Get alt_irk and identifier from paired file
-        var pairedDataPtr: UnsafeMutablePointer<UInt8>? = nil
-        var pairedDataLen: UInt = 0
-        verboseLog("[IdeviceGateway] startWirelessPair() serializing paired file to bytes")
-        let serializeErr = rp_pairing_file_to_bytes(pairedRpf, &pairedDataPtr, &pairedDataLen)
-        if let serializeErr = serializeErr {
-            debugLog("[IdeviceGateway] startWirelessPair() rp_pairing_file_to_bytes failed")
-            defer { idevice_error_free(serializeErr) }
-            throw IdeviceGatewayError(.serviceError, reason: "Failed to serialize paired file")
-        }
+        var addr = sockaddr_in()
+        addr.sin_len = __uint8_t(MemoryLayout<sockaddr_in>.size)
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_port = remotePairingPort.bigEndian
+        addr.sin_addr.s_addr = inet_addr(deviceEndpointIp)
 
-        var altIrkHex = ""
-        var pairedUdid = ""
-        if let pairedDataPtr = pairedDataPtr {
-            let plistData = Data(bytes: pairedDataPtr, count: Int(pairedDataLen))
-            idevice_data_free(pairedDataPtr, pairedDataLen)
-            if let plist = try? PropertyListSerialization.propertyList(from: plistData, options: [], format: nil) as? [String: Any] {
-                pairedUdid = plist["identifier"] as? String ?? ""
-                if let altIrkData = plist["alt_irk"] as? Data {
-                    altIrkHex = altIrkData.map { String(format: "%02x", $0) }.joined()
+        class PinContext {
+            let callback: (String) -> Void
+            init(_ callback: @escaping (String) -> Void) {
+                self.callback = callback
+            }
+        }
+        let pinContextObj = PinContext(onPin)
+        let pinContextPtr = Unmanaged.passRetained(pinContextObj).toOpaque()
+        defer { Unmanaged<PinContext>.fromOpaque(pinContextPtr).release() }
+
+        var adapter: OpaquePointer? = nil
+        var handshake: OpaquePointer? = nil
+        var err: UnsafeMutablePointer<IdeviceFfiError>? = nil
+
+        verboseLog("[IdeviceGateway] triggerWirelessPair() connecting to \(deviceEndpointIp):\(remotePairingPort)...")
+        try hostName.withCString { hostPtr in
+            withUnsafePointer(to: &addr) { addrPtr in
+                addrPtr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPtr in
+                    err = tunnel_create_rppairing(
+                        sockaddrPtr,
+                        socklen_t(MemoryLayout<sockaddr_in>.size),
+                        hostPtr,
+                        rpf,
+                        { context in
+                            if let context = context {
+                                let ctxObj = Unmanaged<PinContext>.fromOpaque(context).takeUnretainedValue()
+                                ctxObj.callback("000000")
+                            }
+                            guard let p = strdup("000000") else { return nil }
+                            return UnsafePointer(p)
+                        },
+                        pinContextPtr,
+                        &adapter,
+                        &handshake
+                    )
                 }
-                verboseLog("[IdeviceGateway] startWirelessPair() parsed pairedUdid: \(pairedUdid), altIrkHex length: \(altIrkHex.count)")
             }
         }
 
-        debugLog("[IdeviceGateway] startWirelessPair() pairing complete")
-        return PairedDevice(
-            name: hostName,
-            model: hostModel,
-            udid: pairedUdid.isEmpty ? identifier : pairedUdid,
-            pairingFilePath: outPath,
-            hostAltIrkHex: altIrkHex
+        if let err = err {
+            let msg = err.pointee.message != nil ? String(cString: err.pointee.message!) : "Pairing failed"
+            debugLog("[IdeviceGateway] triggerWirelessPair() tunnel_create_rppairing failed: \(msg)")
+            defer { idevice_error_free(err) }
+            throw IdeviceGatewayError(.serviceError, reason: msg)
+        }
+        defer {
+            if let adapter = adapter { adapter_free(adapter) }
+            if let handshake = handshake { rsd_handshake_free(handshake) }
+        }
+
+        return try finalizeAndSavePairedDevice(
+            rpf: rpf,
+            hostName: hostName,
+            hostModel: hostModel,
+            outPath: outPath,
+            fallbackUdid: identifier
         )
     }
 
@@ -2156,7 +2265,7 @@ extension IdeviceGateway {
         outPath: String,
         onReady: @escaping @Sendable (String, UInt16, [String: String]) -> Void,
         onPin: @escaping @Sendable (String) -> Void
-    ) async throws -> WirelessPairPairedDevice {
+    ) async throws -> PairedDeviceRecord {
         let paired = try await withFFIDispatch {
             try self.syncStartWirelessPair(
                 hostName: hostName,
@@ -2166,7 +2275,29 @@ extension IdeviceGateway {
                 onPin: onPin
             )
         }
-        return WirelessPairPairedDevice(
+        return PairedDeviceRecord(
+            name: paired.name,
+            model: paired.model,
+            udid: paired.udid,
+            pairingFilePath: paired.pairingFilePath
+        )
+    }
+
+    public func triggerWirelessPair(
+        hostName: String,
+        hostModel: String,
+        outPath: String,
+        onPin: @escaping @Sendable (String) -> Void
+    ) async throws -> PairedDeviceRecord {
+        let paired = try await withFFIDispatch {
+            try self.syncTriggerWirelessPair(
+                hostName: hostName,
+                hostModel: hostModel,
+                outPath: outPath,
+                onPin: onPin
+            )
+        }
+        return PairedDeviceRecord(
             name: paired.name,
             model: paired.model,
             udid: paired.udid,

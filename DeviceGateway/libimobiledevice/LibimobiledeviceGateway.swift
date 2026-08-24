@@ -1310,8 +1310,17 @@ extension LibimobiledeviceGateway {
         outPath: String,
         onReady: @escaping @Sendable (String, UInt16, [String: String]) -> Void,
         onPin: @escaping @Sendable (String) -> Void
-    ) async throws -> WirelessPairPairedDevice {
+    ) async throws -> PairedDeviceRecord {
         throw LibimobiledeviceGatewayError(.unsupportedOperation, reason: "startWirelessPair (RemotePairing is not supported on pure Lockdown gateway)")
+    }
+
+    public func triggerWirelessPair(
+        hostName: String,
+        hostModel: String,
+        outPath: String,
+        onPin: @escaping @Sendable (String) -> Void
+    ) async throws -> PairedDeviceRecord {
+        throw LibimobiledeviceGatewayError(.unsupportedOperation, reason: "triggerWirelessPair (RemotePairing is not supported on pure Lockdown gateway)")
     }
 
     public func afcListDirectory(bundleId: String, path: String) async throws -> [String] {

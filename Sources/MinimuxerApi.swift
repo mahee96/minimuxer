@@ -353,7 +353,14 @@ public protocol WirelessPairAPI: AnyObject {
         hostName: String,
         hostModel: String,
         outPath: String,
-        completion: @escaping (Result<WirelessPairPairedDevice, Swift.Error>) -> Void
+        completion: @escaping (Result<PairedDeviceRecord, Swift.Error>) -> Void
+    )
+    
+    func trigger(
+        hostName: String,
+        hostModel: String,
+        outPath: String,
+        completion: @escaping (Result<PairedDeviceRecord, Swift.Error>) -> Void
     )
     
     func stop()
@@ -362,9 +369,21 @@ public protocol WirelessPairAPI: AnyObject {
 public extension WirelessPairAPI {
     func start(
         outPath: String,
-        completion: @escaping (Result<WirelessPairPairedDevice, Swift.Error>) -> Void
+        completion: @escaping (Result<PairedDeviceRecord, Swift.Error>) -> Void
     ){
         start(
+            hostName: MinimuxerConstants.defaultHostName,
+            hostModel: MinimuxerConstants.defaultHostModel,
+            outPath: outPath,
+            completion: completion
+        )
+    }
+
+    func trigger(
+        outPath: String,
+        completion: @escaping (Result<PairedDeviceRecord, Swift.Error>) -> Void
+    ){
+        trigger(
             hostName: MinimuxerConstants.defaultHostName,
             hostModel: MinimuxerConstants.defaultHostModel,
             outPath: outPath,

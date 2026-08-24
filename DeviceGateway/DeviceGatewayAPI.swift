@@ -8,7 +8,7 @@
 
 import Foundation
 
-public struct WirelessPairPairedDevice: Sendable {
+public struct PairedDeviceRecord: Sendable {
     public let name: String
     public let model: String
     public let udid: String
@@ -59,7 +59,14 @@ public protocol DeviceGatewayAPI: AnyObject, Sendable {
         outPath: String,
         onReady: @escaping @Sendable (String, UInt16, [String: String]) -> Void,
         onPin: @escaping @Sendable (String) -> Void
-    ) async throws -> WirelessPairPairedDevice
+    ) async throws -> PairedDeviceRecord
+
+    func triggerWirelessPair(
+        hostName: String,
+        hostModel: String,
+        outPath: String,
+        onPin: @escaping @Sendable (String) -> Void
+    ) async throws -> PairedDeviceRecord
 
     func afcListDirectory(bundleId: String, path: String) async throws -> [String]
     func afcReadFile(bundleId: String, path: String) async throws -> Data

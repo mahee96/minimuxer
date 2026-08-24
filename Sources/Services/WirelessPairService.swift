@@ -16,7 +16,12 @@ final internal class WirelessPairService: WirelessPairAPI {
     let gateway: any DeviceGatewayAPI
     
     private var netService: NetService?
-    private var isPairing = false
+    
+    private var activeStartTask: Task<Void, Never>?
+    private let startLock = NSLock()
+    
+    private var activeTriggerTasks: [String: Task<Void, Never>] = [:]
+    private let triggerLock = NSLock()
     
     var onPinReceived: ((String) -> Void)?
     var onReadyToPair: ((String, Int) -> Void)?
@@ -31,10 +36,12 @@ final internal class WirelessPairService: WirelessPairAPI {
         outPath: String,
         completion: @escaping (Result<PairedDeviceRecord, Swift.Error>) -> Void
     ) {
-        guard !isPairing else { return }
-        isPairing = true
+        startLock.withLock {
+            activeStartTask?.cancel()
+            activeStartTask = nil
+        }
         
-        Task.detached { [weak self] in
+        let task = Task.detached { [weak self] in
             guard let self = self else { return }
             
             let outcome: Result<PairedDeviceRecord, Swift.Error>
@@ -66,28 +73,44 @@ final internal class WirelessPairService: WirelessPairAPI {
             }
             
             await MainActor.run {
+                self.startLock.withLock {
+                    self.activeStartTask = nil
+                }
                 self.stopAdvertising()
-                self.isPairing = false
                 completion(outcome)
             }
+        }
+        
+        startLock.withLock {
+            activeStartTask = task
         }
     }
 
     func trigger(
+        targetIp: String,
+        targetPort: UInt16,
         hostName: String = MinimuxerConstants.defaultHostName,
         hostModel: String = MinimuxerConstants.defaultHostModel,
         outPath: String,
         completion: @escaping (Result<PairedDeviceRecord, Swift.Error>) -> Void
     ) {
-        guard !isPairing else { return }
-        isPairing = true
+        let socketKey = "\(targetIp):\(targetPort)"
         
-        Task.detached { [weak self] in
+        triggerLock.withLock {
+            if let existing = activeTriggerTasks[socketKey] {
+                existing.cancel()
+                activeTriggerTasks.removeValue(forKey: socketKey)
+            }
+        }
+        
+        let task = Task.detached { [weak self] in
             guard let self = self else { return }
             
             let outcome: Result<PairedDeviceRecord, Swift.Error>
             do {
                 let pairedDevice = try await self.gateway.triggerWirelessPair(
+                    targetIp: targetIp,
+                    targetPort: targetPort,
                     hostName: hostName,
                     hostModel: hostModel,
                     outPath: outPath,
@@ -104,15 +127,32 @@ final internal class WirelessPairService: WirelessPairAPI {
             }
             
             await MainActor.run {
-                self.isPairing = false
+                self.triggerLock.withLock {
+                    self.activeTriggerTasks.removeValue(forKey: socketKey)
+                }
                 completion(outcome)
             }
+        }
+        
+        triggerLock.withLock {
+            activeTriggerTasks[socketKey] = task
         }
     }
     
     func stop() {
+        startLock.withLock {
+            activeStartTask?.cancel()
+            activeStartTask = nil
+        }
+        
+        triggerLock.withLock {
+            for (_, task) in activeTriggerTasks {
+                task.cancel()
+            }
+            activeTriggerTasks.removeAll()
+        }
+        
         stopAdvertising()
-        isPairing = false
     }
     
     fileprivate func startAdvertising(serviceID: String, port: Int, txt: [String: Data]) {

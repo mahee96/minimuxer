@@ -62,6 +62,8 @@ public protocol DeviceGatewayAPI: AnyObject, Sendable {
     ) async throws -> PairedDeviceRecord
 
     func triggerWirelessPair(
+        targetIp: String,
+        targetPort: UInt16,
         hostName: String,
         hostModel: String,
         outPath: String,

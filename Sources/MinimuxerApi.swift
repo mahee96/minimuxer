@@ -357,6 +357,8 @@ public protocol WirelessPairAPI: AnyObject {
     )
     
     func trigger(
+        targetIp: String,
+        targetPort: UInt16,
         hostName: String,
         hostModel: String,
         outPath: String,
@@ -372,18 +374,6 @@ public extension WirelessPairAPI {
         completion: @escaping (Result<PairedDeviceRecord, Swift.Error>) -> Void
     ){
         start(
-            hostName: MinimuxerConstants.defaultHostName,
-            hostModel: MinimuxerConstants.defaultHostModel,
-            outPath: outPath,
-            completion: completion
-        )
-    }
-
-    func trigger(
-        outPath: String,
-        completion: @escaping (Result<PairedDeviceRecord, Swift.Error>) -> Void
-    ){
-        trigger(
             hostName: MinimuxerConstants.defaultHostName,
             hostModel: MinimuxerConstants.defaultHostModel,
             outPath: outPath,

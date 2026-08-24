@@ -20,6 +20,7 @@ open class DeviceGatewayError: LocalizedError, CustomStringConvertible, @uncheck
         public static let noConnection = Code("noConnection")
         public static let notInitialized = Code("notInitialized")
         public static let deviceEndpointIpNotAvailable = Code("deviceEndpointIpNotAvailable")
+        public static let invalidTargetEndpoint = Code("invalidTargetEndpoint")
         public static let unsupportedOperation = Code("unsupportedOperation")
     }
 
@@ -45,6 +46,8 @@ open class DeviceGatewayError: LocalizedError, CustomStringConvertible, @uncheck
             return reason.isEmpty ? "DeviceGateway not initialized. start() should be called first." : reason
         case .deviceEndpointIpNotAvailable:
             return reason.isEmpty ? "Device endpoint IP is not available." : reason
+        case .invalidTargetEndpoint:
+            return reason.isEmpty ? "Invalid target endpoint IP or port." : reason
         case .unsupportedOperation:
             return "Operation '\(reason)' is not supported."
         default:

@@ -44,6 +44,7 @@ public enum MinimuxerConstants {
     public static let defaultAdDomain = ""
     public static let remotePairingDaemonServiceType = "_remotepairing._tcp."
     public static let remotePairingPairableHostServiceType = "_remotepairing-pairable-host._tcp."
+    public static let remotePairingManualPairingServiceType = "_remotepairing-manual-pairing._tcp."
 
     // UsbmuxdProxyServer Constants
     public static let deviceAttach = "Attached"

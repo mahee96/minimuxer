@@ -1910,26 +1910,28 @@ public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
     }
 
     private func syncTriggerWirelessPair(
+        targetIp: String,
+        targetPort: UInt16,
         hostName: String,
         hostModel: String,
         outPath: String,
         onPin: @escaping (String) -> Void
     ) throws -> PairedDevice {
-        debugLog("[IdeviceGateway] triggerWirelessPair() called, hostName: \(hostName), hostModel: \(hostModel), outPath: \(outPath)")
+        debugLog("[IdeviceGateway] triggerWirelessPair() called, targetIp: \(targetIp), targetPort: \(targetPort), hostName: \(hostName), hostModel: \(hostModel), outPath: \(outPath)")
         
         let (rpf, identifier) = try generatePairingFile(hostName: hostName)
         defer { rp_pairing_file_free(rpf) }
 
-        guard let deviceEndpointIp = deviceEndpointIp, !deviceEndpointIp.isEmpty else {
-            debugLog("[IdeviceGateway] triggerWirelessPair() failed because deviceEndpointIp is not available")
-            throw IdeviceGatewayError(.deviceEndpointIpNotAvailable)
+        guard !targetIp.isEmpty, targetPort > 0 else {
+            debugLog("[IdeviceGateway] triggerWirelessPair() failed because target endpoint is invalid: \(targetIp):\(targetPort)")
+            throw IdeviceGatewayError(.invalidTargetEndpoint, reason: "Target endpoint IP (\(targetIp)) or port (\(targetPort)) is invalid")
         }
 
         var addr = sockaddr_in()
         addr.sin_len = __uint8_t(MemoryLayout<sockaddr_in>.size)
         addr.sin_family = sa_family_t(AF_INET)
-        addr.sin_port = remotePairingPort.bigEndian
-        addr.sin_addr.s_addr = inet_addr(deviceEndpointIp)
+        addr.sin_port = targetPort.bigEndian
+        addr.sin_addr.s_addr = inet_addr(targetIp)
 
         class PinContext {
             let callback: (String) -> Void
@@ -1945,7 +1947,7 @@ public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
         var handshake: OpaquePointer? = nil
         var err: UnsafeMutablePointer<IdeviceFfiError>? = nil
 
-        verboseLog("[IdeviceGateway] triggerWirelessPair() connecting via tunnel_create_rppairing to \(deviceEndpointIp):\(remotePairingPort)...")
+        verboseLog("[IdeviceGateway] triggerWirelessPair() connecting via tunnel_create_rppairing to \(ip):\(effectivePort)...")
         try hostName.withCString { hostPtr in
             withUnsafePointer(to: &addr) { addrPtr in
                 addrPtr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPtr in
@@ -2284,6 +2286,8 @@ extension IdeviceGateway {
     }
 
     public func triggerWirelessPair(
+        targetIp: String,
+        targetPort: UInt16,
         hostName: String,
         hostModel: String,
         outPath: String,
@@ -2291,6 +2295,8 @@ extension IdeviceGateway {
     ) async throws -> PairedDeviceRecord {
         let paired = try await withFFIDispatch {
             try self.syncTriggerWirelessPair(
+                targetIp: targetIp,
+                targetPort: targetPort,
                 hostName: hostName,
                 hostModel: hostModel,
                 outPath: outPath,

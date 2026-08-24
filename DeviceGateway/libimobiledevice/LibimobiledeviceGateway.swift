@@ -1315,6 +1315,8 @@ extension LibimobiledeviceGateway {
     }
 
     public func triggerWirelessPair(
+        targetIp: String,
+        targetPort: UInt16,
         hostName: String,
         hostModel: String,
         outPath: String,

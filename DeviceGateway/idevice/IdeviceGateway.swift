@@ -1947,7 +1947,7 @@ public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
         var handshake: OpaquePointer? = nil
         var err: UnsafeMutablePointer<IdeviceFfiError>? = nil
 
-        verboseLog("[IdeviceGateway] triggerWirelessPair() connecting via tunnel_create_rppairing to \(ip):\(effectivePort)...")
+        verboseLog("[IdeviceGateway] triggerWirelessPair() connecting via tunnel_create_rppairing to \(targetIp):\(targetPort)...")
         try hostName.withCString { hostPtr in
             withUnsafePointer(to: &addr) { addrPtr in
                 addrPtr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPtr in

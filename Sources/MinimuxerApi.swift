@@ -279,6 +279,20 @@ public enum LocalInterfaceType: String, Hashable, Sendable, CaseIterable, Compar
         self == .vpnUtun || self == .vpnIpsec
     }
 
+    public var symbolName: String {
+        switch self {
+        case .vpnUtun, .vpnIpsec: return "lock.shield"
+        case .wifi, .lowLatencyWLAN: return "wifi"
+        case .usbLinkLocal, .ethernet: return "cable.connector"
+        case .cellular: return "antenna.radiowaves.left.and.right"
+        case .loopback: return "arrow.triangle.2.circlepath"
+        case .airdrop: return "airdrop"
+        case .hotspotBridge: return "personalhotspot"
+        case .packetCapture: return "waveform.path.ecg"
+        case .other: return "network"
+        }
+    }
+
     private struct Prefix {
         let value: String
         init(_ value: String) { self.value = value }

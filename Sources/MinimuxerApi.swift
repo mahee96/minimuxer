@@ -362,6 +362,7 @@ public protocol NetworkObserverAPI: AnyObject {
 public protocol WirelessPairAPI: AnyObject {
     var onPinReceived: ((String) -> Void)? { get set }
     var onReadyToPair: ((String, Int) -> Void)? { get set }
+    var onRequestPin: ((@escaping (String) -> Void) -> Void)? { get set }
     
     func start(
         hostName: String,

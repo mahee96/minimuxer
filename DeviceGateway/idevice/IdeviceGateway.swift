@@ -253,6 +253,49 @@ public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
         isInitialized = true
     }
 
+    private func withSockaddr<R>(ip: String, port: UInt16, _ body: (UnsafePointer<sockaddr>, socklen_t) throws -> R) throws -> R {
+        if ip.contains(":") {
+            var addr6 = sockaddr_in6()
+            addr6.sin6_len = __uint8_t(MemoryLayout<sockaddr_in6>.size)
+            addr6.sin6_family = sa_family_t(AF_INET6)
+            addr6.sin6_port = port.bigEndian
+            
+            var cleanIp = ip
+            if let scopeRange = cleanIp.range(of: "%") {
+                let ifaceName = String(cleanIp[scopeRange.upperBound...])
+                cleanIp = String(cleanIp[..<scopeRange.lowerBound])
+                addr6.sin6_scope_id = if_nametoindex(ifaceName)
+            } else if cleanIp.lowercased().hasPrefix("fe80:") {
+                addr6.sin6_scope_id = if_nametoindex("en0")
+            }
+            
+            guard inet_pton(AF_INET6, cleanIp, &addr6.sin6_addr) == 1 else {
+                throw IdeviceGatewayError(.invalidTargetEndpoint, reason: "Invalid IPv6 address: \(ip)")
+            }
+            
+            return try withUnsafePointer(to: &addr6) { ptr in
+                try ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPtr in
+                    try body(sockaddrPtr, socklen_t(MemoryLayout<sockaddr_in6>.size))
+                }
+            }
+        } else {
+            var addr = sockaddr_in()
+            addr.sin_len = __uint8_t(MemoryLayout<sockaddr_in>.size)
+            addr.sin_family = sa_family_t(AF_INET)
+            addr.sin_port = port.bigEndian
+            
+            guard inet_pton(AF_INET, ip, &addr.sin_addr) == 1 else {
+                throw IdeviceGatewayError(.invalidTargetEndpoint, reason: "Invalid IPv4 address: \(ip)")
+            }
+            
+            return try withUnsafePointer(to: &addr) { ptr in
+                try ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPtr in
+                    try body(sockaddrPtr, socklen_t(MemoryLayout<sockaddr_in>.size))
+                }
+            }
+        }
+    }
+
     private func ensureRPConnection() throws {
         debugLog("[IdeviceGateway] ensureRPConnection() started, adapter: \(String(describing: adapter)), handshake: \(String(describing: handshake))")
         if adapter != nil && handshake != nil {
@@ -270,30 +313,22 @@ public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
             throw IdeviceGatewayError(.deviceEndpointIpNotAvailable)
         }
 
-        // Standard RPPairing socket address
-        var addr = sockaddr_in()
-        addr.sin_family = sa_family_t(AF_INET)
-        addr.sin_port = remotePairingPort.bigEndian
-        addr.sin_addr.s_addr = inet_addr(deviceEndpointIp)
-
         let hostname = MinimuxerConstants.appName
         var err: UnsafeMutablePointer<IdeviceFfiError>? = nil
 
-        verboseLog("[IdeviceGateway] ensureRPConnection() calling tunnel_create_rppairing with deviceEndpointIp: \(deviceEndpointIp)")
+        verboseLog("[IdeviceGateway] ensureRPConnection() calling tunnel_create_rppairing with deviceEndpointIp: \(deviceEndpointIp):\(remotePairingPort)")
         try hostname.withCString { hostPtr in
-            withUnsafePointer(to: &addr) { addrPtr in
-                addrPtr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPtr in
-                    err = tunnel_create_rppairing(
-                        sockaddrPtr,
-                        socklen_t(MemoryLayout<sockaddr_in>.size),
-                        hostPtr,
-                        pairingFile,
-                        nil,
-                        nil,
-                        &adapter,
-                        &handshake
-                    )
-                }
+            try withSockaddr(ip: deviceEndpointIp, port: remotePairingPort) { sockaddrPtr, sockaddrLen in
+                err = tunnel_create_rppairing(
+                    sockaddrPtr,
+                    sockaddrLen,
+                    hostPtr,
+                    pairingFile,
+                    nil,
+                    nil,
+                    &adapter,
+                    &handshake
+                )
             }
         }
 
@@ -1915,7 +1950,7 @@ public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
         hostName: String,
         hostModel: String,
         outPath: String,
-        onPin: @escaping (String) -> Void
+        onRequestPin: @escaping (@escaping (String) -> Void) -> Void
     ) throws -> PairedDevice {
         debugLog("[IdeviceGateway] triggerWirelessPair() called, targetIp: \(targetIp), targetPort: \(targetPort), hostName: \(hostName), hostModel: \(hostModel), outPath: \(outPath)")
         
@@ -1927,48 +1962,46 @@ public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
             throw IdeviceGatewayError(.invalidTargetEndpoint, reason: "Target endpoint IP (\(targetIp)) or port (\(targetPort)) is invalid")
         }
 
-        var addr = sockaddr_in()
-        addr.sin_len = __uint8_t(MemoryLayout<sockaddr_in>.size)
-        addr.sin_family = sa_family_t(AF_INET)
-        addr.sin_port = targetPort.bigEndian
-        addr.sin_addr.s_addr = inet_addr(targetIp)
-
         class PinContext {
-            let callback: (String) -> Void
-            init(_ callback: @escaping (String) -> Void) {
-                self.callback = callback
+            let onRequestPin: (@escaping (String) -> Void) -> Void
+            init(_ onRequestPin: @escaping (@escaping (String) -> Void) -> Void) {
+                self.onRequestPin = onRequestPin
             }
         }
-        let pinContextObj = PinContext(onPin)
+        let pinContextObj = PinContext(onRequestPin)
         let pinContextPtr = Unmanaged.passRetained(pinContextObj).toOpaque()
         defer { Unmanaged<PinContext>.fromOpaque(pinContextPtr).release() }
 
-        var adapter: OpaquePointer? = nil
-        var handshake: OpaquePointer? = nil
         var err: UnsafeMutablePointer<IdeviceFfiError>? = nil
 
-        verboseLog("[IdeviceGateway] triggerWirelessPair() connecting via tunnel_create_rppairing to \(targetIp):\(targetPort)...")
+        verboseLog("[IdeviceGateway] triggerWirelessPair() pairing via rppairing_pair_network to \(targetIp):\(targetPort)...")
         try hostName.withCString { hostPtr in
-            withUnsafePointer(to: &addr) { addrPtr in
-                addrPtr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPtr in
-                    err = tunnel_create_rppairing(
-                        sockaddrPtr,
-                        socklen_t(MemoryLayout<sockaddr_in>.size),
-                        hostPtr,
-                        rpf,
-                        { context in
-                            if let context = context {
-                                let ctxObj = Unmanaged<PinContext>.fromOpaque(context).takeUnretainedValue()
-                                ctxObj.callback("000000")
-                            }
-                            guard let p = strdup("000000") else { return nil }
-                            return UnsafePointer(p)
-                        },
-                        pinContextPtr,
-                        &adapter,
-                        &handshake
-                    )
-                }
+            try withSockaddr(ip: targetIp, port: targetPort) { sockaddrPtr, sockaddrLen in
+                err = rppairing_pair_network(
+                    sockaddrPtr,
+                    sockaddrLen,
+                    hostPtr,
+                    rpf,
+                    { context in
+                        guard let context = context else { return nil }
+                        let ctxObj = Unmanaged<PinContext>.fromOpaque(context).takeUnretainedValue()
+                        let sema = DispatchSemaphore(value: 0)
+                        var enteredPin: String? = nil
+                        debugLog("[IdeviceGateway] pin_callback invoked, requesting PIN from user UI...")
+                        ctxObj.onRequestPin { pin in
+                            debugLog("[IdeviceGateway] pin_callback received user entered PIN: '\(pin)'")
+                            enteredPin = pin
+                            sema.signal()
+                        }
+                        let waitResult = sema.wait(timeout: .now() + 60.0)
+                        if waitResult == .timedOut {
+                            debugLog("[IdeviceGateway] pin_callback timed out waiting for user input")
+                        }
+                        guard let pinStr = enteredPin, let p = strdup(pinStr) else { return nil }
+                        return UnsafePointer(p)
+                    },
+                    pinContextPtr
+                )
             }
         }
 
@@ -1977,10 +2010,6 @@ public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
             debugLog("[IdeviceGateway] triggerWirelessPair() pairing failed: \(msg)")
             defer { idevice_error_free(err) }
             throw IdeviceGatewayError(.serviceError, reason: msg)
-        }
-        defer {
-            if let adapter = adapter { adapter_free(adapter) }
-            if let handshake = handshake { rsd_handshake_free(handshake) }
         }
 
         return try finalizeAndSavePairedDevice(
@@ -2291,7 +2320,7 @@ extension IdeviceGateway {
         hostName: String,
         hostModel: String,
         outPath: String,
-        onPin: @escaping @Sendable (String) -> Void
+        onRequestPin: @escaping @Sendable (@escaping @Sendable (String) -> Void) -> Void
     ) async throws -> PairedDeviceRecord {
         let paired = try await withFFIDispatch {
             try self.syncTriggerWirelessPair(
@@ -2300,7 +2329,7 @@ extension IdeviceGateway {
                 hostName: hostName,
                 hostModel: hostModel,
                 outPath: outPath,
-                onPin: onPin
+                onRequestPin: onRequestPin
             )
         }
         return PairedDeviceRecord(

@@ -1320,7 +1320,7 @@ extension LibimobiledeviceGateway {
         hostName: String,
         hostModel: String,
         outPath: String,
-        onPin: @escaping @Sendable (String) -> Void
+        onRequestPin: @escaping @Sendable (@escaping @Sendable (String) -> Void) -> Void
     ) async throws -> PairedDeviceRecord {
         throw LibimobiledeviceGatewayError(.unsupportedOperation, reason: "triggerWirelessPair (RemotePairing is not supported on pure Lockdown gateway)")
     }

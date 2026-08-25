@@ -67,7 +67,7 @@ public protocol DeviceGatewayAPI: AnyObject, Sendable {
         hostName: String,
         hostModel: String,
         outPath: String,
-        onPin: @escaping @Sendable (String) -> Void
+        onRequestPin: @escaping @Sendable (@escaping @Sendable (String) -> Void) -> Void
     ) async throws -> PairedDeviceRecord
 
     func afcListDirectory(bundleId: String, path: String) async throws -> [String]

@@ -25,6 +25,7 @@ final internal class WirelessPairService: WirelessPairAPI {
     
     var onPinReceived: ((String) -> Void)?
     var onReadyToPair: ((String, Int) -> Void)?
+    var onRequestPin: ((@escaping (String) -> Void) -> Void)?
     
     init(gateway: any DeviceGatewayAPI) {
         self.gateway = gateway
@@ -126,11 +127,15 @@ final internal class WirelessPairService: WirelessPairAPI {
                     hostName: hostName,
                     hostModel: hostModel,
                     outPath: outPath,
-                    onPin: { [weak self] pinString in
+                    onRequestPin: { [weak self] submitPin in
                         guard let self = self else { return }
-                        debugLog("[WirelessPairService] gateway trigger onPin callback (pin='\(pinString)')")
+                        debugLog("[WirelessPairService] gateway trigger onRequestPin callback invoked")
                         Task { @MainActor in
-                            self.onPinReceived?(pinString)
+                            if let onRequestPin = self.onRequestPin {
+                                onRequestPin(submitPin)
+                            } else {
+                                submitPin("000000")
+                            }
                         }
                     }
                 )

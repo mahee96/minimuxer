@@ -5,7 +5,8 @@ let package = Package(
     name: "MinimuxerGateway",
     platforms: [
         .iOS(.v14),
-        .macOS(.v11)
+        .macOS(.v11),
+        .tvOS(.v14)
     ],
     products: [
         .library(
@@ -31,8 +32,8 @@ let package = Package(
     targets: [
          .binaryTarget(
              name: "IDevice",
-             url: "https://github.com/SideStore/idevice/releases/download/v0.1.65-ss-3c2439e/idevice-xcframework-v0.1.65-ss-3c2439e.zip",
-             checksum: "62f6a033b60cefd7c0dcc9e354c59a7088f6581e8bd9f8b193cd42533094bb50"
+             url: "https://github.com/SideStore/idevice/releases/download/v0.1.66-ss-61c2704/idevice-xcframework-v0.1.66-ss-61c2704.zip",
+             checksum: "6f32b32ca43d3f28c145742da926cc279d312abd99abe55c79f875e2d6d5e162"
          ),
 //        .binaryTarget(
 //            name: "IDevice",
@@ -40,8 +41,8 @@ let package = Package(
 //        ),
         .binaryTarget(
             name: "libimobiledevice",
-            url: "https://github.com/SideStore/libimobiledevice-xcframework/releases/download/1.4.0-ss-413b33a/libimobiledevice.xcframework.zip",
-            checksum: "235a56081d49f66972196c08ef1aa3e5034dae86618d158d16c4f4d3d0eb8582"
+            url: "https://github.com/SideStore/libimobiledevice-xcframework/releases/download/1.4.0-ss-0f88f7b/libimobiledevice.xcframework.zip",
+            checksum: "7ccbdd56b074807461fc43d2e32ba92f20df2501a6c14cf9f64a917e7f3fe6e7"
         ),
 //         .binaryTarget(
 //             name: "libimobiledevice",

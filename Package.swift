@@ -5,7 +5,8 @@ let package = Package(
     name: "Minimuxer",
     platforms: [
         .iOS(.v14),
-        .macOS(.v11)
+        .macOS(.v11),
+        .tvOS(.v14)
     ],
     products: [
         .library(
@@ -24,8 +25,8 @@ let package = Package(
     targets: [
         .binaryTarget(
             name: "EMProxy",
-            url: "https://github.com/SideStore/em_proxy/releases/download/v0.9.2/EMProxy.xcframework.zip",
-            checksum: "4a4ae57ae2e6e110484399a72b95fcdeda8db2aff658cf3793761371098dee08"
+            url: "https://github.com/SideStore/em_proxy/releases/download/v0.9.3/EMProxy.xcframework.zip",
+            checksum: "3998789c38d09b55e488d46e31897affc7bbcb9c244d7a9d5b2d5cf6afd916c3"
         ),
 //         .binaryTarget(
 //             name: "EMProxy",

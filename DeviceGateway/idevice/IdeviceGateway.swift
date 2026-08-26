@@ -1973,6 +1973,7 @@ public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
         defer { Unmanaged<PinContext>.fromOpaque(pinContextPtr).release() }
 
         var err: UnsafeMutablePointer<IdeviceFfiError>? = nil
+        var peerDevicePtr: UnsafeMutablePointer<RpPairingPeerDeviceC>? = nil
 
         verboseLog("[IdeviceGateway] triggerWirelessPair() pairing via rppairing_pair_network to \(targetIp):\(targetPort)...")
         try hostName.withCString { hostPtr in
@@ -2000,7 +2001,8 @@ public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
                         guard let pinStr = enteredPin, let p = strdup(pinStr) else { return nil }
                         return UnsafePointer(p)
                     },
-                    pinContextPtr
+                    pinContextPtr,
+                    &peerDevicePtr
                 )
             }
         }
@@ -2012,12 +2014,33 @@ public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
             throw IdeviceGatewayError(.serviceError, reason: msg)
         }
 
+        var peerName = hostName
+        var peerModel = hostModel
+        var peerUdid: String? = nil
+        var peerAltIrk: [UInt8]? = nil
+
+        if let peer = peerDevicePtr {
+            defer { rppairing_peer_device_free(peer) }
+            let p = peer.pointee
+            if let namePtr = p.name {
+                peerName = String(cString: namePtr)
+            }
+            if let modelPtr = p.model {
+                peerModel = String(cString: modelPtr)
+            }
+            if let udidPtr = p.udid {
+                peerUdid = String(cString: udidPtr)
+            }
+            peerAltIrk = withUnsafeBytes(of: p.alt_irk) { Array($0) }
+        }
+
         return try finalizeAndSavePairedDevice(
             rpf: rpf,
-            hostName: hostName,
-            hostModel: hostModel,
+            hostName: peerName,
+            hostModel: peerModel,
             outPath: outPath,
-            fallbackUdid: identifier
+            fallbackUdid: peerUdid ?? identifier,
+            initialAltIrk: peerAltIrk
         )
     }
 

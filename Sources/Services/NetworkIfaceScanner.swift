@@ -500,7 +500,7 @@ internal struct TunnelRoute: Hashable, Sendable {
 }
 
 
-internal final class TunnelNetInfo: NetInfo {
+internal final class TunnelNetInfo: NetInfo, @unchecked Sendable {
 
     let tunnelType: TunnelType
     let linkLayerDestinationIP: IP?

@@ -148,7 +148,7 @@ final internal class WirelessPairService: WirelessPairAPI {
             
             await MainActor.run {
                 self.triggerLock.withLock {
-                    self.activeTriggerTasks.removeValue(forKey: socketKey)
+                    _ = self.activeTriggerTasks.removeValue(forKey: socketKey)
                 }
                 completion(outcome)
             }

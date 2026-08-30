@@ -64,7 +64,7 @@ final internal class UsbmuxdProxyServer {
         let newListener = try NWListener(using: params, on: port)
 
         return try await withCheckedThrowingContinuation { continuation in
-            var hasResponded = false
+            nonisolated(unsafe) var hasResponded = false
 
             newListener.stateUpdateHandler = { [weak self] state in
                 guard let self = self else { return }
@@ -113,7 +113,7 @@ final internal class UsbmuxdProxyServer {
         guard let currentListener = currentListener else { return }
 
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            var hasResponded = false
+            nonisolated(unsafe) var hasResponded = false
             currentListener.stateUpdateHandler = { state in
                 if case .cancelled = state {
                     if !hasResponded {

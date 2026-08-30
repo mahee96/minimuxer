@@ -209,8 +209,8 @@ final internal class MinimuxerImpl: MinimuxerAPI {
             deviceUDID = try await runIdeviceCheckingVPN("while fetching device UDID", fallback: nil) {
                 try await fetchUDID()
             }
-        } catch let err as MinimuxerError {
-            return .failure(err)
+        } catch {
+            return .failure(error)
         }
 
         verboseLog(
@@ -233,13 +233,11 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         if withDDIMountCheck {
             do {
                 try await checkDDIMountStatus()
-            } catch let err as MinimuxerError {
-                if case .mount = err {
-                    return .failure(err)
-                }
-                return .failure(.mount(protocol: activeProtocol, reason: err.description))
             } catch {
-                return .failure(.mount(protocol: activeProtocol, reason: error.localizedDescription))
+                if case .mount = error {
+                    return .failure(error)
+                }
+                return .failure(.mount(protocol: activeProtocol, reason: error.description))
             }
         }
 

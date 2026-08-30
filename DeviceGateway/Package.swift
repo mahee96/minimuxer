@@ -15,11 +15,19 @@ let package = Package(
         ),
         .library(
             name: "IdeviceGateway",
+            targets: ["IdeviceGateway"]
+        ),
+        .library(
+            name: "IdeviceGateway-Dynamic",
             type: .dynamic,
             targets: ["IdeviceGateway"]
         ),
         .library(
             name: "LibimobiledeviceGateway",
+            targets: ["LibimobiledeviceGateway"]
+        ),
+        .library(
+            name: "LibimobiledeviceGateway-Dynamic",
             type: .dynamic,
             targets: ["LibimobiledeviceGateway"]
         )
@@ -48,12 +56,6 @@ let package = Package(
 //             name: "libimobiledevice",
 //             path: "../../../../local/libimobiledevice-xcframework/libs/libimobiledevice.xcframework"
 //         ),
-
-        .binaryTarget(
-            name: "OpenSSL",
-            url: "https://github.com/krzyzanowskim/OpenSSL/releases/download/3.6.2000/OpenSSL.xcframework.zip",
-            checksum: "37846a8bd302cb2443eff47f1045ab844d0cd40bf82cc6159cfad9aa5c3eff9e"
-        ),
 
         // Base API Target
         .target(
@@ -89,7 +91,7 @@ let package = Package(
                 "DeviceGatewayAPI",
                 .product(name: "MinimuxerCommon", package: "Common"),
                 "libimobiledevice",
-                "OpenSSL",
+                .product(name: "OpenSSL",   package: "RemotePairingKit"),
                 .product(name: "RPPairing", package: "RemotePairingKit")
             ],
             path: "libimobiledevice"

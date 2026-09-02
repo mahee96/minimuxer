@@ -244,7 +244,6 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         return .success(true)
     } 
 
-    @inline(__always)
     private func runIdeviceCheckingVPN<T>(_ context: String, fallback: T, action: () async throws -> T) async throws(MinimuxerError) -> T {
         do {
             return try await action()

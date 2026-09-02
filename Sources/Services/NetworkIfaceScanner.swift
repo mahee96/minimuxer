@@ -13,7 +13,6 @@ import Darwin
 
 // MARK: - IPv4 helpers
 
-@inline(__always)
 private func ipv4String(_ value: UInt32) -> String? {
     var addr = in_addr(s_addr: value.bigEndian)
     var buf = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
@@ -21,7 +20,6 @@ private func ipv4String(_ value: UInt32) -> String? {
     return String(cString: buf)
 }
 
-@inline(__always)
 private func sockaddrIPv4(_ sa: inout sockaddr) -> UInt32? {
     var buf = [CChar](repeating: 0, count: Int(NI_MAXHOST))
     guard getnameinfo(&sa, socklen_t(sa.sa_len), &buf, socklen_t(buf.count), nil, 0, NI_NUMERICHOST) == 0,
@@ -30,7 +28,6 @@ private func sockaddrIPv4(_ sa: inout sockaddr) -> UInt32? {
     return inet_pton(AF_INET, s, &a) == 1 ? a.s_addr.bigEndian : nil
 }
 
-@inline(__always)
 private func sockaddrIPv6(_ sa: inout sockaddr) -> String? {
     var buf = [CChar](repeating: 0, count: Int(INET6_ADDRSTRLEN))
     guard getnameinfo(&sa, socklen_t(sa.sa_len), &buf, socklen_t(buf.count), nil, 0, NI_NUMERICHOST) == 0,
@@ -154,7 +151,6 @@ private struct rt_msghdr {
     var rtm_rmx: rt_metrics
 }
 
-@inline(__always)
 private func sockaddrNetmaskIPv4(_ cursor: UnsafeRawPointer, saLen: Int) -> UInt32? {
     guard saLen > 0 else { return 0 }
     var rawBytes: [UInt8] = [0, 0, 0, 0]

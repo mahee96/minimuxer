@@ -76,16 +76,17 @@ public enum NetworkUtils {
         return false
     }
 
-    /// Verifies device reachability across remotePairingPort and lockdowndPort
-    public static func testDeviceConnection(ifaddr: String?) -> Bool {
+    // Verifies device reachability on a specific port
+    public static func testDeviceConnection(ifaddr: String?, port: UInt16) -> Bool {
         guard let ip = ifaddr, !ip.isEmpty else { return false }
-        let isRPReachable = testTCP(ip: ip, port: MinimuxerConstants.remotePairingPort)
-        if isRPReachable {
-            verboseLog("[minimuxer] [net] testDeviceConnection(\(ip)) -> reachable via remotePairingPort (\(MinimuxerConstants.remotePairingPort))")
-            return true
-        }
-        let isLockdownReachable = testTCP(ip: ip, port: MinimuxerConstants.lockdowndPort)
-        verboseLog("[minimuxer] [net] testDeviceConnection(\(ip)) -> \(isLockdownReachable ? "reachable via lockdowndPort (\(MinimuxerConstants.lockdowndPort))" : "unreachable across both ports")")
-        return isLockdownReachable
+        let reachable = testTCP(ip: ip, port: port)
+        verboseLog("[minimuxer] [net] testDeviceConnection(\(ip):\(port)) -> \(reachable ? "reachable" : "unreachable")")
+        return reachable
+    }
+
+    // Verifies device reachability on a specific port
+    public static func testDeviceConnection(ifaddr: String?, isRPPairing: Bool) -> Bool {
+        let targetPort = isRPPairing ? MinimuxerConstants.remotePairingPort : MinimuxerConstants.lockdowndPort
+        return testDeviceConnection(ifaddr: ifaddr, port: targetPort)
     }
 }

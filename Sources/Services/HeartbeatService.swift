@@ -108,7 +108,7 @@ final internal class HeartbeatService {
             }
             
             // verify tunnel/device reachability first
-            if !NetworkUtils.testDeviceConnection(ifaddr: tunnelPeerIp) {
+            if !NetworkUtils.testDeviceConnection(ifaddr: tunnelPeerIp, isRPPairing: self.gateway.isRPPairing) {
                 logIfNeeded("device IP not reachable, waiting...", isVerbose: true)
                 lastBeatSuccessful = false
                 try? await Task.sleep(nanoseconds: MinimuxerConstants.heartbeatSleepNs)

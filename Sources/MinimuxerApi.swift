@@ -186,7 +186,7 @@ public final class Minimuxer: MinimuxerFacade, @unchecked Sendable {
         let emproxy = EMProxyImpl()
         let endpoint = DeviceEndpoint(gateway: gateway)
         let proxyServer = UsbmuxdProxyServer(gateway: gateway)
-        let connectionManager = DeviceConnectionManager()
+        let connectionManager = DeviceConnectionManager(gateway: gateway)
         let network = NetworkObserverService(
             connectionManager: connectionManager,
             endpoint: endpoint,

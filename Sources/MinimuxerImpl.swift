@@ -376,7 +376,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
     }
   
     func testDeviceConnection(ifaddr: String?) -> Bool {
-        NetworkUtils.testDeviceConnection(ifaddr: ifaddr)
+        NetworkUtils.testDeviceConnection(ifaddr: ifaddr, isRPPairing: self.isrppairing)
     }
 
     private func ensureDDIMounted() async throws {

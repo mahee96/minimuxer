@@ -63,7 +63,7 @@ actor DeviceConnectionManager {
             
             case .localVPN:
                 // cache last state in locals
-                let lastInterfaceCache = interfacesCache
+                let lastInterfacesCache = interfacesCache
                 let lastVpnIface = vpnIface
                 let lastReportedPeer = reportedPeerIp
                 let lastDerivedPeer = derivedPeerIp
@@ -89,7 +89,7 @@ actor DeviceConnectionManager {
                 let isDerivedIpUnchanged = lastDerivedPeer == derivedPeerIp && lastDerivedPeerMask == derivedPeerSubnetMask
                 let isReportedIpUnchanged = lastReportedPeer == reportedPeerIp
                 if lastConnectionMode == connectionMode &&
-                    lastInterfaceCache == interfacesCache &&
+                    lastInterfacesCache == interfacesCache &&
                     isOverrideIpUnchanged && isDerivedIpUnchanged && isReportedIpUnchanged &&
                     lastIsDerivedPeerIpReachable == isDerivedPeerIpReachable &&
                     lastIsOverridePeerIpReachable == isOverridePeerIpReachable

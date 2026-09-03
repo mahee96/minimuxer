@@ -38,7 +38,7 @@ public enum PairingProtocol: String, Codable, CustomStringConvertible, Sendable 
         return self.rawValue
     }
 
-    public static func validatePairingFile(from plist: [String: Any]?) throws -> PairingProtocol {
+    public static func validatePairingFile(from plist: [String: any Sendable]?) throws -> PairingProtocol {
         guard let plist = plist else {
             throw PairingError.invalidPlist("The file could not be parsed as a property list (plist).")
         }

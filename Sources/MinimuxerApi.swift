@@ -11,8 +11,8 @@ import Combine
 import Network
 public import MinimuxerCommon
 public import DeviceGatewayAPI
-package import IdeviceGateway
-package import LibimobiledeviceGateway
+import IdeviceGateway
+import LibimobiledeviceGateway
 
 public enum MinimuxerComponent: String {
     case heartbeat

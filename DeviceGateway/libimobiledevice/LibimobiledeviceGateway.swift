@@ -428,7 +428,7 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
         self.cachedUDID = udid
         self.isInitialized = true
 
-        debugLog("[LibimobiledeviceGateway] Initialized successfully with \(pairingType.rawValue) pairing for UDID: \(udid)")
+        debugLog("[LibimobiledeviceGateway] Initialized successfully with \(pairingFile.mode.rawValue) pairing for UDID: \(udid)")
     }
 
     func syncFetchUDID() throws -> String? {

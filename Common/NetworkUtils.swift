@@ -13,10 +13,14 @@ public enum NetworkUtils {
     public static func testTCP(ip: String, port: UInt16, timeoutMs: Int = 100) -> Bool {
         guard !ip.isEmpty else { return false }
 
+        let startTime = CFAbsoluteTimeGetCurrent()
         let isIPv6 = ip.contains(":")
         let family = isIPv6 ? AF_INET6 : AF_INET
         let fd = socket(family, SOCK_STREAM, 0)
-        guard fd >= 0 else { return false }
+        guard fd >= 0 else {
+            verboseLog("[minimuxer] [net] testTCP(\(ip):\(port)) socket creation failed (errno=\(errno))")
+            return false
+        }
         defer { close(fd) }
 
         // Non-blocking mode
@@ -27,7 +31,10 @@ public enum NetworkUtils {
             var addr = sockaddr_in6()
             addr.sin6_family = sa_family_t(AF_INET6)
             addr.sin6_port = port.bigEndian
-            guard inet_pton(AF_INET6, ip, &addr.sin6_addr) == 1 else { return false }
+            guard inet_pton(AF_INET6, ip, &addr.sin6_addr) == 1 else {
+                verboseLog("[minimuxer] [net] testTCP(\(ip):\(port)) inet_pton IPv6 failed")
+                return false
+            }
             _ = withUnsafePointer(to: &addr) {
                 $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
                     connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in6>.size))
@@ -37,7 +44,10 @@ public enum NetworkUtils {
             var addr = sockaddr_in()
             addr.sin_family = sa_family_t(AF_INET)
             addr.sin_port = port.bigEndian
-            guard inet_pton(AF_INET, ip, &addr.sin_addr) == 1 else { return false }
+            guard inet_pton(AF_INET, ip, &addr.sin_addr) == 1 else {
+                verboseLog("[minimuxer] [net] testTCP(\(ip):\(port)) inet_pton IPv4 failed")
+                return false
+            }
             _ = withUnsafePointer(to: &addr) {
                 $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
                     connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
@@ -47,6 +57,7 @@ public enum NetworkUtils {
 
         var pfd = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
         let result = poll(&pfd, 1, Int32(timeoutMs))
+        let elapsedMs = Int((CFAbsoluteTimeGetCurrent() - startTime) * 1000)
 
         let hasOutput = (pfd.revents & Int16(POLLOUT)) != 0
         let hasError = (pfd.revents & (Int16(POLLERR) | Int16(POLLHUP) | Int16(POLLNVAL))) != 0
@@ -55,15 +66,26 @@ public enum NetworkUtils {
             var socketError: Int32 = 0
             var errorLen = socklen_t(MemoryLayout<Int32>.size)
             getsockopt(fd, SOL_SOCKET, SO_ERROR, &socketError, &errorLen)
-            return socketError == 0
+            let isSuccess = socketError == 0
+            verboseLog("[minimuxer] [net] testTCP(\(ip):\(port)) -> \(isSuccess ? "connected" : "socket error \(socketError)") (took \(elapsedMs)ms)")
+            return isSuccess
         }
+
+        let reason = result == 0 ? "timed out (\(timeoutMs)ms)" : "poll error (result=\(result), revents=0x\(String(pfd.revents, radix: 16)))"
+        verboseLog("[minimuxer] [net] testTCP(\(ip):\(port)) -> failed: \(reason) (took \(elapsedMs)ms)")
         return false
     }
 
     /// Verifies device reachability across remotePairingPort and lockdowndPort
     public static func testDeviceConnection(ifaddr: String?) -> Bool {
         guard let ip = ifaddr, !ip.isEmpty else { return false }
-        return testTCP(ip: ip, port: MinimuxerConstants.remotePairingPort)
-            || testTCP(ip: ip, port: MinimuxerConstants.lockdowndPort)
+        let isRPReachable = testTCP(ip: ip, port: MinimuxerConstants.remotePairingPort)
+        if isRPReachable {
+            verboseLog("[minimuxer] [net] testDeviceConnection(\(ip)) -> reachable via remotePairingPort (\(MinimuxerConstants.remotePairingPort))")
+            return true
+        }
+        let isLockdownReachable = testTCP(ip: ip, port: MinimuxerConstants.lockdowndPort)
+        verboseLog("[minimuxer] [net] testDeviceConnection(\(ip)) -> \(isLockdownReachable ? "reachable via lockdowndPort (\(MinimuxerConstants.lockdowndPort))" : "unreachable across both ports")")
+        return isLockdownReachable
     }
 }

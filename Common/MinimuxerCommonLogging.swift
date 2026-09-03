@@ -1,16 +1,14 @@
 //
-//  MinimuxerLogging.swift
-//  Minimuxer
+//  MinimuxerCommonLogging.swift
+//  MinimuxerCommon
 //
-//  Created by Magesh K on 22/08/26.
+//  Created by Magesh K on 03/09/26.
 //  Copyright © 2026 SideStore. All rights reserved.
 //
 
 import Foundation
-internal import MinimuxerCommon
-import DeviceGatewayAPI
 
-public enum MinimuxerLogging {
+public enum MinimuxerCommonLogging {
     private static let lock = NSLock()
     private nonisolated(unsafe) static var _isLoggingEnabled: Bool = true
 
@@ -19,11 +17,7 @@ public enum MinimuxerLogging {
     }
 
     public static func setLogging(_ enabled: Bool) {
-        lock.withLock {
-            _isLoggingEnabled = enabled
-            MinimuxerCommonLogging.setLogging(enabled)
-            DeviceGatewayLogging.setLogging(enabled)
-        }
+        lock.withLock { _isLoggingEnabled = enabled }
     }
 }
 
@@ -53,7 +47,7 @@ func debugLog(_ text: @autoclosure () -> String) {
 }
 
 func verboseLog(_ text: @autoclosure () -> String) {
-    if MinimuxerLogging.isLoggingEnabled {
+    if MinimuxerCommonLogging.isLoggingEnabled {
         let message = text()
         if !message.isEmpty && message.allSatisfy({ $0 == "\n" || $0 == "\r" }) {
             print(message, terminator: "")

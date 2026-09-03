@@ -20,6 +20,7 @@ let package = Package(
             path: ".",
             sources: [
                 "FFIDispatcher.swift",
+                "MinimuxerCommonLogging.swift",
                 "MinimuxerConstants.swift",
                 "NetworkUtils.swift"
             ]

@@ -204,21 +204,18 @@ public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
         setLogging(true)
         #endif
 
-        guard let data = pairingFileContent.data(using: .utf8) else {
-            debugLog("[IdeviceGateway] start() failed to decode pairingFileContent data as UTF-8")
-            throw IdeviceGatewayError(.invalidPairingFile, reason: "UTF-8 encoding failed")
-        }
-
-        let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any]
+        let parsedPairingFile: any PairingFile
         do {
-            let pairingType = try Self.validatePairingFile(from: plist)
-            self.pairingFileData = data
-            self.pairingFileType = pairingType
-            isRPPairing = (pairingType == .rppairing)
+            parsedPairingFile = try PairingFileParser.parse(content: pairingFileContent)
+            self.pairingFileData = parsedPairingFile.rawData
+            self.pairingFileType = parsedPairingFile.mode
+            self.isRPPairing = (parsedPairingFile.mode == .rppairing)
         } catch {
             debugLog("[IdeviceGateway] start() failed: \(error.localizedDescription)")
             throw error
         }
+
+        let data = parsedPairingFile.rawData
 
         if isRPPairing {
             try data.withUnsafeBytes { (buf: UnsafeRawBufferPointer) in

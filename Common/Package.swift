@@ -22,7 +22,9 @@ let package = Package(
                 "FFIDispatcher.swift",
                 "MinimuxerCommonLogging.swift",
                 "MinimuxerConstants.swift",
-                "NetworkUtils.swift"
+                "NetworkUtils.swift",
+                "PairingFile.swift",
+                "PairingProtocol.swift"
             ]
         )
     ]

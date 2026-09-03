@@ -404,20 +404,12 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
         debugLog("[LibimobiledeviceGateway] start() called")
         cleanup()
 
-        guard let data = pairingFileContent.data(using: .utf8) else {
-            throw LibimobiledeviceGatewayError(.invalidPairingFile, reason: "UTF-8 encoding failed")
-        }
+        let pairingFile = try PairingFileParser.parse(content: pairingFileContent)
+        self.pairingFileData = pairingFile.rawData
+        self.pairingFileType = pairingFile.mode
+        self.isRPPairing = (pairingFile.mode == .rppairing)
 
-        guard let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any] else {
-            throw LibimobiledeviceGatewayError(.invalidPairingFile, reason: "Could not parse plist")
-        }
-
-        let pairingType = try PairingProtocol.validatePairingFile(from: plist)
-        self.pairingFileData = data
-        self.pairingFileType = pairingType
-        self.isRPPairing = (pairingType == .rppairing)
-
-        if pairingType == .rppairing {
+        if pairingFile.mode == .rppairing {
             var identity = rppairing_identity_t()
             let err = pairingFileContent.withCString { cStr in
                 rppairing_identity_from_plist(cStr, pairingFileContent.utf8.count, &identity)
@@ -428,14 +420,8 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
             self.rpIdentity = identity
         }
 
-        let udid: String?
-        if pairingType == .rppairing {
-            udid = (plist["UDID"] as? String) ?? (plist["identifier"] as? String)
-        } else {
-            udid = plist["UDID"] as? String
-        }
-
-        guard let udid, !udid.isEmpty else {
+        let udid = pairingFile.deviceIdentifier
+        guard !udid.isEmpty else {
             throw LibimobiledeviceGatewayError(.invalidPairingFile, reason: "Missing UDID/identifier in pairing file")
         }
 

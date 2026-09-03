@@ -60,6 +60,9 @@ let package = Package(
         // Base API Target
         .target(
             name: "DeviceGatewayAPI",
+            dependencies: [
+                .product(name: "MinimuxerCommon", package: "Common")
+            ],
             path: ".",
             exclude: [
                 "idevice",
@@ -68,8 +71,7 @@ let package = Package(
             sources: [
                 "DeviceGatewayAPI.swift",
                 "DeviceGatewayError.swift",
-                "DeviceGatewayLogging.swift",
-                "PairingProtocol.swift"
+                "DeviceGatewayLogging.swift"
             ]
         ),
 

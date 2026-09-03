@@ -7,6 +7,7 @@
 //
 
 import Foundation
+@_exported import MinimuxerCommon
 
 public struct PairedDeviceRecord: Sendable {
     public let name: String

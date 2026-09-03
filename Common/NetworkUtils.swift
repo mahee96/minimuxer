@@ -11,10 +11,36 @@ import Foundation
 public enum NetworkUtils {
     /// Probes whether a TCP port is open on IPv4 or IPv6 with a millisecond timeout.
     public static func testTCP(ip: String, port: UInt16, timeoutMs: Int = 100) -> Bool {
-        guard !ip.isEmpty else { return false }
+        guard !ip.isEmpty else {
+            verboseLog("[minimuxer] [net] testTCP empty IP address")
+            return false
+        }
+        guard !ip.contains("/") else {
+            verboseLog("[minimuxer] [net] testTCP(\(ip):\(port)) invalid IP format (contains subnet/CIDR slash)")
+            return false
+        }
 
         let startTime = CFAbsoluteTimeGetCurrent()
         let isIPv6 = ip.contains(":")
+        var addr4 = sockaddr_in()
+        var addr6 = sockaddr_in6()
+
+        if isIPv6 {
+            guard inet_pton(AF_INET6, ip, &addr6.sin6_addr) == 1 else {
+                verboseLog("[minimuxer] [net] testTCP(\(ip):\(port)) invalid IPv6 address")
+                return false
+            }
+            addr6.sin6_family = sa_family_t(AF_INET6)
+            addr6.sin6_port = port.bigEndian
+        } else {
+            guard inet_pton(AF_INET, ip, &addr4.sin_addr) == 1 else {
+                verboseLog("[minimuxer] [net] testTCP(\(ip):\(port)) invalid IPv4 address")
+                return false
+            }
+            addr4.sin_family = sa_family_t(AF_INET)
+            addr4.sin_port = port.bigEndian
+        }
+
         let family = isIPv6 ? AF_INET6 : AF_INET
         let fd = socket(family, SOCK_STREAM, 0)
         guard fd >= 0 else {
@@ -28,27 +54,13 @@ public enum NetworkUtils {
         _ = fcntl(fd, F_SETFL, flags | O_NONBLOCK)
 
         if isIPv6 {
-            var addr = sockaddr_in6()
-            addr.sin6_family = sa_family_t(AF_INET6)
-            addr.sin6_port = port.bigEndian
-            guard inet_pton(AF_INET6, ip, &addr.sin6_addr) == 1 else {
-                verboseLog("[minimuxer] [net] testTCP(\(ip):\(port)) inet_pton IPv6 failed")
-                return false
-            }
-            _ = withUnsafePointer(to: &addr) {
+            _ = withUnsafePointer(to: &addr6) {
                 $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
                     connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in6>.size))
                 }
             }
         } else {
-            var addr = sockaddr_in()
-            addr.sin_family = sa_family_t(AF_INET)
-            addr.sin_port = port.bigEndian
-            guard inet_pton(AF_INET, ip, &addr.sin_addr) == 1 else {
-                verboseLog("[minimuxer] [net] testTCP(\(ip):\(port)) inet_pton IPv4 failed")
-                return false
-            }
-            _ = withUnsafePointer(to: &addr) {
+            _ = withUnsafePointer(to: &addr4) {
                 $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
                     connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
                 }
@@ -78,7 +90,10 @@ public enum NetworkUtils {
 
     // Verifies device reachability on a specific port
     public static func testDeviceConnection(ifaddr: String?, port: UInt16) -> Bool {
-        guard let ip = ifaddr, !ip.isEmpty else { return false }
+        guard let ip = ifaddr, !ip.isEmpty else {
+            verboseLog("[minimuxer] [net] testDeviceConnection(nil/empty:\(port)) -> unreachable")
+            return false
+        }
         let reachable = testTCP(ip: ip, port: port)
         verboseLog("[minimuxer] [net] testDeviceConnection(\(ip):\(port)) -> \(reachable ? "reachable" : "unreachable")")
         return reachable

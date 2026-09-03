@@ -321,11 +321,6 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         // start our fake usbmuxd server for lockdown protocol based clients if required
         try await restartMuxerServer()
         
-        do {
-            try await mountDDI(docsPath: mountPath)
-        } catch {
-            debugLog("[minimuxer] WARN: Initial DDI mount skipped during startup: \(error.localizedDescription)")
-        }
         // mark ready!
         await state.with{
             $0.status = .started

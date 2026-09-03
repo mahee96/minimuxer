@@ -982,6 +982,167 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
         }
     }
 
+    func syncYeetAppBundle(bundleId: String, appURL: URL) throws {
+        let appName = appURL.lastPathComponent
+        let remoteBaseDir = "PublicStaging/\(bundleId)"
+        let remoteAppPath = "\(remoteBaseDir)/\(appName)"
+
+        if isRPPairing {
+            try withRSDService(.afc) { stream in
+                var packetNum: UInt64 = 0
+
+                debugLog("[LibimobiledeviceGateway] syncYeetAppDirectory: Ensuring PublicStaging directory exists...")
+                try rsdAfcMakeDir(stream, path: "PublicStaging", packetNum: &packetNum)
+                try rsdAfcMakeDir(stream, path: remoteBaseDir, packetNum: &packetNum)
+                try rsdAfcMakeDir(stream, path: remoteAppPath, packetNum: &packetNum)
+
+                let fileManager = FileManager.default
+                guard let enumerator = fileManager.enumerator(
+                    at: appURL,
+                    includingPropertiesForKeys: [.isDirectoryKey],
+                    options: []
+                ) else {
+                    throw LibimobiledeviceGatewayError(.serviceError, reason: "Failed to enumerate \(appURL.path)")
+                }
+
+                for case let fileURL as URL in enumerator {
+                    let relativePath = fileURL.path.replacingOccurrences(of: appURL.path, with: "").trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+                    let remoteItemPath = "\(remoteAppPath)/\(relativePath)"
+
+                    var isDirectory: ObjCBool = false
+                    fileManager.fileExists(atPath: fileURL.path, isDirectory: &isDirectory)
+
+                    if isDirectory.boolValue {
+                        try rsdAfcMakeDir(stream, path: remoteItemPath, packetNum: &packetNum)
+                    } else {
+                        let fd = try rsdAfcFileOpen(stream, path: remoteItemPath, mode: 3, packetNum: &packetNum)
+                        defer { try? rsdAfcFileClose(stream, fd: fd, packetNum: &packetNum) }
+
+                        let data = try Data(contentsOf: fileURL, options: .alwaysMapped)
+                        var offset = 0
+                        while offset < data.count {
+                            let end = min(offset + kAfcChunkSize, data.count)
+                            let chunk = data.subdata(in: offset..<end)
+                            let writeHeaderPayload = withUnsafeBytes(of: fd.littleEndian) { Data($0) }
+
+                            packetNum += 1
+                            try rsdAfcSendPacket(stream, opcode: 16 /* Write */, headerPayload: writeHeaderPayload, payload: chunk, packetNum: &packetNum)
+                            let writeResp = try rsdAfcRecvResponse(stream)
+                            if writeResp.opcode == 1 && writeResp.headerPayload.count >= 8 {
+                                let status = writeResp.headerPayload.withUnsafeBytes { $0.load(as: UInt64.self) }.littleEndian
+                                if status != 0 {
+                                    throw LibimobiledeviceGatewayError(.serviceError, reason: "AFC Write failed with status \(status) for \(remoteItemPath)")
+                                }
+                            }
+                            offset = end
+                        }
+                    }
+                }
+                debugLog("[LibimobiledeviceGateway] Successfully uploaded app bundle to \(remoteAppPath) via RSD AFC!")
+            }
+            return
+        }
+
+        try withService(
+            service: .afc,
+            create: afc_client_new,
+            cleanup: afc_client_free
+        ) { afc in
+            _ = afc_make_directory(afc, "PublicStaging")
+            _ = afc_make_directory(afc, remoteBaseDir)
+            _ = afc_make_directory(afc, remoteAppPath)
+
+            let fileManager = FileManager.default
+            guard let enumerator = fileManager.enumerator(
+                at: appURL,
+                includingPropertiesForKeys: [.isDirectoryKey],
+                options: []
+            ) else {
+                throw LibimobiledeviceGatewayError(.serviceError, reason: "Failed to enumerate \(appURL.path)")
+            }
+
+            for case let fileURL as URL in enumerator {
+                let relativePath = fileURL.path.replacingOccurrences(of: appURL.path, with: "").trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+                let remoteItemPath = "\(remoteAppPath)/\(relativePath)"
+
+                var isDirectory: ObjCBool = false
+                fileManager.fileExists(atPath: fileURL.path, isDirectory: &isDirectory)
+
+                if isDirectory.boolValue {
+                    _ = afc_make_directory(afc, remoteItemPath)
+                } else {
+                    var handle: UInt64 = 0
+                    let openRes = afc_file_open(afc, remoteItemPath, AFC_FOPEN_RW, &handle)
+                    guard openRes == AFC_E_SUCCESS, handle != 0 else {
+                        throw LibimobiledeviceGatewayError(.serviceError, reason: "afc_file_open failed for \(remoteItemPath) with code \(openRes.rawValue)")
+                    }
+                    defer { _ = afc_file_close(afc, handle) }
+
+                    let data = try Data(contentsOf: fileURL, options: .alwaysMapped)
+                    if !data.isEmpty {
+                        try data.withUnsafeBytes { rawBuf in
+                            guard let baseAddr = rawBuf.baseAddress?.assumingMemoryBound(to: CChar.self) else {
+                                throw LibimobiledeviceGatewayError(.serviceError, reason: "Invalid file buffer")
+                            }
+                            var bytesWritten: UInt32 = 0
+                            let writeRes = afc_file_write(afc, handle, baseAddr, UInt32(data.count), &bytesWritten)
+                            if writeRes != AFC_E_SUCCESS {
+                                throw LibimobiledeviceGatewayError(.serviceError, reason: "afc_file_write failed for \(remoteItemPath) with code \(writeRes.rawValue)")
+                            }
+                        }
+                    }
+                }
+            }
+            debugLog("[LibimobiledeviceGateway] Successfully uploaded app bundle to \(remoteAppPath) via Lockdown AFC!")
+        }
+    }
+
+    func syncInstallAppBundle(bundleId: String, appName: String) throws {
+        let remotePath = "PublicStaging/\(bundleId)/\(appName)"
+        if isRPPairing {
+            try withRSDService(.installationProxy) { stream in
+                let dict: [String: Any] = [
+                    "Command": "Install",
+                    "PackagePath": remotePath,
+                    "ClientOptions": [
+                        "PackageType": "Developer"
+                    ]
+                ]
+                debugLog("[LibimobiledeviceGateway] Sending installation_proxy command to install \(remotePath)...")
+                try rsdSendPlist(stream, dict: dict)
+                while true {
+                    let resp = try rsdRecvPlist(stream)
+                    debugLog("[LibimobiledeviceGateway] installation_proxy response: \(resp)")
+                    if let status = resp["Status"] as? String {
+                        if status == "Complete" {
+                            debugLog("[LibimobiledeviceGateway] installation_proxy completed successfully for \(bundleId)!")
+                            return
+                        }
+                    }
+                    if let err = resp["Error"] as? String {
+                        throw LibimobiledeviceGatewayError(.serviceError, reason: "Installation failed: \(err)")
+                    }
+                }
+            }
+            return
+        }
+
+        try withService(
+            service: .installationProxy,
+            create: instproxy_client_new,
+            cleanup: instproxy_client_free
+        ) { instproxy in
+            let clientOptions: plist_t? = plist_new_dict()
+            defer { plist_free(clientOptions) }
+            plist_dict_set_item(clientOptions, "PackageType", plist_new_string("Developer"))
+
+            let res = instproxy_install(instproxy, remotePath, clientOptions, nil, nil)
+            if res != INSTPROXY_E_SUCCESS {
+                throw LibimobiledeviceGatewayError(.serviceError, reason: "instproxy_install failed with code \(res.rawValue)")
+            }
+        }
+    }
+
     func syncWipeContainer(identifier: String) throws {
         if isRPPairing {
             try withRSDService(.houseArrest) { stream in
@@ -1240,9 +1401,21 @@ extension LibimobiledeviceGateway {
         }
     }
 
+    public func yeetAppBundle(bundleId: String, appURL: URL) async throws {
+        try await withFFIDispatch {
+            try self.syncYeetAppBundle(bundleId: bundleId, appURL: appURL)
+        }
+    }
+
     public func installIpa(bundleId: String) async throws {
         try await withFFIDispatch {
             try self.syncInstallIpa(bundleId: bundleId)
+        }
+    }
+
+    public func installAppBundle(bundleId: String, appName: String) async throws {
+        try await withFFIDispatch {
+            try self.syncInstallAppBundle(bundleId: bundleId, appName: appName)
         }
     }
 

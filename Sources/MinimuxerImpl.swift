@@ -427,9 +427,21 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         }
     }
 
+    func yeetAppBundle(bundleId: String, appURL: URL) async throws {
+        try await matchingPriority {
+            try await self.gateway.yeetAppBundle(bundleId: bundleId, appURL: appURL)
+        }
+    }
+
     func installIpa(bundleId: String) async throws {
         try await matchingPriority{
             try await self.gateway.installIpa(bundleId: bundleId)
+        }
+    }
+
+    func installAppBundle(bundleId: String, appName: String) async throws {
+        try await matchingPriority {
+            try await self.gateway.installAppBundle(bundleId: bundleId, appName: appName)
         }
     }
 

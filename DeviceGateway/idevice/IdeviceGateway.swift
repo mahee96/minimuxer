@@ -961,6 +961,114 @@ public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
         }
     }
 
+    private func syncYeetAppBundle(bundleId: String, appURL: URL) throws {
+        debugLog("[IdeviceGateway] yeetAppBundle() called, bundleId: \(bundleId), appURL: \(appURL.path)")
+        try verifyInitialized()
+        try performWithEitherService(
+            connectRP: afc_client_connect_rsd,
+            connectLockdown: afc_client_connect,
+            cleanup: afc_client_free,
+            serviceName: "AFC client"
+        ) { client in
+            let stagingDir = MinimuxerConstants.pkgPath
+            verboseLog("[IdeviceGateway] yeetAppBundle() creating directory: \(stagingDir)")
+            _ = stagingDir.withCString { dirPtr in
+                afc_make_directory(client, dirPtr)
+            }
+            let bundleDir = "\(stagingDir)/\(bundleId)"
+            verboseLog("[IdeviceGateway] yeetAppBundle() creating directory: \(bundleDir)")
+            _ = bundleDir.withCString { dirPtr in
+                afc_make_directory(client, dirPtr)
+            }
+            let remoteAppPath = "\(bundleDir)/\(appURL.lastPathComponent)"
+            verboseLog("[IdeviceGateway] yeetAppBundle() creating directory: \(remoteAppPath)")
+            _ = remoteAppPath.withCString { dirPtr in
+                afc_make_directory(client, dirPtr)
+            }
+
+            let fileManager = FileManager.default
+            guard let enumerator = fileManager.enumerator(
+                at: appURL,
+                includingPropertiesForKeys: [.isDirectoryKey],
+                options: []
+            ) else {
+                throw IdeviceGatewayError(.serviceError, reason: "Failed to enumerate \(appURL.path)")
+            }
+
+            for case let fileURL as URL in enumerator {
+                let relativePath = fileURL.path.replacingOccurrences(of: appURL.path, with: "").trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+                let remoteItemPath = "\(remoteAppPath)/\(relativePath)"
+
+                var isDirectory: ObjCBool = false
+                fileManager.fileExists(atPath: fileURL.path, isDirectory: &isDirectory)
+
+                if isDirectory.boolValue {
+                    _ = remoteItemPath.withCString { pathPtr in
+                        afc_make_directory(client, pathPtr)
+                    }
+                } else {
+                    var fileHandle: OpaquePointer? = nil
+                    let openErr = remoteItemPath.withCString { pathPtr in
+                        afc_file_open(client, pathPtr, AfcFopenMode(rawValue: 4), &fileHandle)
+                    }
+                    if let openErr = openErr {
+                        let msg = self.getErrorMessage(from: openErr)
+                        defer { idevice_error_free(openErr) }
+                        throw IdeviceGatewayError(.serviceError, reason: "Failed to open remote AFC file \(remoteItemPath): \(msg)")
+                    }
+                    defer {
+                        if let fileHandle = fileHandle {
+                            afc_file_close(fileHandle)
+                        }
+                    }
+
+                    let fileData = try Data(contentsOf: fileURL, options: .alwaysMapped)
+                    if !fileData.isEmpty {
+                        try fileData.withUnsafeBytes { (buf: UnsafeRawBufferPointer) in
+                            if let baseAddress = buf.baseAddress?.assumingMemoryBound(to: UInt8.self) {
+                                let writeErr = afc_file_write(fileHandle, baseAddress, fileData.count)
+                                if let writeErr = writeErr {
+                                    let msg = self.getErrorMessage(from: writeErr)
+                                    defer { idevice_error_free(writeErr) }
+                                    throw IdeviceGatewayError(.serviceError, reason: "Failed to write to AFC file \(remoteItemPath): \(msg)")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            debugLog("[IdeviceGateway] yeetAppBundle() uploaded \(appURL.lastPathComponent) successfully")
+        }
+    }
+
+    private func syncInstallAppBundle(bundleId: String, appName: String) throws {
+        debugLog("[IdeviceGateway] installAppBundle() called, bundleId: \(bundleId), appName: \(appName)")
+        try verifyInitialized()
+        try performWithEitherService(
+            connectRP: installation_proxy_connect_rsd,
+            connectLockdown: installation_proxy_connect,
+            cleanup: installation_proxy_client_free,
+            serviceName: "instproxy"
+        ) { client in
+            let path = "\(MinimuxerConstants.pkgPath)/\(bundleId)/\(appName)"
+            try path.withCString { pathPtr in
+                verboseLog("[IdeviceGateway] installAppBundle() calling installation_proxy_install for path: \(path)")
+                let options = plist_new_dict()
+                defer { plist_free(options) }
+                plist_dict_set_item(options, "PackageType", plist_new_string("Developer"))
+
+                let installErr = installation_proxy_install(client, pathPtr, options)
+                if let installErr = installErr {
+                    let msg = self.getErrorMessage(from: installErr)
+                    debugLog("[IdeviceGateway] installAppBundle() installation_proxy_install failed: \(msg)")
+                    defer { idevice_error_free(installErr) }
+                    throw IdeviceGatewayError(.serviceError, reason: "Failed to install App directory, error: (\(msg))")
+                }
+                debugLog("[IdeviceGateway] installAppBundle() installation_proxy_install succeeded")
+            }
+        }
+    }
+
     private func getAppPaths(appId: String) throws -> (container: String, bundlePath: String) {
         debugLog("[IdeviceGateway] getAppPaths() called, appId: \(appId)")
         return try performWithEitherService(
@@ -2260,9 +2368,21 @@ extension IdeviceGateway {
         }
     }
 
+    public func yeetAppBundle(bundleId: String, appURL: URL) async throws {
+        try await withFFIDispatch {
+            try self.syncYeetAppBundle(bundleId: bundleId, appURL: appURL)
+        }
+    }
+
     public func installIpa(bundleId: String) async throws {
         try await withFFIDispatch {
             try self.syncInstallIpa(bundleId: bundleId)
+        }
+    }
+
+    public func installAppBundle(bundleId: String, appName: String) async throws {
+        try await withFFIDispatch {
+            try self.syncInstallAppBundle(bundleId: bundleId, appName: appName)
         }
     }
 

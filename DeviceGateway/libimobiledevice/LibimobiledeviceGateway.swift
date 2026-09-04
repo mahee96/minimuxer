@@ -418,17 +418,17 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
                 throw LibimobiledeviceGatewayError(.invalidPairingFile, reason: "rppairing_identity_from_plist failed with code \(err.rawValue)")
             }
             self.rpIdentity = identity
+        } else if let lockdown = pairingFile as? LockdownPairingFile {
+            let udid = lockdown.udid
+            guard !udid.isEmpty else {
+                throw LibimobiledeviceGatewayError(.invalidPairingFile, reason: "Missing UDID in pairing file")
+            }
+            self.cachedUDID = udid
         }
 
-        let udid = pairingFile.deviceIdentifier
-        guard !udid.isEmpty else {
-            throw LibimobiledeviceGatewayError(.invalidPairingFile, reason: "Missing UDID/identifier in pairing file")
-        }
-
-        self.cachedUDID = udid
         self.isInitialized = true
 
-        debugLog("[LibimobiledeviceGateway] Initialized successfully with \(pairingFile.mode.rawValue) pairing for UDID: \(udid)")
+        debugLog("[LibimobiledeviceGateway] Initialized successfully with \(pairingFile.mode.rawValue) pairing")
     }
 
     func syncFetchUDID() throws -> String? {

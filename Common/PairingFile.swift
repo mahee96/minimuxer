@@ -13,7 +13,6 @@ public protocol PairingFile: Sendable {
     var rawData: Data { get }
     var mode: PairingProtocol { get }
     var plist: [String: any Sendable] { get }
-    var deviceIdentifier: String { get }
 }
 
 public struct RPPairingFile: PairingFile {
@@ -24,8 +23,6 @@ public struct RPPairingFile: PairingFile {
     public let identifier: String
     public let publicKey: Data?
     public let privateKey: Data?
-
-    public var deviceIdentifier: String { identifier }
 
     public init(content: String, plist: [String: any Sendable], data: Data) throws {
         self.rawContent = content
@@ -52,8 +49,6 @@ public struct LockdownPairingFile: PairingFile {
     public let hostCertificate: Data?
     public let rootCertificate: Data?
     public let deviceCertificate: Data?
-
-    public var deviceIdentifier: String { udid }
 
     public init(content: String, plist: [String: any Sendable], data: Data) throws {
         self.rawContent = content

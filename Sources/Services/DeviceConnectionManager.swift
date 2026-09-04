@@ -165,16 +165,11 @@ actor DeviceConnectionManager {
     }
 
     private func resolveLocalVPNTunnel(from interfaces: Set<NetInfo>) -> (tunnel: TunnelNetInfo?, candidatePeer: CandidatePeer?, isReachable: Bool) {
-        // Device connection strictly operates on IPv4 tunnels only
+        // Device connection strictly operates on IPv4 utun tunnels only
         let tunnels = interfaces
             .compactMap { $0 as? TunnelNetInfo }
-            .filter { !$0.interfaceAddresses.v4.isEmpty }
-            .sorted { lhs, rhs in
-                if (lhs.tunnelType == .utun) != (rhs.tunnelType == .utun) {
-                    return lhs.tunnelType == .utun
-                }
-                return lhs.name < rhs.name
-            }
+            .filter { $0.tunnelType == .utun && !$0.interfaceAddresses.v4.isEmpty }
+            .sorted { $0.name < $1.name }
         guard !tunnels.isEmpty else { return (nil, nil, false) }
 
         // 1. Evaluate candidate tunnels against reachable endpoints
@@ -188,7 +183,7 @@ actor DeviceConnectionManager {
         }
 
         // 2. Fallback to preferred IPv4 tunnel candidate
-        let fallbackTunnel = tunnels.first { $0.tunnelType == .utun } ?? tunnels.first
+        let fallbackTunnel = tunnels.first
         let fallbackPeer = fallbackTunnel.flatMap { resolveCandidatePeers(for: $0).first }
         return (fallbackTunnel, fallbackPeer, false)
     }

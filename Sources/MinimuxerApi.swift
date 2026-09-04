@@ -88,8 +88,8 @@ public protocol MinimuxerAPI: AnyObject {
     func fetchUDID() async throws -> String?
     func testDeviceConnection(ifaddr: String?) -> Bool
 
-    func yeetAppAfc(bundleId: String, ipaBytes: Data) async throws
-    func yeetAppBundle(bundleId: String, appURL: URL) async throws
+    func sendIpaAfc(bundleId: String, ipaBytes: Data) async throws
+    func sendAppBundleAfc(bundleId: String, appURL: URL) async throws
     func installIpa(bundleId: String) async throws
     func installAppBundle(bundleId: String, appName: String) async throws
     func removeApp(bundleId: String) async throws

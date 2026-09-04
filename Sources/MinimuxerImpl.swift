@@ -421,15 +421,15 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         }
     }
 
-    func yeetAppAfc(bundleId: String, ipaBytes: Data) async throws {
+    func sendIpaAfc(bundleId: String, ipaBytes: Data) async throws {
         try await matchingPriority{
-            try await self.gateway.yeetAppAfc(bundleId: bundleId, ipaBytes: ipaBytes)
+            try await self.gateway.sendIpaAfc(bundleId: bundleId, ipaBytes: ipaBytes)
         }
     }
 
-    func yeetAppBundle(bundleId: String, appURL: URL) async throws {
+    func sendAppBundleAfc(bundleId: String, appURL: URL) async throws {
         try await matchingPriority {
-            try await self.gateway.yeetAppBundle(bundleId: bundleId, appURL: appURL)
+            try await self.gateway.sendAppBundleAfc(bundleId: bundleId, appURL: appURL)
         }
     }
 

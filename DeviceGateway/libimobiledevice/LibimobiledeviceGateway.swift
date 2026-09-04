@@ -872,20 +872,20 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
         _ = try? rsdAfcRecvResponse(stream)
     }
 
-    func syncYeetAppAfc(bundleId: String, ipaBytes: Data) throws {
+    func syncsendIpaAfc(bundleId: String, ipaBytes: Data) throws {
         if isRPPairing {
             try withRSDService(.afc) { stream in
                 var packetNum: UInt64 = 0
                 let remotePath = "PublicStaging/\(bundleId).ipa"
 
-                debugLog("[LibimobiledeviceGateway] syncYeetAppAfc: Ensuring PublicStaging directory exists...")
+                debugLog("[LibimobiledeviceGateway] syncsendIpaAfc: Ensuring PublicStaging directory exists...")
                 try rsdAfcMakeDir(stream, path: "PublicStaging", packetNum: &packetNum)
 
-                debugLog("[LibimobiledeviceGateway] syncYeetAppAfc: Opening \(remotePath)...")
+                debugLog("[LibimobiledeviceGateway] syncsendIpaAfc: Opening \(remotePath)...")
                 let fd = try rsdAfcFileOpen(stream, path: remotePath, mode: 3, packetNum: &packetNum)
                 defer { try? rsdAfcFileClose(stream, fd: fd, packetNum: &packetNum) }
 
-                debugLog("[LibimobiledeviceGateway] syncYeetAppAfc: Staging file opened (fd=\(fd)), uploading \(ipaBytes.count) bytes...")
+                debugLog("[LibimobiledeviceGateway] syncsendIpaAfc: Staging file opened (fd=\(fd)), uploading \(ipaBytes.count) bytes...")
                 var offset = 0
                 var chunkIdx = 0
                 let totalChunks = (ipaBytes.count + kAfcChunkSize - 1) / kAfcChunkSize
@@ -905,7 +905,7 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
                     }
                     offset = end
                     if chunkIdx % 5 == 0 || offset >= ipaBytes.count {
-                        debugLog("[LibimobiledeviceGateway] syncYeetAppAfc: Uploaded chunk \(chunkIdx)/\(totalChunks) (\(offset)/\(ipaBytes.count) bytes)")
+                        debugLog("[LibimobiledeviceGateway] syncsendIpaAfc: Uploaded chunk \(chunkIdx)/\(totalChunks) (\(offset)/\(ipaBytes.count) bytes)")
                     }
                 }
                 debugLog("[LibimobiledeviceGateway] Successfully uploaded \(ipaBytes.count) bytes to \(remotePath) via RSD AFC!")
@@ -982,7 +982,7 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
         }
     }
 
-    func syncYeetAppBundle(bundleId: String, appURL: URL) throws {
+    func syncsendAppBundleAfc(bundleId: String, appURL: URL) throws {
         let appName = appURL.lastPathComponent
         let remoteBaseDir = "PublicStaging/\(bundleId)"
         let remoteAppPath = "\(remoteBaseDir)/\(appName)"
@@ -1395,15 +1395,15 @@ extension LibimobiledeviceGateway {
         }
     }
 
-    public func yeetAppAfc(bundleId: String, ipaBytes: Data) async throws {
+    public func sendIpaAfc(bundleId: String, ipaBytes: Data) async throws {
         try await withFFIDispatch {
-            try self.syncYeetAppAfc(bundleId: bundleId, ipaBytes: ipaBytes)
+            try self.syncsendIpaAfc(bundleId: bundleId, ipaBytes: ipaBytes)
         }
     }
 
-    public func yeetAppBundle(bundleId: String, appURL: URL) async throws {
+    public func sendAppBundleAfc(bundleId: String, appURL: URL) async throws {
         try await withFFIDispatch {
-            try self.syncYeetAppBundle(bundleId: bundleId, appURL: appURL)
+            try self.syncsendAppBundleAfc(bundleId: bundleId, appURL: appURL)
         }
     }
 

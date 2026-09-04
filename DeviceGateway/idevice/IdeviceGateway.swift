@@ -883,8 +883,8 @@ public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
         }
     }
 
-    private func syncYeetAppAfc(bundleId: String, ipaBytes: Data) throws {
-        debugLog("[IdeviceGateway] yeetAppAfc() called, bundleId: \(bundleId), ipaBytes size: \(ipaBytes.count)")
+    private func syncsendIpaAfc(bundleId: String, ipaBytes: Data) throws {
+        debugLog("[IdeviceGateway] sendIpaAfc() called, bundleId: \(bundleId), ipaBytes size: \(ipaBytes.count)")
         try verifyInitialized()
         try performWithEitherService(
             connectRP: afc_client_connect_rsd,
@@ -894,44 +894,44 @@ public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
         ) { client in
             // Ensure directory
             let stagingDir = MinimuxerConstants.pkgPath
-            verboseLog("[IdeviceGateway] yeetAppAfc() creating directory: \(stagingDir)")
+            verboseLog("[IdeviceGateway] sendIpaAfc() creating directory: \(stagingDir)")
             _ = stagingDir.withCString { dirPtr in
                 afc_make_directory(client, dirPtr)
             }
             let bundleDir = "\(stagingDir)/\(bundleId)"
-            verboseLog("[IdeviceGateway] yeetAppAfc() creating directory: \(bundleDir)")
+            verboseLog("[IdeviceGateway] sendIpaAfc() creating directory: \(bundleDir)")
             _ = bundleDir.withCString { dirPtr in
                 afc_make_directory(client, dirPtr)
             }
  
             let path = "\(bundleDir)/app.ipa"
             var fileHandle: OpaquePointer? = nil
-            verboseLog("[IdeviceGateway] yeetAppAfc() opening remote file: \(path)")
+            verboseLog("[IdeviceGateway] sendIpaAfc() opening remote file: \(path)")
             let openErr = path.withCString { pathPtr in
                 afc_file_open(client, pathPtr, AfcFopenMode(rawValue: 4), &fileHandle) // WrOnly/Wr mode
             }
             if let openErr = openErr {
                 let msg = self.getErrorMessage(from: openErr)
-                debugLog("[IdeviceGateway] yeetAppAfc() afc_file_open failed: \(msg)")
+                debugLog("[IdeviceGateway] sendIpaAfc() afc_file_open failed: \(msg)")
                 defer { idevice_error_free(openErr) }
                 throw IdeviceGatewayError(.serviceError, reason: "Failed to open remote AFC file, error: (\(msg))")
             }
             defer {
-                verboseLog("[IdeviceGateway] yeetAppAfc() closing remote file handle")
+                verboseLog("[IdeviceGateway] sendIpaAfc() closing remote file handle")
                 afc_file_close(fileHandle)
             }
  
             try ipaBytes.withUnsafeBytes { (buf: UnsafeRawBufferPointer) in
                 if let baseAddress = buf.baseAddress?.assumingMemoryBound(to: UInt8.self) {
-                    verboseLog("[IdeviceGateway] yeetAppAfc() writing data to AFC file")
+                    verboseLog("[IdeviceGateway] sendIpaAfc() writing data to AFC file")
                     let writeErr = afc_file_write(fileHandle, baseAddress, ipaBytes.count)
                     if let writeErr = writeErr {
                         let msg = self.getErrorMessage(from: writeErr)
-                        debugLog("[IdeviceGateway] yeetAppAfc() afc_file_write failed: \(msg)")
+                        debugLog("[IdeviceGateway] sendIpaAfc() afc_file_write failed: \(msg)")
                         defer { idevice_error_free(writeErr) }
                         throw IdeviceGatewayError(.serviceError, reason: "Failed to write to AFC file, error: (\(msg))")
                     }
-                    debugLog("[IdeviceGateway] yeetAppAfc() afc_file_write succeeded")
+                    debugLog("[IdeviceGateway] sendIpaAfc() afc_file_write succeeded")
                 }
             }
         }
@@ -961,8 +961,8 @@ public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
         }
     }
 
-    private func syncYeetAppBundle(bundleId: String, appURL: URL) throws {
-        debugLog("[IdeviceGateway] yeetAppBundle() called, bundleId: \(bundleId), appURL: \(appURL.path)")
+    private func syncsendAppBundleAfc(bundleId: String, appURL: URL) throws {
+        debugLog("[IdeviceGateway] sendAppBundleAfc() called, bundleId: \(bundleId), appURL: \(appURL.path)")
         try verifyInitialized()
         try performWithEitherService(
             connectRP: afc_client_connect_rsd,
@@ -971,17 +971,17 @@ public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
             serviceName: "AFC client"
         ) { client in
             let stagingDir = MinimuxerConstants.pkgPath
-            verboseLog("[IdeviceGateway] yeetAppBundle() creating directory: \(stagingDir)")
+            verboseLog("[IdeviceGateway] sendAppBundleAfc() creating directory: \(stagingDir)")
             _ = stagingDir.withCString { dirPtr in
                 afc_make_directory(client, dirPtr)
             }
             let bundleDir = "\(stagingDir)/\(bundleId)"
-            verboseLog("[IdeviceGateway] yeetAppBundle() creating directory: \(bundleDir)")
+            verboseLog("[IdeviceGateway] sendAppBundleAfc() creating directory: \(bundleDir)")
             _ = bundleDir.withCString { dirPtr in
                 afc_make_directory(client, dirPtr)
             }
             let remoteAppPath = "\(bundleDir)/\(appURL.lastPathComponent)"
-            verboseLog("[IdeviceGateway] yeetAppBundle() creating directory: \(remoteAppPath)")
+            verboseLog("[IdeviceGateway] sendAppBundleAfc() creating directory: \(remoteAppPath)")
             _ = remoteAppPath.withCString { dirPtr in
                 afc_make_directory(client, dirPtr)
             }
@@ -1037,7 +1037,7 @@ public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
                     }
                 }
             }
-            debugLog("[IdeviceGateway] yeetAppBundle() uploaded \(appURL.lastPathComponent) successfully")
+            debugLog("[IdeviceGateway] sendAppBundleAfc() uploaded \(appURL.lastPathComponent) successfully")
         }
     }
 
@@ -2362,15 +2362,15 @@ extension IdeviceGateway {
         }
     }
 
-    public func yeetAppAfc(bundleId: String, ipaBytes: Data) async throws {
+    public func sendIpaAfc(bundleId: String, ipaBytes: Data) async throws {
         try await withFFIDispatch {
-            try self.syncYeetAppAfc(bundleId: bundleId, ipaBytes: ipaBytes)
+            try self.syncsendIpaAfc(bundleId: bundleId, ipaBytes: ipaBytes)
         }
     }
 
-    public func yeetAppBundle(bundleId: String, appURL: URL) async throws {
+    public func sendAppBundleAfc(bundleId: String, appURL: URL) async throws {
         try await withFFIDispatch {
-            try self.syncYeetAppBundle(bundleId: bundleId, appURL: appURL)
+            try self.syncsendAppBundleAfc(bundleId: bundleId, appURL: appURL)
         }
     }
 

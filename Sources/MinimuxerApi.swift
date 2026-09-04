@@ -73,7 +73,7 @@ public protocol MinimuxerAPI: AnyObject {
     var statusPublisher: AnyPublisher<Result<Bool, MinimuxerError>, Never> { get }
     
     func getConnectionMode() async -> DeviceConnectionMode
-    func isReady(withDDIMountCheck: Bool) async -> Result<Bool, MinimuxerError>
+    func isReady(withNetworkCheck: Bool, withDDIMountCheck: Bool) async -> Result<Bool, MinimuxerError>
     func describeError(_ error: MinimuxerError) -> String
     func bindConnectionConfig(_ binding: ConnectionConfigBinding) async
     func setLogging(_ enabled: Bool)
@@ -106,8 +106,8 @@ public protocol MinimuxerAPI: AnyObject {
 }
 
 public extension MinimuxerAPI {
-    func isReady() async -> Result<Bool, MinimuxerError> {
-        await isReady(withDDIMountCheck: false)
+    func isReady(withNetworkCheck: Bool = true, withDDIMountCheck: Bool = false) async -> Result<Bool, MinimuxerError> {
+        await isReady(withNetworkCheck: withNetworkCheck, withDDIMountCheck: withDDIMountCheck)
     }
 }
 

@@ -115,7 +115,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         return true
     }
 
-    func isReady(withDDIMountCheck: Bool = false) async -> Result<Bool, MinimuxerError> {
+    func isReady(withNetworkCheck: Bool, withDDIMountCheck: Bool) async -> Result<Bool, MinimuxerError> {
         if !isPairingFileLoaded {
             debugLog("[minimuxer] minimuxer not ready: pairing file not loaded")
             return .failure(.pairingNotLoaded("No valid pairing file has been loaded"))
@@ -128,10 +128,11 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         }
 
         // check connection status first
-        if !(self.network.isWifiSatisfied   /* ||
-             self.network.isWiredSatisfied     ||
-             self.network.isUsbSatisfied       ||
-             self.network.isBridgeSatisfied */
+        if withNetworkCheck && !(
+            self.network.isWifiSatisfied   /* ||
+            self.network.isWiredSatisfied     ||
+            self.network.isUsbSatisfied       ||
+            self.network.isBridgeSatisfied */
         ){
             debugLog("[minimuxer] minimuxer not ready: no network connection")
             return .failure(.noConnection("No wifi interface satisfied"))

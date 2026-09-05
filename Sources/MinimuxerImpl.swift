@@ -22,7 +22,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
     }
 
     let gateway: any DeviceGatewayAPI
-    let network: any NetworkObserverAPI
+    let network: NetworkObserverService
     let emproxy: any EMProxyAPI
     let wirelessPair: any WirelessPairAPI
     let mounter: Mounter
@@ -33,7 +33,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
 
     init(
         gateway: any DeviceGatewayAPI,
-        network: any NetworkObserverAPI,
+        network: NetworkObserverService,
         emproxy: any EMProxyAPI,
         wirelessPair: any WirelessPairAPI,
         mounter: Mounter,
@@ -52,13 +52,11 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         self.connectionManager = connectionManager
         self.heartbeat = heartbeat
 
-        if let netService = network as? NetworkObserverService {
-            netService.onNetworkChanged = { [weak self] in
-                guard let self = self else { return }
-                let readyResult = await self.isReady()
-                debugLog("[minimuxer] [net] publishing status update to subscribers")
-                self.statusSubject.send(readyResult)
-            }
+        self.network.onNetworkChanged = { [weak self] in
+            guard let self = self else { return }
+            let readyResult = await self.isReady()
+            debugLog("[minimuxer] [net] publishing status update to subscribers")
+            self.statusSubject.send(readyResult)
         }
     }
 

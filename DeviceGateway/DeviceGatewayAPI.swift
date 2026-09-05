@@ -7,27 +7,29 @@
 //
 
 import Foundation
-@_exported import MinimuxerCommon
+import MinimuxerCommon
 
 public struct PairedDeviceRecord: Sendable {
     public let name: String
     public let model: String
-    public let udid: String
     public let pairingFilePath: String
+    public let pairingFile: any PairingFile
     
-    public init(name: String, model: String, udid: String, pairingFilePath: String) {
+    public init(name: String, model: String, pairingFilePath: String, pairingFile: any PairingFile) {
         self.name = name
         self.model = model
-        self.udid = udid
         self.pairingFilePath = pairingFilePath
+        self.pairingFile = pairingFile
     }
 }
 
 public protocol DeviceGatewayAPI: AnyObject, Sendable {
-    var isRPPairing: Bool { get }
     var pairingFileType: PairingProtocol { get }
     var pairingFileData: Data? { get }
     var pairingDataDict: [String: Any]? { get }
+
+    func getPort(for protocol: PairingProtocol) -> UInt16
+    func setPort(_ port: UInt16, for protocol: PairingProtocol)
 
     func start(pairingFileContent: String) async throws
     func setDeviceEndpointIp(_ ip: String?)
@@ -76,4 +78,11 @@ public protocol DeviceGatewayAPI: AnyObject, Sendable {
     func afcListDirectory(bundleId: String, path: String) async throws -> [String]
     func afcReadFile(bundleId: String, path: String) async throws -> Data
     func afcGetFileInfo(bundleId: String, path: String) async throws -> (isDirectory: Bool, fileSize: Int64)
+}
+
+public extension DeviceGatewayAPI {
+    /// Active target port for the currently loaded pairing file mode
+    var targetPort: UInt16 {
+        getPort(for: pairingFileType)
+    }
 }

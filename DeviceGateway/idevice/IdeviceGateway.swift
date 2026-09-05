@@ -76,26 +76,26 @@ public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
     private var adapter: OpaquePointer? = nil
     private var handshake: OpaquePointer? = nil
     private var deviceEndpointIp: String? = nil
-    private var remotePairingPort: UInt16 = MinimuxerConstants.remotePairingPort
+    private var protocolPorts: [PairingProtocol: UInt16] = [:]
     private var isInitialized = false
 
-    public private(set) var isRPPairing: Bool = false
     public private(set) var pairingFileType: PairingProtocol = .unknown
     
     public func getPairingFileType() -> PairingProtocol {
         return pairingFileType
     }
 
-    public func setRemotePairingPort(_ port: UInt16) {
-        debugLog("[IdeviceGateway] setRemotePairingPort(\(port)) called")
-        guard self.remotePairingPort != port else { return }
-        self.remotePairingPort = port
+    public func getPort(for protocol: PairingProtocol) -> UInt16 {
+        protocolPorts[`protocol`] ?? `protocol`.defaultPort
+    }
+
+    public func setPort(_ port: UInt16, for protocol: PairingProtocol) {
+        debugLog("[IdeviceGateway] setPort(\(port), for: .\(`protocol`)) called")
+        guard protocolPorts[`protocol`] != port else { return }
+        protocolPorts[`protocol`] = port
         invalidateConnection()
     }
 
-    static func validatePairingFile(from plist: [String: Any]?) throws -> PairingProtocol {
-        try PairingProtocol.validatePairingFile(from: plist)
-    }
     public private(set) var pairingFileData: Data? = nil{
         didSet {
             var pairingDict: [String: Any]? = nil
@@ -123,7 +123,7 @@ public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
         
         if let pairingFile = self.pairingFile {
             verboseLog("[IdeviceGateway] cleanup() freeing pairingFile")
-            if isRPPairing {
+            if pairingFileType == .rppairing {
                 rp_pairing_file_free(pairingFile)
             } else {
                 idevice_pairing_file_free(pairingFile)
@@ -131,7 +131,6 @@ public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
             self.pairingFile = nil
         }
 
-        isRPPairing = false
         pairingFileType = .unknown
         lastError = nil
         if let handshake = handshake {
@@ -209,7 +208,6 @@ public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
             parsedPairingFile = try PairingFileParser.parse(content: pairingFileContent)
             self.pairingFileData = parsedPairingFile.rawData
             self.pairingFileType = parsedPairingFile.mode
-            self.isRPPairing = (parsedPairingFile.mode == .rppairing)
         } catch {
             debugLog("[IdeviceGateway] start() failed: \(error.localizedDescription)")
             throw error
@@ -217,7 +215,7 @@ public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
 
         let data = parsedPairingFile.rawData
 
-        if isRPPairing {
+        if pairingFileType == .rppairing {
             try data.withUnsafeBytes { (buf: UnsafeRawBufferPointer) in
                 if let baseAddress = buf.baseAddress?.assumingMemoryBound(to: UInt8.self) {
                     verboseLog("[IdeviceGateway] start() calling rp_pairing_file_from_bytes")
@@ -231,8 +229,7 @@ public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
         } else {
             // Traditional usbmuxd / lockdown connection path
             // For pre-iOS 17 devices, a default connection can be established without RPPairing tunnel
-            verboseLog("[IdeviceGateway] start() setting isRPPairing = false (mode = .lockdown)")
-            isRPPairing = false
+            verboseLog("[IdeviceGateway] start() mode = .lockdown")
 
             // Parse pairing file content XML plist to self.pairingFile IdevicePairingFile*
             try data.withUnsafeBytes { (buf: UnsafeRawBufferPointer) in
@@ -313,9 +310,10 @@ public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
         let hostname = MinimuxerConstants.appName
         var err: UnsafeMutablePointer<IdeviceFfiError>? = nil
 
-        verboseLog("[IdeviceGateway] ensureRPConnection() calling tunnel_create_rppairing with deviceEndpointIp: \(deviceEndpointIp):\(remotePairingPort)")
+        let rpPort = getPort(for: .rppairing)
+        verboseLog("[IdeviceGateway] ensureRPConnection() calling tunnel_create_rppairing with deviceEndpointIp: \(deviceEndpointIp):\(rpPort)")
         try hostname.withCString { hostPtr in
-            try withSockaddr(ip: deviceEndpointIp, port: remotePairingPort) { sockaddrPtr, sockaddrLen in
+            try withSockaddr(ip: deviceEndpointIp, port: rpPort) { sockaddrPtr, sockaddrLen in
                 err = tunnel_create_rppairing(
                     sockaddrPtr,
                     sockaddrLen,
@@ -673,8 +671,8 @@ public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
         serviceName: String,
         action: (OpaquePointer) throws -> T
     ) throws -> T {
-        debugLog("[IdeviceGateway] performWithEitherService(\(serviceName)) started, isRPPairing: \(isRPPairing) (mode = .\(pairingFileType))")
-        if isRPPairing {
+        debugLog("[IdeviceGateway] performWithEitherService(\(serviceName)) started, mode = .\(pairingFileType)")
+        if pairingFileType == .rppairing {
             return try performWithService(connect: connectRP, cleanup: cleanup, serviceName: serviceName, action: action)
         } else {
             return try performWithTcpService(connect: connectLockdown, cleanup: cleanup, serviceName: serviceName, action: action)
@@ -682,9 +680,9 @@ public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
     }
 
     private func syncFetchUDID() throws -> String? {
-        debugLog("[IdeviceGateway] fetchUDID() started, isRPPairing: \(isRPPairing) (mode = .\(pairingFileType))")
+        debugLog("[IdeviceGateway] fetchUDID() started, mode = .\(pairingFileType)")
         try verifyInitialized()
-        if isRPPairing {
+        if pairingFileType == .rppairing {
             do {
                 verboseLog("[IdeviceGateway] fetchUDID() calling ensureRPConnection()")
                 try ensureRPConnection()
@@ -781,7 +779,7 @@ public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
     }
 
     private func syncGetLockdownValue(key: String) throws -> String? {
-        debugLog("[IdeviceGateway] getLockdownValue(key: \(key)) started, isRPPairing: \(isRPPairing) (mode = .\(pairingFileType))")
+        debugLog("[IdeviceGateway] getLockdownValue(key: \(key)) started, mode = .\(pairingFileType)")
         try verifyInitialized()
 
         return try performWithEitherService(
@@ -1477,7 +1475,7 @@ public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
         debugLog("[IdeviceGateway] mountPersonalizedDdi() called, image size: \(image.count), trustcache size: \(trustcache.count), manifest size: \(manifest.count)")
         try verifyInitialized()
 
-        if isRPPairing {
+        if pairingFileType == .rppairing {
             try mountPersonalizedDdiRsd(image: image, trustcache: trustcache, manifest: manifest)
             return
         }
@@ -1836,14 +1834,6 @@ public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
         }
     }
 
-    struct PairedDevice {
-        let name: String
-        let model: String
-        let udid: String
-        let pairingFilePath: String
-        let hostAltIrkHex: String
-    }
-
     private func generatePairingFile(hostName: String) throws -> (OpaquePointer, String) {
         var rpf: OpaquePointer? = nil
         verboseLog("[IdeviceGateway] generatePairingFile() generating pairing file")
@@ -1931,7 +1921,7 @@ public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
         outPath: String,
         fallbackUdid: String,
         initialAltIrk: [UInt8]? = nil
-    ) throws -> PairedDevice {
+    ) throws -> PairedDeviceRecord {
         verboseLog("[IdeviceGateway] finalizeAndSavePairedDevice() writing pairing file to: \(outPath)")
         let writeErr = rp_pairing_file_write(rpf, outPath)
         if let writeErr = writeErr {
@@ -1952,9 +1942,13 @@ public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
 
         var altIrkHex = initialAltIrk?.map { String(format: "%02x", $0) }.joined() ?? ""
         var pairedUdid = ""
+        var parsedPairingFile: (any PairingFile)? = nil
         if let pairedDataPtr = pairedDataPtr {
             let plistData = Data(bytes: pairedDataPtr, count: Int(pairedDataLen))
             idevice_data_free(pairedDataPtr, pairedDataLen)
+            if let content = String(data: plistData, encoding: .utf8) {
+                parsedPairingFile = try? PairingFileParser.parse(content: content)
+            }
             if let plist = try? PropertyListSerialization.propertyList(from: plistData, options: [], format: nil) as? [String: Any] {
                 pairedUdid = plist["identifier"] as? String ?? ""
                 if let altIrkData = plist["alt_irk"] as? Data {
@@ -1964,13 +1958,20 @@ public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
             }
         }
 
+        let resolvedPairingFile: any PairingFile
+        if let parsed = parsedPairingFile {
+            resolvedPairingFile = parsed
+        } else {
+            let diskContent = try String(contentsOfFile: outPath, encoding: .utf8)
+            resolvedPairingFile = try PairingFileParser.parse(content: diskContent)
+        }
+
         debugLog("[IdeviceGateway] finalizeAndSavePairedDevice() pairing complete")
-        return PairedDevice(
+        return PairedDeviceRecord(
             name: hostName,
             model: hostModel,
-            udid: pairedUdid.isEmpty ? fallbackUdid : pairedUdid,
             pairingFilePath: outPath,
-            hostAltIrkHex: altIrkHex
+            pairingFile: resolvedPairingFile
         )
     }
 
@@ -1980,7 +1981,7 @@ public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
         outPath: String,
         onReady: @escaping (String, UInt16, [String: String]) -> Void,
         onPin: @escaping (String) -> Void
-    ) throws -> PairedDevice {
+    ) throws -> PairedDeviceRecord {
         debugLog("[IdeviceGateway] startWirelessPair() called, hostName: \(hostName), hostModel: \(hostModel), outPath: \(outPath)")
         
         let (rpf, identifier) = try generatePairingFile(hostName: hostName)
@@ -2056,7 +2057,7 @@ public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
         hostModel: String,
         outPath: String,
         onRequestPin: @escaping (@escaping (String) -> Void) -> Void
-    ) throws -> PairedDevice {
+    ) throws -> PairedDeviceRecord {
         debugLog("[IdeviceGateway] triggerWirelessPair() called, targetIp: \(targetIp), targetPort: \(targetPort), hostName: \(hostName), hostModel: \(hostModel), outPath: \(outPath)")
         
         let (rpf, identifier) = try generatePairingFile(hostName: hostName)
@@ -2437,7 +2438,7 @@ extension IdeviceGateway {
         onReady: @escaping @Sendable (String, UInt16, [String: String]) -> Void,
         onPin: @escaping @Sendable (String) -> Void
     ) async throws -> PairedDeviceRecord {
-        let paired = try await withFFIDispatch {
+        try await withFFIDispatch {
             try self.syncStartWirelessPair(
                 hostName: hostName,
                 hostModel: hostModel,
@@ -2446,12 +2447,6 @@ extension IdeviceGateway {
                 onPin: onPin
             )
         }
-        return PairedDeviceRecord(
-            name: paired.name,
-            model: paired.model,
-            udid: paired.udid,
-            pairingFilePath: paired.pairingFilePath
-        )
     }
 
     public func triggerWirelessPair(
@@ -2462,7 +2457,7 @@ extension IdeviceGateway {
         outPath: String,
         onRequestPin: @escaping @Sendable (@escaping @Sendable (String) -> Void) -> Void
     ) async throws -> PairedDeviceRecord {
-        let paired = try await withFFIDispatch {
+        try await withFFIDispatch {
             try self.syncTriggerWirelessPair(
                 targetIp: targetIp,
                 targetPort: targetPort,
@@ -2472,12 +2467,6 @@ extension IdeviceGateway {
                 onRequestPin: onRequestPin
             )
         }
-        return PairedDeviceRecord(
-            name: paired.name,
-            model: paired.model,
-            udid: paired.udid,
-            pairingFilePath: paired.pairingFilePath
-        )
     }
 
     public func afcListDirectory(bundleId: String, path: String) async throws -> [String] {

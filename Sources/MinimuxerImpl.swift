@@ -73,7 +73,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
     }
     private let state = State()
     
-    var isrppairing: Bool { self.gateway.isRPPairing }
+    var pairingFileType: PairingProtocol { self.gateway.pairingFileType }
     
     var isLoggingEnabled: Bool { MinimuxerLogging.isLoggingEnabled }
     
@@ -101,13 +101,13 @@ final internal class MinimuxerImpl: MinimuxerAPI {
     
     @discardableResult
     private func checkDDIMountStatus() async throws(MinimuxerError) -> Bool {
-        let activeProtocol: PairingProtocol = isrppairing ? .rppairing : .lockdown
+        let activeProtocol = self.gateway.pairingFileType
         let ddiMounted = try await runIdeviceCheckingVPN("while checking DDI mount status", fallback: false) {
             try await isDDIMounted()
         }
         guard ddiMounted else {
-            let msg = isrppairing ? "dmg=\(ddiMounted) started=\(self.proxyServer.isListening)" : "DeveloperDiskImage is not mounted"
-            if isrppairing {
+            let msg = activeProtocol == .rppairing ? "dmg=\(ddiMounted) started=\(self.proxyServer.isListening)" : "DeveloperDiskImage is not mounted"
+            if activeProtocol == .rppairing {
                 verboseLog("minimuxer not ready (\(activeProtocol)): \(msg)")
             }
             throw MinimuxerError.mount(protocol: activeProtocol, reason: msg)
@@ -154,7 +154,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
                 }
 
                 // check iKEv2 too if in lockdown mode and ios >= 26.4
-                if !isrppairing && !net.isIKEv2IPSecAvailable {
+                if self.gateway.pairingFileType != .rppairing && !net.isIKEv2IPSecAvailable {
                     if #available(iOS 26.4, *) {
                         debugLog("[minimuxer] minimuxer not ready: no ipsec interface (required for lockdown on iOS 26.4+)")
                         return .failure(.invalidVPN("utun is present but no ipsec/IKEv2 interface found — LocalDevVPN may not support the lockdown protocol on iOS 26.4+"))
@@ -203,7 +203,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
             }
         }
 
-        let activeProtocol: PairingProtocol = isrppairing ? .rppairing : .lockdown
+        let activeProtocol = self.gateway.pairingFileType
 
         let deviceUDID: String?
         do {
@@ -223,7 +223,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
             return .failure(.invalidPairing(protocol: activeProtocol, reason: ".\(activeProtocol) UDID not found"))
         }
 
-        if !isrppairing {
+        if activeProtocol != .rppairing {
             guard self.proxyServer.isListening else {
                 return .failure(.muxerNotListening("Usbmuxd fake server is not listening"))
             }
@@ -281,7 +281,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
     
     
     private func restartMuxerServer() async throws {
-        guard !isrppairing else { return }
+        guard self.gateway.pairingFileType != .rppairing else { return }
         // restartMuxerServer only applies to the lockdown protocol path
         guard let pairingDict = self.gateway.pairingDataDict else {
             debugLog("[minimuxer] ERROR: Pairing DICT missing...ignoring restart MuxerServer")
@@ -313,7 +313,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
             $0.status = .inprogress     // mark inprogress
             $0.lastDocsPath = mountPath // record the mountPath
         }
-        // let idevice initialize its state and set isRPPairing
+        // let idevice initialize its state
         try await matchingPriority {
             try await self.gateway.start(pairingFileContent: pairingFile)
         }
@@ -346,7 +346,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
     }
     
     private func restartWith(pairingFile: String, op: String) async throws {
-        let activeProtocol: PairingProtocol = isrppairing ? .rppairing : .lockdown
+        let activeProtocol = self.gateway.pairingFileType
         guard let mountPath = await state.lastDocsPath else {
             throw MinimuxerError.mount(protocol: activeProtocol, reason: "start() should be invoked before requesting \(op). cause: lastDocsPath is nil")
         }
@@ -356,7 +356,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
 
     func restart() async throws {
         verboseLog("[minimuxer] Restarting services...")
-        let activeProtocol: PairingProtocol = isrppairing ? .rppairing : .lockdown
+        let activeProtocol = self.gateway.pairingFileType
         guard let pairingData = self.gateway.pairingFileData,
               let pairingFile = String(data: pairingData, encoding: .utf8) else {
             debugLog("[minimuxer] restart: no existing pairing file — cannot restart")
@@ -371,8 +371,8 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         try await restartWith(pairingFile: pairingFile, op: "reinitializePairingData")
     }
   
-    func testDeviceConnection(ifaddr: String?) -> Bool {
-        NetworkUtils.testDeviceConnection(ifaddr: ifaddr, isRPPairing: self.isrppairing)
+    func testDeviceConnection(ifaddr: String) -> Bool {
+        return NetworkUtils.testTCP(ip: ifaddr, port: self.gateway.targetPort)
     }
 
     private func ensureDDIMounted() async throws {
@@ -381,7 +381,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
             return
         }
         guard let mountPath = await state.lastDocsPath else {
-            let activeProtocol: PairingProtocol = isrppairing ? .rppairing : .lockdown
+            let activeProtocol = self.gateway.pairingFileType
             throw MinimuxerError.mount(protocol: activeProtocol, reason: "DDI mount path not set")
         }
         verboseLog("[minimuxer] DDI not mounted, mounting now before launching debug session...")

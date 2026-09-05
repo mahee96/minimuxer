@@ -75,7 +75,7 @@ final internal class WirelessPairService: WirelessPairAPI {
                         }
                     }
                 )
-                debugLog("[WirelessPairService] gateway.startWirelessPair SUCCEEDED with device: \(pairedDevice.name) (\(pairedDevice.udid))")
+                debugLog("[WirelessPairService] gateway.startWirelessPair SUCCEEDED with device: \(pairedDevice.name) (\(pairedDevice.pairingFilePath))")
                 outcome = .success(pairedDevice)
             } catch {
                 debugLog("[WirelessPairService] gateway.startWirelessPair FAILED with error: \(error)")
@@ -139,7 +139,7 @@ final internal class WirelessPairService: WirelessPairAPI {
                         }
                     }
                 )
-                debugLog("[WirelessPairService] gateway.triggerWirelessPair SUCCEEDED with device: \(pairedDevice.name) (\(pairedDevice.udid))")
+                debugLog("[WirelessPairService] gateway.triggerWirelessPair SUCCEEDED with device: \(pairedDevice.name) (\(pairedDevice.pairingFilePath))")
                 outcome = .success(pairedDevice)
             } catch {
                 debugLog("[WirelessPairService] gateway.triggerWirelessPair FAILED with error: \(error)")

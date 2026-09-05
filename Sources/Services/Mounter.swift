@@ -15,7 +15,6 @@ final internal class Mounter {
     let gateway: any DeviceGatewayAPI
     let proxyServer: UsbmuxdProxyServer
     let endpoint: DeviceEndpoint
-    private var isRPPairing: Bool { self.gateway.isRPPairing }
 
     init(gateway: any DeviceGatewayAPI, proxyServer: UsbmuxdProxyServer, endpoint: DeviceEndpoint) {
         self.gateway = gateway
@@ -32,8 +31,9 @@ final internal class Mounter {
         let dmgDocsPath = (path.hasSuffix("/") ? String(path.dropLast()) : path) + "/DMG"
         try? FileManager.default.createDirectory(atPath: dmgDocsPath, withIntermediateDirectories: true)
 
+        let activeProtocol = self.gateway.pairingFileType
         // Prerequisite: usbmuxd must be up (RP pairing connects via RSD, skips muxer)
-        if !isRPPairing {
+        if activeProtocol != .rppairing {
             guard self.proxyServer.isListening else {
                 debugLog("[minimuxer] mounter: usbmuxd not ready!")
                 throw MinimuxerError.noConnection("Usbmuxd fake server is not listening")
@@ -57,7 +57,7 @@ final internal class Mounter {
         // For lockdown path, fetch iOS version to dispatch pre-17 vs post-17
         var major = 17
         var versionStr: String? = nil
-        if !isRPPairing {
+        if activeProtocol != .rppairing {
             guard let v = try await runIdevice("getLockdownValue(ProductVersion)", body: {
                 try await self.gateway.getLockdownValue(key: "ProductVersion")
             }) else {
@@ -68,7 +68,6 @@ final internal class Mounter {
             major = Int(v.split(separator: ".").first ?? "0") ?? 0
         }
 
-        let activeProtocol: PairingProtocol = isRPPairing ? .rppairing : .lockdown
         var lastError: Error = MinimuxerError.mount(protocol: activeProtocol, reason: "Initial mount state")
         for attempt in 1...max(1, maxRetries) {
             do {

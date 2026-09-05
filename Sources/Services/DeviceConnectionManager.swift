@@ -51,6 +51,17 @@ actor DeviceConnectionManager {
         connectionConfigCache?.getConnectionMode() ?? .notConfigured
     }
 
+    private func tcpProbe(_ ip: String?) -> Bool {
+        guard let ip, !ip.isEmpty else {
+            debugLog("[minimuxer] [iface] tcpProbe skipped — IP is nil or empty")
+            return false
+        }
+        let port = gateway.targetPort
+        let reachable = NetworkUtils.testTCP(ip: ip, port: port)
+        debugLog("[minimuxer] [iface] tcpProbe \(ip):\(port) (protocol: .\(gateway.pairingFileType)) -> \(reachable ? "reachable" : "unreachable")")
+        return reachable
+    }
+
     @discardableResult
     func refresh(quietScan: Bool = false) async -> Bool {
         let connectionMode = getPreferredConnectionMode()
@@ -83,7 +94,7 @@ actor DeviceConnectionManager {
 
                 let rawOverrideIp = connectionConfigCache?.getOverrideTunnelPeerIp()
                 overridePeerIp = (rawOverrideIp?.isEmpty ?? true) ? nil : rawOverrideIp
-                isOverridePeerIpReachable = NetworkUtils.testDeviceConnection(ifaddr: overridePeerIp, isRPPairing: self.gateway.isRPPairing)
+                isOverridePeerIpReachable = tcpProbe(overridePeerIp)
             
                 let isOverrideIpUnchanged = lastOverrideIp == overridePeerIp
                 let isDerivedIpUnchanged = lastDerivedPeer == derivedPeerIp && lastDerivedPeerMask == derivedPeerSubnetMask
@@ -129,7 +140,7 @@ actor DeviceConnectionManager {
             case .remoteServer:
                 let rawServerIp = connectionConfigCache?.getRemoteServerIp()
                 let serverIp = (rawServerIp?.isEmpty ?? true) ? nil : rawServerIp
-                let reachable = NetworkUtils.testDeviceConnection(ifaddr: serverIp, isRPPairing: self.gateway.isRPPairing)
+                let reachable = tcpProbe(serverIp)
                 if self.lastConnectionMode == connectionMode && serverIp == remoteServerIp && reachable == isRemoteServerIpReachable {
                     debugLog("[minimuxer] [iface] no remote server state changes detected, skipping refresh")
                     return false
@@ -176,7 +187,7 @@ actor DeviceConnectionManager {
         for tunnel in tunnels {
             let candidates = resolveCandidatePeers(for: tunnel)
             for candidate in candidates {
-                if NetworkUtils.testDeviceConnection(ifaddr: candidate.ip, isRPPairing: self.gateway.isRPPairing) {
+                if tcpProbe(candidate.ip) {
                     return (tunnel, candidate, true)
                 }
             }

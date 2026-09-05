@@ -65,7 +65,7 @@ public struct ConnectionConfigBinding: Sendable {
 }
 
 public protocol MinimuxerAPI: AnyObject {
-    var isrppairing: Bool { get }
+    var pairingFileType: PairingProtocol { get }
     var isLoggingEnabled: Bool { get }
     var isPairingFileLoaded: Bool { get }
     func getPairingFileType() -> PairingProtocol
@@ -86,7 +86,7 @@ public protocol MinimuxerAPI: AnyObject {
     func isDDIMounted() async throws -> Bool
 
     func fetchUDID() async throws -> String?
-    func testDeviceConnection(ifaddr: String?) -> Bool
+    func testDeviceConnection(ifaddr: String) -> Bool
 
     func sendIpaAfc(bundleId: String, ipaBytes: Data) async throws
     func sendAppBundleAfc(bundleId: String, appURL: URL) async throws
@@ -165,9 +165,9 @@ public final class Minimuxer: MinimuxerFacade, @unchecked Sendable {
 
         switch resolvedBackend {
         case .libimobiledevice:
-            LibimobiledeviceGateway.shared.setRemotePairingPort(resolvedPort)
+            LibimobiledeviceGateway.shared.setPort(resolvedPort, for: .rppairing)
         case .idevice:
-            IdeviceGateway.shared.setRemotePairingPort(resolvedPort)
+            IdeviceGateway.shared.setPort(resolvedPort, for: .rppairing)
         }
 
         if let cached = cachedInstance, currentBackend == resolvedBackend {
@@ -241,18 +241,18 @@ public extension EMProxyAPI {
 }
 
 public enum LocalInterfaceType: String, Hashable, Sendable, CaseIterable, Comparable {
-    case vpnUtun = "VPN (uTun)"
-    case vpnIpsec = "VPN (IPSec)"
-    case wifi = "Wi-Fi"
-    case usbLinkLocal = "USB / Link-Local"
-    case ethernet = "Ethernet / Adapter"
-    case cellular = "Cellular"
-    case airdrop = "AirDrop (AWDL)"
+    case vpnUtun        = "VPN (uTun)"
+    case vpnIpsec       = "VPN (IPSec)"
+    case wifi           = "Wi-Fi"
+    case usbLinkLocal   = "USB / Link-Local"
+    case ethernet       = "Ethernet / Adapter"
+    case cellular       = "Cellular"
+    case airdrop        = "AirDrop (AWDL)"
     case lowLatencyWLAN = "Low-Latency WLAN"
-    case hotspotBridge = "Personal Hotspot / Bridge"
-    case loopback = "Loopback"
-    case packetCapture = "Packet Capture"
-    case other = "Other"
+    case hotspotBridge  = "Personal Hotspot / Bridge"
+    case loopback       = "Loopback"
+    case packetCapture  = "Packet Capture"
+    case other          = "Other"
 
     private static let priorityOrder: [LocalInterfaceType] = [
         .wifi,
@@ -283,15 +283,15 @@ public enum LocalInterfaceType: String, Hashable, Sendable, CaseIterable, Compar
 
     public var symbolName: String {
         switch self {
-        case .vpnUtun, .vpnIpsec: return "lock.shield"
-        case .wifi, .lowLatencyWLAN: return "wifi"
+        case .vpnUtun, .vpnIpsec:      return "lock.shield"
+        case .wifi, .lowLatencyWLAN:   return "wifi"
         case .usbLinkLocal, .ethernet: return "cable.connector"
-        case .cellular: return "antenna.radiowaves.left.and.right"
-        case .loopback: return "arrow.triangle.2.circlepath"
-        case .airdrop: return "airdrop"
-        case .hotspotBridge: return "personalhotspot"
-        case .packetCapture: return "waveform.path.ecg"
-        case .other: return "network"
+        case .cellular:                return "antenna.radiowaves.left.and.right"
+        case .loopback:                return "arrow.triangle.2.circlepath"
+        case .airdrop:                 return "airdrop"
+        case .hotspotBridge:           return "personalhotspot"
+        case .packetCapture:           return "waveform.path.ecg"
+        case .other:                   return "network"
         }
     }
 

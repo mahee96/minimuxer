@@ -75,7 +75,6 @@ private let kDefaultTimeoutMs: Int32 = 120000
 public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
     public static let shared = LibimobiledeviceGateway()
 
-    public private(set) var isRPPairing: Bool = false
     public private(set) var pairingFileType: PairingProtocol = .unknown
     public private(set) var pairingFileData: Data? = nil {
         didSet {
@@ -95,7 +94,7 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
     private var cachedUDID: String? = nil
     private var isInitialized = false
     private var deviceEndpointIp: String? = nil
-    private var remotePairingPort: UInt16 = MinimuxerConstants.remotePairingPort
+    private var protocolPorts: [PairingProtocol: UInt16] = [:]
     private var rpIdentity: rppairing_identity_t? = nil
     private var activeTunnel: rppairing_tunnel_t? = nil
     private var activeTunnelInfo: rppairing_tunnel_info_t? = nil
@@ -130,7 +129,6 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
         isInitialized = false
         self.pairingFileData = nil
         self.cachedUDID = nil
-        self.isRPPairing = false
         self.pairingFileType = .unknown
         cleanupRPTunnel()
         rpIdentity = nil
@@ -140,16 +138,20 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
         return pairingFileType
     }
 
+    public func getPort(for protocol: PairingProtocol) -> UInt16 {
+        protocolPorts[`protocol`] ?? `protocol`.defaultPort
+    }
+
+    public func setPort(_ port: UInt16, for protocol: PairingProtocol) {
+        debugLog("[LibimobiledeviceGateway] setPort(\(port), for: .\(`protocol`)) called")
+        guard protocolPorts[`protocol`] != port else { return }
+        protocolPorts[`protocol`] = port
+        cleanupRPTunnel()
+    }
+
     public func setDeviceEndpointIp(_ ip: String?) {
         debugLog("[LibimobiledeviceGateway] setDeviceEndpointIp(\(ip ?? "nil")) called")
         self.deviceEndpointIp = ip
-    }
-
-    public func setRemotePairingPort(_ port: UInt16) {
-        debugLog("[LibimobiledeviceGateway] setRemotePairingPort(\(port)) called")
-        guard self.remotePairingPort != port else { return }
-        self.remotePairingPort = port
-        cleanupRPTunnel()
     }
 
     public func setLogging(_ enabled: Bool) {
@@ -179,7 +181,7 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
             throw LibimobiledeviceGatewayError(.notInitialized, reason: "RPPairing identity not loaded")
         }
         let host = try requireDeviceEndpointIp()
-        let port = self.remotePairingPort
+        let port = getPort(for: .rppairing)
         var client: rppairing_client_t? = nil
         let err = rppairing_client_new(host, port, MinimuxerConstants.appName, &client)
         guard err == RPPAIRING_E_SUCCESS, let client = client else {
@@ -407,7 +409,6 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
         let pairingFile = try PairingFileParser.parse(content: pairingFileContent)
         self.pairingFileData = pairingFile.rawData
         self.pairingFileType = pairingFile.mode
-        self.isRPPairing = (pairingFile.mode == .rppairing)
 
         if pairingFile.mode == .rppairing {
             var identity = rppairing_identity_t()
@@ -446,7 +447,7 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
     }
 
     func syncGetLockdownValue(key: String) throws -> String? {
-        if isRPPairing {
+        if pairingFileType == .rppairing {
             return try withRSDService(.lockdownd) { stream in
                 try rsdSendPlist(stream, dict: ["Label": "SideStore", "Request": "GetValue", "Key": key])
                 let resp = try rsdRecvPlist(stream)
@@ -475,7 +476,7 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
     }
 
     func syncIsDDIMounted() throws -> Bool {
-        if isRPPairing {
+        if pairingFileType == .rppairing {
             return try withRSDService(.mobileImageMounter) { stream in
                 try rsdSendPlist(stream, dict: ["Command": "LookupImage", "ImageType": "Developer"])
                 let resp = try rsdRecvPlist(stream)
@@ -502,7 +503,7 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
     }
 
     func syncMountDeveloperImage(image: Data, signature: Data) throws {
-        if isRPPairing {
+        if pairingFileType == .rppairing {
             try withRSDService(.mobileImageMounter) { stream in
                 try rsdSendPlist(stream, dict: ["Command": "ReceiveBytes", "ImageSize": image.count, "ImageType": "Developer"])
                 let resp1 = try rsdRecvPlist(stream)
@@ -563,7 +564,7 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
     }
 
     func syncMountPersonalizedDdi(image: Data, trustcache: Data, manifest: Data) throws {
-        if isRPPairing {
+        if pairingFileType == .rppairing {
             try withRSDService(.mobileImageMounter) { stream in
                 debugLog("[LibimobiledeviceGateway] Sending ReceiveBytes for DDI (size: \(image.count))...")
                 try rsdSendPlist(stream, dict: ["Command": "ReceiveBytes", "ImageSize": image.count, "ImageType": "Personalized"])
@@ -649,7 +650,7 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
     }
 
     func syncInstallProvisioningProfile(profile: Data) throws {
-        if isRPPairing {
+        if pairingFileType == .rppairing {
             try withRSDService(.misagent) { stream in
                 debugLog("[LibimobiledeviceGateway] Installing provisioning profile via RSD misagent...")
                 try rsdSendPlist(stream, dict: ["MessageType": "Install", "Profile": profile])
@@ -683,7 +684,7 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
     }
 
     func syncRemoveProvisioningProfile(id: String) throws {
-        if isRPPairing {
+        if pairingFileType == .rppairing {
             try withRSDService(.misagent) { stream in
                 try rsdSendPlist(stream, dict: ["MessageType": "Remove", "ProfileID": id])
                 let resp = try rsdRecvPlist(stream)
@@ -707,7 +708,7 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
     }
 
     func syncDumpProfiles(docsPath: String) throws -> String {
-        if isRPPairing {
+        if pairingFileType == .rppairing {
             return try withRSDService(.misagent) { stream in
                 try rsdSendPlist(stream, dict: ["MessageType": "CopyAll"])
                 let resp = try rsdRecvPlist(stream, timeoutMs: 10000)
@@ -747,7 +748,7 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
     }
 
     func syncRemoveApp(bundleId: String) throws {
-        if isRPPairing {
+        if pairingFileType == .rppairing {
             try withRSDService(.installationProxy) { stream in
                 try rsdSendPlist(stream, dict: [
                     "Command": "Uninstall",
@@ -873,7 +874,7 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
     }
 
     func syncsendIpaAfc(bundleId: String, ipaBytes: Data) throws {
-        if isRPPairing {
+        if pairingFileType == .rppairing {
             try withRSDService(.afc) { stream in
                 var packetNum: UInt64 = 0
                 let remotePath = "PublicStaging/\(bundleId).ipa"
@@ -940,7 +941,7 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
     }
 
     func syncInstallIpa(bundleId: String) throws {
-        if isRPPairing {
+        if pairingFileType == .rppairing {
             try withRSDService(.installationProxy) { stream in
                 let remotePath = "PublicStaging/\(bundleId).ipa"
                 let dict: [String: Any] = [
@@ -987,7 +988,7 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
         let remoteBaseDir = "PublicStaging/\(bundleId)"
         let remoteAppPath = "\(remoteBaseDir)/\(appName)"
 
-        if isRPPairing {
+        if pairingFileType == .rppairing {
             try withRSDService(.afc) { stream in
                 var packetNum: UInt64 = 0
 
@@ -1099,7 +1100,7 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
 
     func syncInstallAppBundle(bundleId: String, appName: String) throws {
         let remotePath = "PublicStaging/\(bundleId)/\(appName)"
-        if isRPPairing {
+        if pairingFileType == .rppairing {
             try withRSDService(.installationProxy) { stream in
                 let dict: [String: Any] = [
                     "Command": "Install",
@@ -1144,7 +1145,7 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
     }
 
     func syncWipeContainer(identifier: String) throws {
-        if isRPPairing {
+        if pairingFileType == .rppairing {
             try withRSDService(.houseArrest) { stream in
                 try rsdSendPlist(stream, dict: [
                     "Command": "VendContainer",
@@ -1176,7 +1177,7 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
     }
 
     func syncDebugApp(appId: String) throws {
-        if isRPPairing {
+        if pairingFileType == .rppairing {
             try withRSDService(.debugserver) { stream in
                 debugLog("[LibimobiledeviceGateway] RSD debugApp connected to debugserver for \(appId)")
             }
@@ -1193,7 +1194,7 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
     }
 
     func syncDebugProcess(pid: UInt32) throws {
-        if isRPPairing {
+        if pairingFileType == .rppairing {
             try withRSDService(.debugserver) { stream in
                 debugLog("[LibimobiledeviceGateway] RSD debugProcess connected to debugserver for PID \(pid)")
             }
@@ -1210,7 +1211,7 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
     }
 
     func syncPerformHeartbeat(interval: UInt64, newInterval: inout UInt64) throws {
-        if isRPPairing {
+        if pairingFileType == .rppairing {
             try withRSDService(.heartbeat) { stream in
                 try rsdSendPlist(stream, dict: ["Command": "Pico"])
                 let resp = try rsdRecvPlist(stream, timeoutMs: 5000)

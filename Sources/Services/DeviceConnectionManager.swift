@@ -29,11 +29,18 @@ actor DeviceConnectionManager {
     // remote server params
     var remoteServerIp: String?
     var isRemoteServerIpReachable = false
-    var deviceProbeTimeout: Int
+
+    private let lock = NSLock()
+    private nonisolated(unsafe) var cachedDeviceProbeTimeout: Int
+
+    nonisolated var deviceProbeTimeout: Int {
+        get { lock.withLock { cachedDeviceProbeTimeout } }
+        set { lock.withLock { cachedDeviceProbeTimeout = newValue } }
+    }
 
     init(gateway: any DeviceGatewayAPI, deviceProbeTimeout: Int = MinimuxerConstants.defaultTCPProbeTimeoutMs) {
         self.gateway = gateway
-        self.deviceProbeTimeout = deviceProbeTimeout
+        self.cachedDeviceProbeTimeout = deviceProbeTimeout
     }
 
     func bindConnectionConfig(_ binding: ConnectionConfigBinding) {

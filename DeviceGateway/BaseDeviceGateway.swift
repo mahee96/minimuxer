@@ -15,10 +15,10 @@ enum AbstractClassError: Error, Sendable {
 }
 
 open class BaseDeviceGateway: @unchecked Sendable {
-    public private(set) var pairingFileType: PairingProtocol = .unknown
-    public private(set) var pairingDataDict: [String: any Sendable]? = nil
+    public package(set) var pairingFileType: PairingProtocol = .unknown
+    public package(set) var pairingDataDict: [String: any Sendable]? = nil
 
-    public private(set) var pairingFileData: Data? = nil {
+    public package(set) var pairingFileData: Data? = nil {
         didSet {
             guard let pairingFileData else {
                 self.pairingDataDict = nil
@@ -32,11 +32,11 @@ open class BaseDeviceGateway: @unchecked Sendable {
         }
     }
 
-    public internal(set) var deviceEndpointIp: String? = nil
-    public internal(set) var isInitialized: Bool = false
+    public package(set) var deviceEndpointIp: String? = nil
+    public package(set) var isInitialized: Bool = false
     private var protocolPorts: [PairingProtocol: UInt16] = [:]
 
-    public init() throws {
+    package init() throws {
         if Self.self === BaseDeviceGateway.self {
             throw AbstractClassError.abstractInitializerInvoked
         }

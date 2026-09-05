@@ -72,35 +72,16 @@ public enum DeviceService: String, Sendable {
 private let kAfcChunkSize = 1024 * 1024 // 1 MB AFC bulk transfer chunk
 private let kDefaultTimeoutMs: Int32 = 120000
 
-public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
+public final class LibimobiledeviceGateway: BaseDeviceGateway, DeviceGatewayAPI {
     public static let shared = LibimobiledeviceGateway()
 
-    public private(set) var pairingFileType: PairingProtocol = .unknown
-    public private(set) var pairingFileData: Data? = nil {
-        didSet {
-            var pairingDict: [String: Any]? = nil
-            if let pairingFileData {
-                pairingDict = try? PropertyListSerialization.propertyList(
-                    from: pairingFileData,
-                    options: [],
-                    format: nil
-                ) as? [String: Any]
-            }
-            self.pairingDataDict = pairingDict
-        }
-    }
-    public private(set) var pairingDataDict: [String: Any]? = nil
-
     private var cachedUDID: String? = nil
-    private var isInitialized = false
-    private var deviceEndpointIp: String? = nil
-    private var protocolPorts: [PairingProtocol: UInt16] = [:]
     private var rpIdentity: rppairing_identity_t? = nil
     private var activeTunnel: rppairing_tunnel_t? = nil
     private var activeTunnelInfo: rppairing_tunnel_info_t? = nil
     private var activeRsd: rppairing_rsd_t? = nil
 
-    private init() {
+    private override init() {
         let sslOpts = UInt64(OPENSSL_INIT_LOAD_SSL_STRINGS | OPENSSL_INIT_LOAD_CRYPTO_STRINGS | OPENSSL_INIT_ADD_ALL_CIPHERS | OPENSSL_INIT_ADD_ALL_DIGESTS)
         let sslRes = OpenSSLInitResult(code: OPENSSL_init_ssl(sslOpts, nil))
         let sslErrs = getOpenSSLErrors()
@@ -118,6 +99,7 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
         let baseProv = OSSL_PROVIDER_load(nil, "base")
         let baseErrs = getOpenSSLErrors()
         debugLog("[LibimobiledeviceGateway] OSSL_PROVIDER_load('base'): \(String(describing: baseProv))\(baseErrs.isEmpty ? "" : " (errors: \(baseErrs.joined(separator: ", ")))")")
+        super.init()
     }
 
     deinit {
@@ -126,37 +108,20 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
 
     private func cleanup() {
         debugLog("[LibimobiledeviceGateway] cleanup() called")
-        isInitialized = false
-        self.pairingFileData = nil
+        setInitialized(false)
+        setPairingFileData(nil)
         self.cachedUDID = nil
-        self.pairingFileType = .unknown
+        setPairingFileType(.unknown)
         cleanupRPTunnel()
         rpIdentity = nil
     }
 
-    public func getPairingFileType() -> PairingProtocol {
-        return pairingFileType
-    }
-
-    public func getPort(for protocol: PairingProtocol) -> UInt16 {
-        protocolPorts[`protocol`] ?? `protocol`.defaultPort
-    }
-
-    public func setPort(_ port: UInt16, for protocol: PairingProtocol) {
-        debugLog("[LibimobiledeviceGateway] setPort(\(port), for: .\(`protocol`)) called")
-        guard protocolPorts[`protocol`] != port else { return }
-        protocolPorts[`protocol`] = port
+    public override func invalidateConnection() {
         cleanupRPTunnel()
     }
 
-    public func setDeviceEndpointIp(_ ip: String?) {
-        debugLog("[LibimobiledeviceGateway] setDeviceEndpointIp(\(ip ?? "nil")) called")
-        self.deviceEndpointIp = ip
-    }
-
-    public func setLogging(_ enabled: Bool) {
-        DeviceGatewayLogging.setLogging(enabled)
-        debugLog("[LibimobiledeviceGateway] setLogging(\(enabled)) called")
+    public override func setLogging(_ enabled: Bool) {
+        super.setLogging(enabled)
         idevice_set_debug_level(enabled ? 1 : 0)
         rppairing_set_debug_level(enabled ? 1 : 0)
     }
@@ -407,8 +372,8 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
         cleanup()
 
         let pairingFile = try PairingFileParser.parse(content: pairingFileContent)
-        self.pairingFileData = pairingFile.rawData
-        self.pairingFileType = pairingFile.mode
+        setPairingFileData(pairingFile.rawData)
+        setPairingFileType(pairingFile.mode)
 
         if pairingFile.mode == .rppairing {
             var identity = rppairing_identity_t()
@@ -427,7 +392,7 @@ public final class LibimobiledeviceGateway: @unchecked Sendable, DeviceGatewayAP
             self.cachedUDID = udid
         }
 
-        self.isInitialized = true
+        setInitialized(true)
 
         debugLog("[LibimobiledeviceGateway] Initialized successfully with \(pairingFile.mode.rawValue) pairing")
     }

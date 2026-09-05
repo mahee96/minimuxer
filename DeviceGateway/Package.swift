@@ -69,6 +69,7 @@ let package = Package(
                 "libimobiledevice"
             ],
             sources: [
+                "BaseDeviceGateway.swift",
                 "DeviceGatewayAPI.swift",
                 "DeviceGatewayError.swift",
                 "DeviceGatewayLogging.swift"

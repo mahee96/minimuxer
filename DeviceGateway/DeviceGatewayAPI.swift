@@ -26,7 +26,7 @@ public struct PairedDeviceRecord: Sendable {
 public protocol DeviceGatewayAPI: AnyObject, Sendable {
     var pairingFileType: PairingProtocol { get }
     var pairingFileData: Data? { get }
-    var pairingDataDict: [String: Any]? { get }
+    var pairingDataDict: [String: any Sendable]? { get }
 
     func getPort(for protocol: PairingProtocol) -> UInt16
     func setPort(_ port: UInt16, for protocol: PairingProtocol)

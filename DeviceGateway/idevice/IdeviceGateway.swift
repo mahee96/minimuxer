@@ -33,7 +33,7 @@ extension String {
     }
 }
 
-public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
+public final class IdeviceGateway: BaseDeviceGateway, DeviceGatewayAPI {
     public static let shared = IdeviceGateway()
     var lastError: Error? = nil
 
@@ -71,46 +71,13 @@ public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
         }
     }
 
-
     private var pairingFile: OpaquePointer? = nil
     private var adapter: OpaquePointer? = nil
     private var handshake: OpaquePointer? = nil
-    private var deviceEndpointIp: String? = nil
-    private var protocolPorts: [PairingProtocol: UInt16] = [:]
-    private var isInitialized = false
 
-    public private(set) var pairingFileType: PairingProtocol = .unknown
-    
-    public func getPairingFileType() -> PairingProtocol {
-        return pairingFileType
+    private override init() {
+        super.init()
     }
-
-    public func getPort(for protocol: PairingProtocol) -> UInt16 {
-        protocolPorts[`protocol`] ?? `protocol`.defaultPort
-    }
-
-    public func setPort(_ port: UInt16, for protocol: PairingProtocol) {
-        debugLog("[IdeviceGateway] setPort(\(port), for: .\(`protocol`)) called")
-        guard protocolPorts[`protocol`] != port else { return }
-        protocolPorts[`protocol`] = port
-        invalidateConnection()
-    }
-
-    public private(set) var pairingFileData: Data? = nil{
-        didSet {
-            var pairingDict: [String: Any]? = nil
-            if let pairingFileData {
-                pairingDict = try? PropertyListSerialization.propertyList(
-                    from: pairingFileData,
-                    options: [], format: nil
-                ) as? [String: Any]
-            }
-            self.pairingDataDict = pairingDict
-        }
-    }
-    public private(set) var pairingDataDict: [String: Any]? = nil
-
-    private init() {}
 
     deinit {
         cleanup()
@@ -118,8 +85,8 @@ public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
 
     private func cleanup() {
         debugLog("[IdeviceGateway] cleanup() called")
-        isInitialized = false
-        self.pairingFileData = nil
+        setInitialized(false)
+        setPairingFileData(nil)
         
         if let pairingFile = self.pairingFile {
             verboseLog("[IdeviceGateway] cleanup() freeing pairingFile")
@@ -131,7 +98,7 @@ public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
             self.pairingFile = nil
         }
 
-        pairingFileType = .unknown
+        setPairingFileType(.unknown)
         lastError = nil
         if let handshake = handshake {
             verboseLog("[IdeviceGateway] cleanup() freeing handshake")
@@ -152,7 +119,7 @@ public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
         }
     }
 
-    private func invalidateConnection() {
+    public override func invalidateConnection() {
         debugLog("[IdeviceGateway] invalidateConnection() called - clearing stale adapter and handshake")
         if let handshake = handshake {
             rsd_handshake_free(handshake)
@@ -164,30 +131,8 @@ public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
         }
     }
 
-    public func setDeviceEndpointIp(_ ip: String?) {
-        debugLog("[IdeviceGateway] setDeviceEndpointIp(\(ip ?? "nil")) called")
-        guard self.deviceEndpointIp != ip else {
-            debugLog("[IdeviceGateway] setDeviceEndpointIp: IP is already \(ip ?? "nil"), skipping invalidation")
-            return
-        }
-        self.deviceEndpointIp = ip
-        
-        // Invalidate current cached connections
-        if handshake != nil {
-            debugLog("[IdeviceGateway] setDeviceEndpointIp invalidating handshake")
-            rsd_handshake_free(handshake)
-            self.handshake = nil
-        }
-        if adapter != nil {
-            debugLog("[IdeviceGateway] setDeviceEndpointIp invalidating adapter")
-            adapter_free(adapter)
-            self.adapter = nil
-        }
-    }
-
-    public func setLogging(_ enabled: Bool) {
-        DeviceGatewayLogging.setLogging(enabled)
-        debugLog("[IdeviceGateway] setLogging(\(enabled)) called")
+    public override func setLogging(_ enabled: Bool) {
+        super.setLogging(enabled)
         idevice_init_logger(enabled ? IdeviceLogLevel(rawValue: 1) : IdeviceLogLevel(rawValue: 0), IdeviceLogLevel(rawValue: 0), nil)
         #if DEBUG
         // just comment/uncomment to override above set logging level during local debugging
@@ -206,8 +151,8 @@ public final class IdeviceGateway: @unchecked Sendable, DeviceGatewayAPI {
         let parsedPairingFile: any PairingFile
         do {
             parsedPairingFile = try PairingFileParser.parse(content: pairingFileContent)
-            self.pairingFileData = parsedPairingFile.rawData
-            self.pairingFileType = parsedPairingFile.mode
+            setPairingFileData(parsedPairingFile.rawData)
+            setPairingFileType(parsedPairingFile.mode)
         } catch {
             debugLog("[IdeviceGateway] start() failed: \(error.localizedDescription)")
             throw error

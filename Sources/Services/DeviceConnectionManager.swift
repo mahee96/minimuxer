@@ -29,9 +29,11 @@ actor DeviceConnectionManager {
     // remote server params
     var remoteServerIp: String?
     var isRemoteServerIpReachable = false
+    var deviceProbeTimeout: Int
 
-    init(gateway: any DeviceGatewayAPI) {
+    init(gateway: any DeviceGatewayAPI, deviceProbeTimeout: Int = MinimuxerConstants.defaultTCPProbeTimeoutMs) {
         self.gateway = gateway
+        self.deviceProbeTimeout = deviceProbeTimeout
     }
 
     func bindConnectionConfig(_ binding: ConnectionConfigBinding) {
@@ -57,7 +59,7 @@ actor DeviceConnectionManager {
             return false
         }
         let port = gateway.servicePort
-        let reachable = NetworkUtils.testTCP(ip: ip, port: port)
+        let reachable = NetworkUtils.testTCP(ip: ip, port: port, timeoutMs: deviceProbeTimeout)
         debugLog("[minimuxer] [iface] tcpProbe \(ip):\(port) (protocol: .\(gateway.pairingFileType)) -> \(reachable ? "reachable" : "unreachable")")
         return reachable
     }

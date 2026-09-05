@@ -69,6 +69,7 @@ public protocol MinimuxerAPI: AnyObject {
     var isLoggingEnabled: Bool { get }
     var isPairingFileLoaded: Bool { get }
     func getPairingFileType() -> PairingProtocol
+    var deviceProbeTimeout: Int { get }
     
     var statusPublisher: AnyPublisher<Result<Bool, MinimuxerError>, Never> { get }
     
@@ -77,6 +78,7 @@ public protocol MinimuxerAPI: AnyObject {
     func describeError(_ error: MinimuxerError) -> String
     func bindConnectionConfig(_ binding: ConnectionConfigBinding) async
     func setLogging(_ enabled: Bool)
+    func setDeviceProbeTimeout(_ timeoutMs: Int)
 
     func start(pairingFile: String, mountPath: String) async throws
     func stop() async throws
@@ -86,7 +88,7 @@ public protocol MinimuxerAPI: AnyObject {
     func isDDIMounted() async throws -> Bool
 
     func fetchUDID() async throws -> String?
-    func testDeviceConnection(ifaddr: String) -> Bool
+    func testDeviceConnection(ifaddr: String, timeout: Int) -> Bool
 
     func sendIpaAfc(bundleId: String, ipaBytes: Data) async throws
     func sendAppBundleAfc(bundleId: String, appURL: URL) async throws
@@ -108,6 +110,10 @@ public protocol MinimuxerAPI: AnyObject {
 public extension MinimuxerAPI {
     func isReady(withNetworkCheck: Bool = true, withDDIMountCheck: Bool = false) async -> Result<Bool, MinimuxerError> {
         await isReady(withNetworkCheck: withNetworkCheck, withDDIMountCheck: withDDIMountCheck)
+    }
+
+    func testDeviceConnection(ifaddr: String) -> Bool {
+        testDeviceConnection(ifaddr: ifaddr, timeout: self.deviceProbeTimeout)
     }
 }
 
@@ -131,6 +137,7 @@ public final class Minimuxer: MinimuxerFacade, @unchecked Sendable {
     public let emproxy: any EMProxyAPI
     public let gateway: any DeviceGatewayAPI
 
+    private static var currentDeviceProbeTimeout: Int = MinimuxerConstants.defaultTCPProbeTimeoutMs
     private static var currentBackend: GatewayBackend = .idevice
     private static var currentRemotePairingPort: UInt16 = MinimuxerConstants.remotePairingPort
     private static var cachedInstance: Minimuxer?
@@ -152,16 +159,19 @@ public final class Minimuxer: MinimuxerFacade, @unchecked Sendable {
 
     public static func shared(
         backend: GatewayBackend? = nil,
-        remotePairingPort: UInt16? = nil
+        remotePairingPort: UInt16? = nil,
+        deviceProbeTimeout: Int? = nil
     ) -> Minimuxer {
         lock.lock()
         defer { lock.unlock() }
 
         let resolvedBackend = backend ?? currentBackend
         let resolvedPort = remotePairingPort ?? currentRemotePairingPort
+        let resolvedTimeout = deviceProbeTimeout ?? currentDeviceProbeTimeout
 
         currentBackend = resolvedBackend
         currentRemotePairingPort = resolvedPort
+        currentDeviceProbeTimeout = resolvedTimeout
 
         switch resolvedBackend {
         case .libimobiledevice:
@@ -171,12 +181,15 @@ public final class Minimuxer: MinimuxerFacade, @unchecked Sendable {
         }
 
         if let cached = cachedInstance, currentBackend == resolvedBackend {
+            cached.core.setDeviceProbeTimeout(resolvedTimeout)
             return cached
         }
-        return createInstance(backend: resolvedBackend)
+        let instance = createInstance(backend: resolvedBackend, deviceProbeTimeout: resolvedTimeout)
+        cachedInstance = instance
+        return instance
     }
 
-    private static func createInstance(backend: GatewayBackend) -> Minimuxer {
+    private static func createInstance(backend: GatewayBackend, deviceProbeTimeout: Int) -> Minimuxer {
         let gateway: any DeviceGatewayAPI
         switch backend {
         case .libimobiledevice:
@@ -188,7 +201,7 @@ public final class Minimuxer: MinimuxerFacade, @unchecked Sendable {
         let emproxy = EMProxyImpl()
         let endpoint = DeviceEndpoint(gateway: gateway)
         let proxyServer = UsbmuxdProxyServer(gateway: gateway)
-        let connectionManager = DeviceConnectionManager(gateway: gateway)
+        let connectionManager = DeviceConnectionManager(gateway: gateway, deviceProbeTimeout: deviceProbeTimeout)
         let network = NetworkObserverService(
             connectionManager: connectionManager,
             endpoint: endpoint,
@@ -219,7 +232,6 @@ public final class Minimuxer: MinimuxerFacade, @unchecked Sendable {
             core: impl
         )
 
-        cachedInstance = instance
         currentBackend = backend
         return instance
     }

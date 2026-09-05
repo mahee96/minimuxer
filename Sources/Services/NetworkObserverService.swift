@@ -80,7 +80,7 @@ final internal class NetworkObserverService: NetworkObserverAPI, @unchecked Send
         return true
     }
     
-    func handleNetworkChange() async {
+    private func handleNetworkChange() async {
         await refreshEndpoint()
         
         // Always re-evaluate and publish network change events as is

@@ -263,6 +263,14 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         MinimuxerLogging.setLogging(enabled)
         self.gateway.setLogging(enabled)
     }
+
+    public var deviceProbeTimeout: Int {
+        self.connectionManager.deviceProbeTimeout
+    }
+
+    func setDeviceProbeTimeout(_ timeoutMs: Int) {
+        self.connectionManager.deviceProbeTimeout = timeoutMs
+    }
     
     func retargetUsbmuxdAddr() {
         verboseLog("[minimuxer] unsetenv(USBMUXD_SOCKET_ADDRESS)")
@@ -371,8 +379,8 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         try await restartWith(pairingFile: pairingFile, op: "reinitializePairingData")
     }
   
-    func testDeviceConnection(ifaddr: String) -> Bool {
-        return NetworkUtils.testTCP(ip: ifaddr, port: self.gateway.servicePort)
+    func testDeviceConnection(ifaddr: String, timeout: Int) -> Bool {
+        return NetworkUtils.testTCP(ip: ifaddr, port: self.gateway.servicePort, timeoutMs: timeout)
     }
 
     private func ensureDDIMounted() async throws {

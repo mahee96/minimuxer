@@ -81,8 +81,8 @@ public protocol DeviceGatewayAPI: AnyObject, Sendable {
 }
 
 public extension DeviceGatewayAPI {
-    /// Active target port for the currently loaded pairing file mode
-    var targetPort: UInt16 {
+    // Active service port for the currently loaded pairing file mode
+    var servicePort: UInt16 {
         getPort(for: pairingFileType)
     }
 }

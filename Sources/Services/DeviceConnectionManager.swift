@@ -56,7 +56,7 @@ actor DeviceConnectionManager {
             debugLog("[minimuxer] [iface] tcpProbe skipped — IP is nil or empty")
             return false
         }
-        let port = gateway.targetPort
+        let port = gateway.servicePort
         let reachable = NetworkUtils.testTCP(ip: ip, port: port)
         debugLog("[minimuxer] [iface] tcpProbe \(ip):\(port) (protocol: .\(gateway.pairingFileType)) -> \(reachable ? "reachable" : "unreachable")")
         return reachable

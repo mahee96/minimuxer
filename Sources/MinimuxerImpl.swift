@@ -372,7 +372,7 @@ final internal class MinimuxerImpl: MinimuxerAPI {
     }
   
     func testDeviceConnection(ifaddr: String) -> Bool {
-        return NetworkUtils.testTCP(ip: ifaddr, port: self.gateway.targetPort)
+        return NetworkUtils.testTCP(ip: ifaddr, port: self.gateway.servicePort)
     }
 
     private func ensureDDIMounted() async throws {

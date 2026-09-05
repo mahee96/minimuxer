@@ -108,7 +108,7 @@ final internal class HeartbeatService {
             }
             
             // verify tunnel/device reachability first
-            let targetPort = self.gateway.targetPort
+            let targetPort = self.gateway.servicePort
             if !NetworkUtils.testTCP(ip: tunnelPeerIp, port: targetPort) {
                 logIfNeeded("device IP not reachable, waiting...", isVerbose: true)
                 lastBeatSuccessful = false

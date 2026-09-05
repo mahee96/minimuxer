@@ -99,7 +99,7 @@ public final class LibimobiledeviceGateway: BaseDeviceGateway, DeviceGatewayAPI 
         let baseProv = OSSL_PROVIDER_load(nil, "base")
         let baseErrs = getOpenSSLErrors()
         debugLog("[LibimobiledeviceGateway] OSSL_PROVIDER_load('base'): \(String(describing: baseProv))\(baseErrs.isEmpty ? "" : " (errors: \(baseErrs.joined(separator: ", ")))")")
-        super.init()
+        try! super.init()
     }
 
     deinit {

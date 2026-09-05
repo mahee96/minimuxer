@@ -9,6 +9,11 @@
 import Foundation
 import MinimuxerCommon
 
+enum AbstractClassError: Error, Sendable {
+    case abstractInitializerInvoked
+    case abstractMethodInvoked
+}
+
 open class BaseDeviceGateway: @unchecked Sendable {
     public private(set) var pairingFileType: PairingProtocol = .unknown
     public private(set) var pairingDataDict: [String: any Sendable]? = nil
@@ -31,7 +36,11 @@ open class BaseDeviceGateway: @unchecked Sendable {
     public internal(set) var isInitialized: Bool = false
     private var protocolPorts: [PairingProtocol: UInt16] = [:]
 
-    public init() {}
+    public init() throws {
+        if Self.self === BaseDeviceGateway.self {
+            throw AbstractClassError.abstractInitializerInvoked
+        }
+    }
 
     public func setPairingFileData(_ data: Data?) {
         self.pairingFileData = data
